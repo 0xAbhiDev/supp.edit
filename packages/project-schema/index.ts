@@ -1,0 +1,258 @@
+import { z } from "zod";
+
+const finite = z.number().finite();
+const frame = finite.int().min(0).max(2_000_000_000);
+const id = z.string().min(1).max(128);
+export const keyframeSchema = z.object({
+  frame: finite.int().min(-2_000_000_000).max(2_000_000_000),
+  value: finite.min(-100000).max(100000),
+  easing: z.enum(["linear", "hold", "ease-in-out"]),
+});
+export const transformSchema = z.object({
+  x: finite.min(-32768).max(32768),
+  y: finite.min(-32768).max(32768),
+  scale: finite.min(0.01).max(10),
+  rotation: finite.min(-36000).max(36000),
+  opacity: finite.min(0).max(1),
+});
+export const assetSchema = z.object({
+  id,
+  name: z.string().max(1024),
+  kind: z.enum(["video", "audio", "image"]),
+  path: z.string().max(32768),
+  size: finite.min(0),
+  duration: finite.min(0).max(86400 * 7),
+  width: finite.int().min(0).max(65536),
+  height: finite.int().min(0).max(65536),
+  fps: finite.min(0).max(1000),
+  codec: z.string().max(128),
+  hasAudio: z.boolean(),
+  fingerprint: z.string().max(1024),
+});
+export const clipSchema = z.object({
+  id,
+  trackId: id,
+  assetId: id.optional(),
+  kind: z.enum(["media", "text", "shape"]),
+  name: z.string().max(1024),
+  start: frame,
+  duration: frame.min(1),
+  sourceIn: frame,
+  gain: finite.min(-60).max(12),
+  transform: transformSchema,
+  effects: z.object({
+    blur: finite.min(0).max(100),
+    brightness: finite.min(0).max(3),
+    contrast: finite.min(0).max(3),
+    saturation: finite.min(0).max(3),
+  }),
+  keyframes: z.object({
+    x: z.array(keyframeSchema).max(10000),
+    y: z.array(keyframeSchema).max(10000),
+    scale: z.array(keyframeSchema).max(10000),
+    opacity: z.array(keyframeSchema).max(10000),
+  }),
+  mask: z
+    .object({
+      type: z.enum(["rectangle", "ellipse"]),
+      x: finite.min(0).max(1),
+      y: finite.min(0).max(1),
+      width: finite.min(0.001).max(1),
+      height: finite.min(0.001).max(1),
+    })
+    .nullable(),
+  text: z.object({
+    content: z.string().max(10000),
+    size: finite.min(6).max(1000),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    font: z.enum(["sans-serif", "serif", "monospace"]),
+    weight: z.enum(["normal", "bold"]),
+    align: z.enum(["left", "center", "right"]),
+  }),
+  shape: z.object({
+    type: z.enum(["rectangle", "ellipse"]),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    width: finite.min(1).max(8192),
+    height: finite.min(1).max(8192),
+  }),
+});
+export const trackSchema = z.object({
+  id,
+  name: z.string().max(256),
+  kind: z.enum(["video", "audio"]),
+  locked: z.boolean(),
+  hidden: z.boolean(),
+  muted: z.boolean(),
+  solo: z.boolean(),
+});
+const projectBase = z.object({
+  schemaVersion: z.literal(1),
+  id,
+  name: z.string().min(1).max(256),
+  createdAt: z.string().datetime(),
+  modifiedAt: z.string().datetime(),
+  settings: z.object({
+    width: finite.int().min(64).max(8192),
+    height: finite.int().min(64).max(8192),
+    fps: z
+      .object({
+        num: finite.int().min(1).max(120000),
+        den: finite.int().min(1).max(10000),
+      })
+      .refine(
+        (v) => v.num / v.den >= 1 && v.num / v.den <= 120,
+        "Frame rate must be 1–120",
+      ),
+    colorSpace: z.literal("srgb"),
+  }),
+  assets: z.array(assetSchema).max(100000),
+  tracks: z.array(trackSchema).min(1).max(1000),
+  clips: z.array(clipSchema).max(100000),
+  markers: z
+    .array(z.object({ id, frame, name: z.string().max(256) }))
+    .max(100000),
+});
+export const projectSchema = projectBase.superRefine((p, ctx) => {
+  for (const list of [p.assets, p.tracks, p.clips, p.markers])
+    if (new Set(list.map((x) => x.id)).size !== list.length)
+      ctx.addIssue({
+        code: "custom",
+        message: "Duplicate IDs in project graph",
+      });
+  for (const c of p.clips) {
+    const track = p.tracks.find((t) => t.id === c.trackId),
+      asset = p.assets.find((a) => a.id === c.assetId);
+    if (!track || (c.kind === "media" && !asset))
+      ctx.addIssue({
+        code: "custom",
+        message: `Broken reference on clip ${c.name}`,
+      });
+    if (
+      track?.kind === "audio" &&
+      (c.kind !== "media" || asset?.kind !== "audio")
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Audio tracks only accept audio assets",
+      });
+    if (track?.kind === "video" && asset?.kind === "audio")
+      ctx.addIssue({
+        code: "custom",
+        message: "Audio assets require an audio track",
+      });
+    if (
+      asset &&
+      asset.kind !== "image" &&
+      c.sourceIn + c.duration >
+        Math.ceil((asset.duration * p.settings.fps.num) / p.settings.fps.den) +
+          1
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: `Clip exceeds source duration: ${c.name}`,
+      });
+    for (const keys of Object.values(c.keyframes)) {
+      if (new Set(keys.map((k) => k.frame)).size !== keys.length)
+        ctx.addIssue({ code: "custom", message: "Duplicate keyframe times" });
+    }
+  }
+});
+export type Project = z.infer<typeof projectBase>;
+export type Asset = z.infer<typeof assetSchema>;
+export type Clip = z.infer<typeof clipSchema>;
+export type Track = z.infer<typeof trackSchema>;
+export type Keyframe = z.infer<typeof keyframeSchema>;
+export type AnimatedProperty = keyof Clip["keyframes"];
+export const uid = () => crypto.randomUUID();
+export const fps = (p: Project) => p.settings.fps.num / p.settings.fps.den;
+export const duration = (p: Project) =>
+  Math.max(0, ...p.clips.map((c) => c.start + c.duration));
+export function newProject(
+  name = "Untitled project",
+  width = 1920,
+  height = 1080,
+  rate = { num: 30, den: 1 },
+): Project {
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: 1,
+    id: uid(),
+    name,
+    createdAt: now,
+    modifiedAt: now,
+    settings: { width, height, fps: rate, colorSpace: "srgb" },
+    assets: [],
+    tracks: [newTrack("video", 1), newTrack("audio", 1)],
+    clips: [],
+    markers: [],
+  };
+}
+export function newTrack(kind: Track["kind"], index: number): Track {
+  return {
+    id: uid(),
+    name: `${kind === "video" ? "Video" : "Audio"} ${index}`,
+    kind,
+    locked: false,
+    hidden: false,
+    muted: false,
+    solo: false,
+  };
+}
+export function newClip(
+  trackId: string,
+  start: number,
+  length: number,
+  kind: Clip["kind"] = "media",
+  asset?: Asset,
+): Clip {
+  return {
+    id: uid(),
+    trackId,
+    start,
+    duration: Math.max(1, length),
+    sourceIn: 0,
+    kind,
+    assetId: asset?.id,
+    name: asset?.name ?? (kind === "text" ? "Your title" : "Shape"),
+    gain: 0,
+    transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+    effects: { blur: 0, brightness: 1, contrast: 1, saturation: 1 },
+    keyframes: { x: [], y: [], scale: [], opacity: [] },
+    mask: null,
+    text: {
+      content: "Your title",
+      size: 96,
+      color: "#ffffff",
+      font: "sans-serif",
+      weight: "bold",
+      align: "center",
+    },
+    shape: { type: "rectangle", color: "#c3f96b", width: 480, height: 270 },
+  };
+}
+export function parseProject(input: unknown): Project {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    !("schemaVersion" in input)
+  )
+    throw new Error("Not a supp.edit project: schemaVersion is missing.");
+  if (input.schemaVersion !== 1)
+    throw new Error(
+      `Unsupported project version ${input.schemaVersion}. This build supports version 1. The file was not changed.`,
+    );
+  return projectSchema.parse(input);
+}
+export function timecode(frame: number, rate: number): string {
+  const nominal = Math.round(rate),
+    totalSeconds = Math.floor(frame / nominal),
+    f = frame % nominal;
+  return [
+    Math.floor(totalSeconds / 3600),
+    Math.floor(totalSeconds / 60) % 60,
+    totalSeconds % 60,
+    Math.min(nominal - 1, f),
+  ]
+    .map((v) => String(v).padStart(2, "0"))
+    .join(":");
+}

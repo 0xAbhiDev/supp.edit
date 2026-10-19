@@ -1,0 +1,8 @@
+[package]
+name = "supp-export"
+version.workspace = true
+edition.workspace = true
+[dependencies]
+supp-project = { path = "../supp-project" }
+supp-media = { path = "../supp-media" }
+tempfile.workspace = true

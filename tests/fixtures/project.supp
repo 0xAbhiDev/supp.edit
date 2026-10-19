@@ -1,0 +1,1 @@
+{"schemaVersion":1,"id":"test-project","name":"Round trip","createdAt":"2026-10-19T00:00:00.000Z","modifiedAt":"2026-10-19T00:00:00.000Z","settings":{"width":1280,"height":720,"fps":{"num":30000,"den":1001},"colorSpace":"srgb"},"assets":[],"tracks":[{"id":"v1","name":"Video 1","kind":"video","locked":false,"hidden":false,"muted":false,"solo":false}],"clips":[],"markers":[]}

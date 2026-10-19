@@ -1,0 +1,19 @@
+[package]
+name = "supp-desktop"
+version.workspace = true
+edition.workspace = true
+default-run = "supp-edit"
+[[bin]]
+name = "supp-edit"
+path = "src/main.rs"
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+rfd = "0.15"
+serde.workspace = true
+serde_json.workspace = true
+uuid = { version = "1", features = ["v4"] }
+supp-project = { path = "../native/crates/supp-project" }
+supp-media = { path = "../native/crates/supp-media" }
+supp-export = { path = "../native/crates/supp-export" }

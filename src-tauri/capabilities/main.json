@@ -1,0 +1,1 @@
+{ "$schema": "../gen/schemas/desktop-schema.json", "identifier": "main", "description": "Only the local editor window receives native IPC and close events.", "windows": ["main"], "permissions": ["core:default", "core:window:allow-close", "core:window:allow-destroy"] }

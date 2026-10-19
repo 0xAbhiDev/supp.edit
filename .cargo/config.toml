@@ -1,0 +1,3 @@
+[build]
+# WebView bindings are memory-intensive; keep the editor responsive on 16 GB hosts.
+jobs = 2
