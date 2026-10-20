@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
+import { produce } from "immer";
+import { projectIndex } from "../../../packages/engine/project-index";
 import {
   MousePointer2,
   Scissors,
@@ -32,10 +34,20 @@ import {
   splitClip,
   deleteClip,
   insertAsset,
+  rippleTrim,
+  rollEdit,
+  slipEdit,
+  slideEdit,
+  type Edit,
 } from "../../../packages/commands";
-import { thumbnails, waveforms } from "../../../packages/platform";
+import {
+  thumbnails,
+  waveforms,
+  useDerivedRevision,
+} from "../../../packages/platform";
 import { IconButton } from "./Controls";
 export function Timeline() {
+  useDerivedRevision();
   const project = useEditor((s) => s.project),
     selected = useEditor((s) => s.selected),
     execute = useEditor((s) => s.execute),
@@ -43,11 +55,18 @@ export function Timeline() {
   const [zoom, setZoom] = useState(45),
     [snap, setSnap] = useState(true),
     [ripple, setRipple] = useState(false),
+    [tool, setTool] = useState<"move" | "ripple" | "roll" | "slip" | "slide">(
+      "move",
+    ),
     [viewport, setViewport] = useState({ left: 0, width: 1000 }),
     [drag, setDrag] = useState<{
       id: string;
       start: number;
       duration: number;
+      neighbors?: Map<string, Clip>;
+      shift?: number;
+      boundary?: number;
+      trackId?: string;
     } | null>(null);
   const scroller = useRef<HTMLDivElement>(null),
     playhead = useRef<HTMLDivElement>(null),
@@ -56,6 +75,19 @@ export function Timeline() {
     total = Math.max(duration(project) + rate * 10, rate * 30),
     width = Math.max(800, total * px),
     interval = zoom >= 80 ? 1 : zoom >= 30 ? 5 : 10;
+  const clipIndex = projectIndex(project);
+  const snapPoints = useMemo(
+    () =>
+      [
+        { frame: 0, owner: "" },
+        ...project.markers.map((m) => ({ frame: m.frame, owner: "" })),
+        ...project.clips.flatMap((c) => [
+          { frame: c.start, owner: c.id },
+          { frame: c.start + c.duration, owner: c.id },
+        ]),
+      ].sort((a, b) => a.frame - b.frame),
+    [project.clips, project.markers],
+  );
   useEffect(() => {
     const update = () => {
       if (playhead.current)
@@ -106,14 +138,20 @@ export function Timeline() {
   }
   function snapped(frame: number, id: string) {
     if (!snap) return Math.max(0, frame);
-    const points = [
-      0,
-      clock.get().frame,
-      ...project.markers.map((m) => m.frame),
-      ...project.clips
-        .filter((c) => c.id !== id)
-        .flatMap((c) => [c.start, c.start + c.duration]),
-    ];
+    let lo = 0,
+      hi = snapPoints.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (snapPoints[mid].frame < frame - 8 / px) lo = mid + 1;
+      else hi = mid;
+    }
+    const points = [clock.get().frame];
+    for (
+      let i = lo;
+      i < snapPoints.length && snapPoints[i].frame <= frame + 8 / px;
+      i++
+    )
+      if (snapPoints[i].owner !== id) points.push(snapPoints[i].frame);
     const near = points.reduce(
       (best, p) => (Math.abs(p - frame) < Math.abs(best - frame) ? p : best),
       frame + 10 / px,
@@ -139,9 +177,61 @@ export function Timeline() {
     let start = c.start,
       end = c.start + c.duration,
       didMove = false;
+    let operation: Edit | undefined;
+    const specialized =
+      tool === "slip" || tool === "slide"
+        ? edge === "move"
+        : (tool === "ripple" || tool === "roll") && edge !== "move";
+    // Preview only the local edit neighborhood. Full-track ripple commits once on release.
+    const local = {
+      ...project,
+      clips: clipIndex.tracks
+        .get(c.trackId)!
+        .range(c.start - 1, c.start + c.duration + 1),
+    };
     const update = (event: PointerEvent) => {
       didMove = true;
       const delta = Math.round((event.clientX - origin) / px);
+      if (specialized) {
+        operation =
+          tool === "slip"
+            ? slipEdit(c.id, delta)
+            : tool === "slide"
+              ? slideEdit(c.id, delta)
+              : tool === "roll"
+                ? rollEdit(
+                    c.id,
+                    edge as "in" | "out",
+                    snapped(
+                      (edge === "in" ? c.start : c.start + c.duration) + delta,
+                      c.id,
+                    ),
+                  )
+                : rippleTrim(
+                    c.id,
+                    edge as "in" | "out",
+                    snapped(
+                      (edge === "in" ? c.start : c.start + c.duration) + delta,
+                      c.id,
+                    ),
+                  );
+        try {
+          const preview = produce(local, operation),
+            edited = preview.clips.find((x) => x.id === c.id)!;
+          setDrag({
+            id: c.id,
+            start: edited.start,
+            duration: edited.duration,
+            neighbors: new Map(preview.clips.map((x) => [x.id, x])),
+            shift: tool === "ripple" ? edited.duration - c.duration : 0,
+            boundary: c.start + c.duration,
+            trackId: c.trackId,
+          });
+        } catch {
+          setDrag(null);
+        }
+        return;
+      }
       if (edge === "move") {
         start = snapped(c.start + delta, c.id);
         end = start + c.duration;
@@ -166,8 +256,13 @@ export function Timeline() {
     const done = (event: PointerEvent) => {
       target.removeEventListener("pointermove", update as EventListener);
       target.removeEventListener("pointerup", done as EventListener);
+      target.removeEventListener("pointercancel", cancel as EventListener);
       setDrag(null);
       if (!didMove) return;
+      if (specialized && operation) {
+        execute(`${tool[0].toUpperCase() + tool.slice(1)} edit`, operation);
+        return;
+      }
       const under = document
         .elementFromPoint(event.clientX, event.clientY)
         ?.closest<HTMLElement>("[data-track-id]")?.dataset.trackId;
@@ -175,8 +270,15 @@ export function Timeline() {
       else
         execute("Trim clip", trimClip(c.id, edge, edge === "in" ? start : end));
     };
+    const cancel = () => {
+      target.removeEventListener("pointermove", update as EventListener);
+      target.removeEventListener("pointerup", done as EventListener);
+      target.removeEventListener("pointercancel", cancel);
+      setDrag(null);
+    };
     target.addEventListener("pointermove", update as EventListener);
     target.addEventListener("pointerup", done as EventListener, { once: true });
+    target.addEventListener("pointercancel", cancel, { once: true });
   }
   return (
     <section className="timeline panel">
@@ -187,7 +289,13 @@ export function Timeline() {
           <span className="badge">Sequence 01</span>
         </div>
         <span className="grow" />
-        <span className="timeline-hint">Drag to move · edges to trim</span>
+        <span className="timeline-hint">
+          {tool === "move"
+            ? "Drag to move · edges to trim"
+            : tool === "ripple" || tool === "roll"
+              ? `${tool} · drag an edge`
+              : `${tool} · drag the clip`}
+        </span>
         <IconButton
           label="Zoom out timeline"
           onClick={() => setZoom(Math.max(10, zoom / 1.3))}
@@ -213,6 +321,17 @@ export function Timeline() {
         <span className="active-tool">
           <MousePointer2 size={15} />
         </span>
+        <select
+          aria-label="Timeline edit tool"
+          value={tool}
+          onChange={(e) => setTool(e.target.value as typeof tool)}
+        >
+          <option value="move">Selection / trim</option>
+          <option value="ripple">Ripple trim</option>
+          <option value="roll">Roll</option>
+          <option value="slip">Slip</option>
+          <option value="slide">Slide</option>
+        </select>
         <IconButton
           label="Split selected clip (S)"
           disabled={!selected}
@@ -319,8 +438,22 @@ export function Timeline() {
               }}
             >
               {Array.from(
-                { length: Math.ceil(total / rate / interval) },
-                (_, i) => i * interval,
+                {
+                  length: Math.max(
+                    0,
+                    Math.ceil(
+                      (viewport.width + zoom * interval * 2) /
+                        (zoom * interval),
+                    ),
+                  ),
+                },
+                (_, i) =>
+                  (Math.max(
+                    0,
+                    Math.floor(viewport.left / (zoom * interval)) - 1,
+                  ) +
+                    i) *
+                  interval,
               )
                 .filter(
                   (sec) =>
@@ -341,6 +474,7 @@ export function Timeline() {
                   key={m.id}
                   style={{ left: m.frame * px }}
                   title={`${m.name} · double-click to delete`}
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
                     clock.seek(m.frame);
@@ -458,82 +592,90 @@ export function Timeline() {
                     clock.seek(frameAt(e.clientX));
                 }}
               >
-                {project.clips
-                  .filter(
-                    (c) =>
-                      c.trackId === track.id &&
-                      (c.start + c.duration) * px > viewport.left - 200 &&
-                      c.start * px < viewport.left + viewport.width + 200,
-                  )
-                  .map((c) => {
-                    const position = drag?.id === c.id ? drag : c;
-                    return (
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Clip ${c.name}`}
-                        key={c.id}
-                        className={`timeline-clip ${c.kind} ${track.kind} ${selected === c.id ? "selected" : ""}`}
-                        style={{
-                          left: position.start * px,
-                          width: Math.max(6, position.duration * px),
-                          opacity: track.hidden ? 0.35 : 1,
-                        }}
-                        onPointerDown={(e) => pointer(e, c, "move")}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") select(c.id);
-                        }}
-                        onDoubleClick={() => {
-                          if (c.assetId)
-                            useEditor.getState().setSource(c.assetId);
-                        }}
-                      >
-                        {c.assetId && thumbnails.has(c.assetId) && (
-                          <div
-                            className="clip-filmstrip"
-                            style={{
-                              backgroundImage: `url("${thumbnails.get(c.assetId)}")`,
-                            }}
-                          />
-                        )}
-                        <span className="clip-title">
-                          {c.kind === "text" ? (
-                            <Type size={11} />
-                          ) : c.kind === "shape" ? (
-                            <Square size={11} />
-                          ) : null}
-                          {c.name}
-                        </span>
-                        {c.assetId && waveforms.has(c.assetId) && (
-                          <svg
-                            className="waveform"
-                            viewBox="0 0 400 28"
-                            preserveAspectRatio="none"
-                          >
-                            {waveforms.get(c.assetId)!.map((v, i) => (
-                              <line
-                                key={i}
-                                x1={i}
-                                x2={i}
-                                y1={14 - v * 12}
-                                y2={14 + v * 12}
-                              />
-                            ))}
-                          </svg>
-                        )}
-                        <span
-                          className="clip-trim in"
-                          aria-label="Trim start"
-                          onPointerDown={(e) => pointer(e, c, "in")}
+                {(
+                  clipIndex.tracks
+                    .get(track.id)
+                    ?.range(
+                      (viewport.left - 200) / px,
+                      (viewport.left + viewport.width + 200) / px,
+                    ) ?? []
+                ).map((c) => {
+                  const position =
+                    drag?.id === c.id
+                      ? drag
+                      : (drag?.neighbors?.get(c.id) ??
+                        (drag?.shift &&
+                        c.trackId === drag.trackId &&
+                        c.start >= (drag.boundary ?? Infinity)
+                          ? { ...c, start: c.start + drag.shift }
+                          : c));
+                  return (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Clip ${c.name}`}
+                      key={c.id}
+                      className={`timeline-clip ${c.kind} ${track.kind} ${selected === c.id ? "selected" : ""}`}
+                      style={{
+                        left: position.start * px,
+                        width: Math.max(6, position.duration * px),
+                        opacity: track.hidden ? 0.35 : 1,
+                      }}
+                      onPointerDown={(e) => pointer(e, c, "move")}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") select(c.id);
+                      }}
+                      onDoubleClick={() => {
+                        if (c.assetId)
+                          useEditor.getState().setSource(c.assetId);
+                      }}
+                    >
+                      {c.assetId && thumbnails.has(c.assetId) && (
+                        <div
+                          className="clip-filmstrip"
+                          style={{
+                            backgroundImage: `url("${thumbnails.get(c.assetId)}")`,
+                          }}
                         />
-                        <span
-                          className="clip-trim out"
-                          aria-label="Trim end"
-                          onPointerDown={(e) => pointer(e, c, "out")}
-                        />
-                      </div>
-                    );
-                  })}
+                      )}
+                      <span className="clip-title">
+                        {c.kind === "text" ? (
+                          <Type size={11} />
+                        ) : c.kind === "shape" ? (
+                          <Square size={11} />
+                        ) : null}
+                        {c.name}
+                      </span>
+                      {c.assetId && waveforms.has(c.assetId) && (
+                        <svg
+                          className="waveform"
+                          viewBox={`${project.assets.find((a) => a.id === c.assetId)?.kind === "image" ? 0 : (c.sourceIn / (rate * (project.assets.find((a) => a.id === c.assetId)?.duration || 1))) * 400} 0 ${(c.duration / (rate * (project.assets.find((a) => a.id === c.assetId)?.duration || 1))) * 400} 28`}
+                          preserveAspectRatio="none"
+                        >
+                          {waveforms.get(c.assetId)!.map((v, i) => (
+                            <line
+                              key={i}
+                              x1={i}
+                              x2={i}
+                              y1={14 - v * 12}
+                              y2={14 + v * 12}
+                            />
+                          ))}
+                        </svg>
+                      )}
+                      <span
+                        className="clip-trim in"
+                        aria-label="Trim start"
+                        onPointerDown={(e) => pointer(e, c, "in")}
+                      />
+                      <span
+                        className="clip-trim out"
+                        aria-label="Trim end"
+                        onPointerDown={(e) => pointer(e, c, "out")}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}

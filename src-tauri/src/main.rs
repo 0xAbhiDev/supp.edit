@@ -45,6 +45,7 @@ fn main() {
             media::import_media,
             media::relink_media,
             media::get_thumbnail,
+            media::get_waveform,
             media::probe_capabilities,
             render::begin_export,
             render::write_frame,

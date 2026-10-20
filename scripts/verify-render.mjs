@@ -57,14 +57,23 @@ const raw = (file, args = []) =>
     ],
     { windowsHide: true, maxBuffer: 128 * 1024 * 1024 },
   );
-const expected = raw(path.join(dir, "0.png")),
-  actual = raw(output);
-assert(expected.length === actual.length, "Pixel buffer lengths differ");
-let error = 0;
-for (let i = 0; i < actual.length; i++)
-  error += Math.abs(actual[i] - expected[i]);
-const mae = error / actual.length;
-assert(mae < 12, `Encoded pixels diverge from preview: mean error ${mae}`);
+const sampledPixelErrors = [
+  ...new Set([0, Math.floor(frames / 2), frames - 1]),
+].map((frame) => {
+  const expected = raw(path.join(dir, `${frame}.png`)),
+    actual = raw(output, ["-vf", `select=eq(n\\,${frame})`]);
+  assert(expected.length === actual.length, "Pixel buffer lengths differ");
+  let error = 0;
+  for (let i = 0; i < actual.length; i++)
+    error += Math.abs(actual[i] - expected[i]);
+  const mae = error / actual.length;
+  assert(
+    mae < 12,
+    `Encoded frame ${frame} diverges from preview: mean error ${mae}`,
+  );
+  return { frame, mae };
+});
+const mae = sampledPixelErrors[0].mae;
 const audio = execFileSync(
   ffmpeg,
   [
@@ -96,6 +105,7 @@ const report = {
   audioCodec: a.codec_name,
   duration: Number(probe.format.duration),
   meanAbsolutePixelError: mae,
+  sampledPixelErrors,
   audioRms: rms,
 };
 fs.writeFileSync(

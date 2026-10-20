@@ -5,11 +5,8 @@ import { fps } from "../../../packages/project-schema";
 import { clock } from "../../../packages/engine/clock";
 import { splitClip, deleteClip } from "../../../packages/commands";
 import * as platform from "../../../packages/platform";
-import {
-  readLocal,
-  writeLocal,
-  type Recovery,
-} from "../../../packages/platform/storage";
+import { writeLocal, type Recovery } from "../../../packages/platform/storage";
+import { writeDerived } from "../../../packages/platform/derived";
 
 export function useWorkspaceSession() {
   const project = useEditor((s) => s.project),
@@ -181,15 +178,25 @@ export function useWorkspaceSession() {
       if (old && next) {
         platform.validateRelink(state.project, old, next);
         if (!platform.desktop) {
-          const file = await readLocal<Blob>("media", next.id);
-          if (file) await writeLocal("media", id, file);
+          // Preserve the original blob under its fingerprint so relink undo restores actual media.
+          const before = await platform.assetBlob(old),
+            file = await platform.assetBlob(next);
+          if (before)
+            await writeLocal("media", platform.assetStorageKey(old), before);
+          if (file)
+            await writeLocal(
+              "media",
+              platform.assetStorageKey({ ...next, id }),
+              file,
+            );
           platform.invalidateAsset(id);
-          const thumbnail = await readLocal<string>(
-            "state",
-            `thumbnail:${next.id}`,
-          );
+          const thumbnail = platform.thumbnails.get(next.id);
           if (thumbnail) {
-            await writeLocal("state", `thumbnail:${id}`, thumbnail);
+            await writeDerived(
+              `thumbnail:${id}:${next.fingerprint}`,
+              thumbnail,
+              thumbnail.length * 2,
+            );
             platform.thumbnails.set(id, thumbnail);
           }
         }

@@ -12,20 +12,41 @@ import {
   type Keyframe,
   type AnimatedProperty,
   fps,
-  newClip,
   uid,
 } from "../project-schema";
 enablePatches();
+export {
+  rippleTrim,
+  rollEdit,
+  slipEdit,
+  slideEdit,
+  sourceEdit,
+  editPoints,
+} from "./nle";
+import { sourceEdit } from "./nle";
 export type Edit = (draft: Draft<Project>) => void;
 export interface HistoryEntry {
   name: string;
   forward: Patch[];
   inverse: Patch[];
+  beforeVersion: number;
+  afterVersion: number;
 }
 export class History {
+  currentVersion = 0;
+  private sequence = 0;
+  private versions = new WeakMap<Project, number>();
+  constructor(initial?: Project) {
+    if (initial) this.versions.set(initial, 0);
+  }
+  version(project: Project) {
+    return this.versions.get(project);
+  }
   past: HistoryEntry[] = [];
   future: HistoryEntry[] = [];
   execute(project: Project, name: string, edit: Edit): Project {
+    if (!this.versions.has(project))
+      this.versions.set(project, this.currentVersion);
     const [next, forward, inverse] = produceWithPatches(project, edit);
     if (!forward.length) return project;
     const modifiedAt = new Date().toISOString();
@@ -35,22 +56,33 @@ export class History {
       path: ["modifiedAt"],
       value: project.modifiedAt,
     });
-    this.past.push({ name, forward, inverse });
+    const beforeVersion = this.currentVersion,
+      afterVersion = ++this.sequence;
+    this.currentVersion = afterVersion;
+    this.past.push({ name, forward, inverse, beforeVersion, afterVersion });
     this.future = [];
     if (this.past.length > 500) this.past.shift();
-    return { ...next, modifiedAt };
+    const result = { ...next, modifiedAt };
+    this.versions.set(result, afterVersion);
+    return result;
   }
   undo(project: Project): Project {
     const entry = this.past.pop();
     if (!entry) return project;
     this.future.push(entry);
-    return applyPatches(project, entry.inverse);
+    const result = applyPatches(project, entry.inverse);
+    this.currentVersion = entry.beforeVersion;
+    this.versions.set(result, this.currentVersion);
+    return result;
   }
   redo(project: Project): Project {
     const entry = this.future.pop();
     if (!entry) return project;
     this.past.push(entry);
-    return applyPatches(project, entry.forward);
+    const result = applyPatches(project, entry.forward);
+    this.currentVersion = entry.afterVersion;
+    this.versions.set(result, this.currentVersion);
+    return result;
   }
 }
 export function editable(p: Project, clipId: string) {
@@ -166,23 +198,10 @@ export function insertAsset(
     if (
       !asset ||
       !track ||
-      track.locked ||
       (asset.kind === "audio") !== (track.kind === "audio")
     )
       return;
-    const length =
-      asset.kind === "image"
-        ? Math.round(fps(p) * 5)
-        : Math.floor(asset.duration * fps(p));
-    p.clips.push(
-      newClip(
-        trackId,
-        Math.max(0, Math.round(start)),
-        Math.max(1, length),
-        "media",
-        asset,
-      ),
-    );
+    sourceEdit(assetId, trackId, start, "insert")(p);
   };
 }
 export function toggleKeyframe(

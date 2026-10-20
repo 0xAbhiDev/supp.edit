@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { type Project, newProject } from "../project-schema";
 import { History, type Edit } from "../commands";
-let history = new History();
+const initialProject = newProject();
+let history = new History(initialProject);
 export type Workspace = "Edit" | "Composite" | "Color" | "Audio" | "Export";
 interface State {
   project: Project;
@@ -9,7 +10,7 @@ interface State {
   source: string | null;
   workspace: Workspace;
   path: string | null;
-  saved: string;
+  savedVersion: number | null;
   dirty: boolean;
   historyNames: string[];
   redoNames: string[];
@@ -28,12 +29,12 @@ interface State {
   inform: (message: string) => void;
 }
 export const useEditor = create<State>((set, get) => ({
-  project: newProject(),
+  project: initialProject,
   selected: null,
   source: null,
   workspace: "Edit",
   path: null,
-  saved: "",
+  savedVersion: 0,
   dirty: false,
   historyNames: [],
   redoNames: [],
@@ -43,11 +44,17 @@ export const useEditor = create<State>((set, get) => ({
   execute: (name, edit) => {
     const old = get().project;
     // Commands contain structure only; media buffers remain in the resource cache.
-    const project = history.execute(old, name, edit);
+    let project: Project;
+    try {
+      project = history.execute(old, name, edit);
+    } catch (e) {
+      get().report(e);
+      return;
+    }
     if (old === project) return;
     set((s) => ({
       project,
-      dirty: JSON.stringify(project) !== s.saved,
+      dirty: history.currentVersion !== s.savedVersion,
       revision: s.revision + 1,
       historyNames: history.past.map((x) => x.name),
       redoNames: [],
@@ -57,7 +64,7 @@ export const useEditor = create<State>((set, get) => ({
     const project = history.undo(get().project);
     set((s) => ({
       project,
-      dirty: JSON.stringify(project) !== s.saved,
+      dirty: history.currentVersion !== s.savedVersion,
       revision: s.revision + 1,
       historyNames: history.past.map((x) => x.name),
       redoNames: history.future.map((x) => x.name),
@@ -67,18 +74,18 @@ export const useEditor = create<State>((set, get) => ({
     const project = history.redo(get().project);
     set((s) => ({
       project,
-      dirty: JSON.stringify(project) !== s.saved,
+      dirty: history.currentVersion !== s.savedVersion,
       revision: s.revision + 1,
       historyNames: history.past.map((x) => x.name),
       redoNames: history.future.map((x) => x.name),
     }));
   },
   load: (project, path = null, dirty = false) => {
-    history = new History();
+    history = new History(project);
     set((s) => ({
       project,
       path,
-      saved: dirty ? "" : JSON.stringify(project),
+      savedVersion: dirty ? null : 0,
       dirty,
       selected: null,
       source: null,
@@ -91,8 +98,8 @@ export const useEditor = create<State>((set, get) => ({
   markSaved: (p, path) =>
     set((s) => ({
       path: path ?? s.path,
-      saved: JSON.stringify(p),
-      dirty: JSON.stringify(s.project) !== JSON.stringify(p),
+      savedVersion: history.version(p) ?? null,
+      dirty: history.currentVersion !== history.version(p),
     })),
   select: (selected) => set({ selected }),
   setSource: (source) => set({ source }),

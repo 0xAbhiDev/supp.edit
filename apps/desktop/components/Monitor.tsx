@@ -17,8 +17,14 @@ import { fps, duration, timecode } from "../../../packages/project-schema";
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock, useClock } from "../../../packages/engine/clock";
 import { sourceUrl } from "../../../packages/platform";
-import { animated, setTransform } from "../../../packages/commands";
+import {
+  animated,
+  setTransform,
+  sourceEdit,
+  editPoints,
+} from "../../../packages/commands";
 import { IconButton } from "./Controls";
+import { usePlayback } from "../../../packages/engine/diagnostics";
 export function Monitor({
   onImport,
   onCanvas,
@@ -31,6 +37,8 @@ export function Monitor({
     renderRef = useRef<Compositor | null>(null),
     project = useEditor((s) => s.project),
     selected = useEditor((s) => s.selected);
+  const mode = usePlayback((s) => s.mode),
+    resolution = usePlayback((s) => s.scale);
   const [safe, setSafe] = useState(false),
     [renderError, setRenderError] = useState<string | null>(null),
     [fit, setFit] = useState({ width: 640, height: 360 });
@@ -61,12 +69,19 @@ export function Monitor({
   }, [project.settings.width, project.settings.height]);
   useEffect(() => {
     if (!canvas.current) return;
-    const renderer = new Compositor(canvas.current);
+    const renderer = new Compositor(canvas.current, false, {
+      renderer: mode,
+      scale: resolution,
+    });
     renderRef.current = renderer;
     onCanvas(canvas.current);
     let disposed = false,
       running = false,
       pending = true;
+    let rendered = 0,
+      dropped = 0,
+      lastFrame: number | null = null,
+      lastPublish = 0;
     async function render() {
       if (running || disposed) return;
       running = true;
@@ -75,7 +90,37 @@ export function Monitor({
         const p = useEditor.getState().project,
           s = clock.get();
         try {
+          const start = performance.now();
           const error = await renderer.render(p, s.frame, s.playing, s.speed);
+          if (
+            s.playing &&
+            lastFrame !== null &&
+            s.speed === 1 &&
+            s.frame > lastFrame
+          )
+            dropped += Math.max(0, s.frame - lastFrame - 1);
+          lastFrame = s.playing ? s.frame : null;
+          rendered++;
+          if (
+            !disposed &&
+            (performance.now() - lastPublish > 250 || !s.playing)
+          ) {
+            lastPublish = performance.now();
+            usePlayback.getState().publish({
+              renderer: renderer.backend,
+              gpu: renderer.device,
+              fallback: renderer.fallback,
+              renderMs: performance.now() - start,
+              rendered,
+              dropped,
+              decodedDropped: renderer.pool.decodedDropped,
+              frameCacheBytes: renderer.pool.frames.bytes,
+              frameCacheHits: renderer.pool.frames.hits,
+              resourceCount: renderer.pool.size,
+              textureBytes: renderer.textureBytes,
+              error: error?.message ?? "",
+            });
+          }
           if (!disposed) setRenderError(error?.message ?? null);
         } catch (e) {
           if (!disposed) setRenderError(String(e));
@@ -94,12 +139,18 @@ export function Monitor({
     request();
     return () => {
       disposed = true;
+      renderer.cancel();
       u1();
       u2();
-      void renderer.dispose();
+      // Let an in-flight frame release its borrowed image surfaces before tearing down the pool.
+      const close = () => {
+        if (running) setTimeout(close, 10);
+        else void renderer.dispose();
+      };
+      close();
       onCanvas(null);
     };
-  }, [onCanvas]);
+  }, [onCanvas, mode, resolution]);
   function move(e: React.PointerEvent) {
     if (e.button !== 0 || !selected) return;
     const c = project.clips.find((c) => c.id === selected);
@@ -197,11 +248,21 @@ export function Monitor({
         )}
         <div className="monitor-label">
           {project.settings.colorSpace.toUpperCase()}
-          <span>CPU COMPOSITOR</span>
+          <RendererLabel />
         </div>
       </div>
       <div className="monitor-bottom">
-        <span className="muted">Fit</span>
+        <select
+          aria-label="Playback resolution"
+          value={resolution}
+          onChange={(e) =>
+            usePlayback.getState().configure({ scale: Number(e.target.value) })
+          }
+        >
+          <option value={1}>Full</option>
+          <option value={0.5}>Half</option>
+          <option value={0.25}>Quarter</option>
+        </select>
         <Transport />
         <div className="monitor-actions">
           <IconButton
@@ -227,6 +288,15 @@ export function Monitor({
     </section>
   );
 }
+function RendererLabel() {
+  const renderer = usePlayback((s) => s.renderer),
+    dropped = usePlayback((s) => s.dropped);
+  return (
+    <span>
+      {renderer} · {dropped} dropped
+    </span>
+  );
+}
 function Transport() {
   const s = useClock(),
     p = useEditor((s) => s.project),
@@ -234,6 +304,19 @@ function Transport() {
   return (
     <div className="transport">
       <span className="timecode">{timecode(s.frame, rate)}</span>
+      <IconButton
+        label="Previous edit"
+        onClick={() => {
+          clock.pause();
+          clock.seek(
+            editPoints(p)
+              .filter((f) => f < s.frame)
+              .at(-1) ?? 0,
+          );
+        }}
+      >
+        │‹
+      </IconButton>
       <IconButton
         label="Previous frame"
         onClick={() => {
@@ -269,15 +352,67 @@ function Transport() {
       >
         <Repeat2 size={15} />
       </IconButton>
+      <IconButton
+        label="Next edit"
+        onClick={() => {
+          clock.pause();
+          clock.seek(editPoints(p).find((f) => f > s.frame) ?? duration(p));
+        }}
+      >
+        ›│
+      </IconButton>
       <span className="timecode muted">{timecode(duration(p), rate)}</span>
     </div>
   );
 }
 export function SourceViewer() {
   const source = useEditor((s) => s.source),
+    project = useEditor((s) => s.project),
     asset = useEditor((s) => s.project.assets.find((a) => a.id === source)),
     [url, setUrl] = useState(""),
     [error, setError] = useState("");
+  const media = useRef<HTMLMediaElement | null>(null),
+    [markIn, setMarkIn] = useState(0),
+    [markOut, setMarkOut] = useState(1),
+    [target, setTarget] = useState("");
+  const rate = fps(project),
+    maximum =
+      asset?.kind === "image"
+        ? Math.round(rate * 5)
+        : Math.max(1, Math.floor((asset?.duration ?? 0) * rate));
+  const tracks = project.tracks.filter(
+    (t) =>
+      !t.locked &&
+      (asset?.kind === "audio" ? t.kind === "audio" : t.kind === "video"),
+  );
+  const targetId = tracks.some((t) => t.id === target)
+    ? target
+    : (tracks[0]?.id ?? "");
+  useEffect(() => {
+    setMarkIn(0);
+    setMarkOut(maximum);
+  }, [source, maximum, asset?.fingerprint]);
+  function insert(mode: "insert" | "overwrite") {
+    if (!asset || !targetId) return;
+    const state = useEditor.getState(),
+      before = state.project;
+    state.execute(
+      `${mode === "insert" ? "Insert" : "Overwrite"} source range`,
+      sourceEdit(
+        asset.id,
+        targetId,
+        clock.get().frame,
+        mode,
+        markIn,
+        markOut - markIn,
+      ),
+    );
+    const after = useEditor.getState().project;
+    if (after !== before) {
+      state.select(after.clips.at(-1)!.id);
+      state.setSource(null);
+    }
+  }
   useEffect(() => {
     setUrl("");
     setError("");
@@ -325,6 +460,9 @@ export function SourceViewer() {
               <img src={url} alt={asset.name} />
             ) : asset.kind === "video" ? (
               <video
+                ref={(el) => {
+                  media.current = el;
+                }}
                 src={url}
                 controls
                 onError={() =>
@@ -337,6 +475,9 @@ export function SourceViewer() {
               <>
                 <Volume2 size={64} />
                 <audio
+                  ref={(el) => {
+                    media.current = el;
+                  }}
                   src={url}
                   controls
                   onError={() =>
@@ -360,6 +501,102 @@ export function SourceViewer() {
               ? `${asset.fps.toFixed(3)} fps`
               : "Frame rate not reported"}
           </span>
+        </div>
+        <div className="source-edit-controls">
+          <label>
+            In (frame)
+            <input
+              aria-label="Source In frame"
+              type="number"
+              min="0"
+              max={markOut - 1}
+              value={markIn}
+              onChange={(e) =>
+                setMarkIn(
+                  Math.max(
+                    0,
+                    Math.min(markOut - 1, Math.round(+e.target.value)),
+                  ),
+                )
+              }
+            />
+          </label>
+          <button
+            disabled={asset.kind === "image" || !url}
+            onClick={() =>
+              setMarkIn(
+                Math.min(
+                  markOut - 1,
+                  Math.max(
+                    0,
+                    Math.floor((media.current?.currentTime ?? 0) * rate),
+                  ),
+                ),
+              )
+            }
+          >
+            Set In
+          </button>
+          <label>
+            Out (exclusive)
+            <input
+              aria-label="Source Out frame"
+              type="number"
+              min={markIn + 1}
+              max={maximum}
+              value={markOut}
+              onChange={(e) =>
+                setMarkOut(
+                  Math.min(
+                    maximum,
+                    Math.max(markIn + 1, Math.round(+e.target.value)),
+                  ),
+                )
+              }
+            />
+          </label>
+          <button
+            disabled={asset.kind === "image" || !url}
+            onClick={() =>
+              setMarkOut(
+                Math.min(
+                  maximum,
+                  Math.max(
+                    markIn + 1,
+                    Math.floor((media.current?.currentTime ?? 0) * rate) + 1,
+                  ),
+                ),
+              )
+            }
+          >
+            Set Out
+          </button>
+          <label>
+            Target track
+            <select
+              aria-label="Source target track"
+              value={targetId}
+              onChange={(e) => setTarget(e.target.value)}
+            >
+              {tracks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            disabled={!targetId || !!error || !url}
+            onClick={() => insert("insert")}
+          >
+            Insert range
+          </button>
+          <button
+            disabled={!targetId || !!error || !url}
+            onClick={() => insert("overwrite")}
+          >
+            Overwrite range
+          </button>
         </div>
       </section>
     </div>

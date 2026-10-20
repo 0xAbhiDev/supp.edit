@@ -1675,3 +1675,23 @@ dd {
     transition: none !important;
   }
 }
+.source-edit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+.source-edit-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+}
+.source-edit-controls input {
+  width: 90px;
+}
+.timeline-tools select {
+  max-width: 140px;
+}

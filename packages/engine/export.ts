@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { type Project, duration, parseProject } from "../project-schema";
 import { desktop } from "../platform";
 import { Compositor } from "./compositor";
+import { usePlayback } from "./diagnostics";
 export type RenderProgress = {
   status: "rendering" | "encoding" | "complete" | "cancelled";
   frame: number;
@@ -22,7 +23,9 @@ export async function exportMp4(
     path = await invoke<string | null>("begin_export", { project: snapshot });
   if (!path) return;
   const canvas = document.createElement("canvas"),
-    renderer = new Compositor(canvas, true),
+    renderer = new Compositor(canvas, true, {
+      renderer: usePlayback.getState().mode,
+    }),
     total = duration(snapshot),
     start = performance.now();
   try {

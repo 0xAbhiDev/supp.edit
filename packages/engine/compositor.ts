@@ -1,13 +1,39 @@
 import { type Project, type Clip } from "../project-schema";
 import { animated } from "../commands";
 import { ResourcePool } from "./resources";
+import { GpuRenderer } from "./gpu";
+import { projectIndex } from "./project-index";
+import type { RendererMode } from "./diagnostics";
 export class Compositor {
   readonly pool: ResourcePool;
+  private gpu: GpuRenderer | null = null;
+  private cancelled = false;
+  cancel() {
+    this.cancelled = true;
+    this.pool.pauseInactive(new Set());
+  }
+  fallback = "";
+  get backend() {
+    return this.gpu ? "WebGL2 texture compositor" : "Canvas2D fallback";
+  }
+  get device() {
+    return this.gpu?.device ?? "CPU / system canvas";
+  }
+  get textureBytes() {
+    return this.gpu?.bytes ?? 0;
+  }
   constructor(
     private canvas: HTMLCanvasElement,
     silent = false,
+    private options: { renderer?: RendererMode; scale?: number } = {},
   ) {
     this.pool = new ResourcePool(silent);
+    if (options.renderer !== "cpu")
+      try {
+        this.gpu = new GpuRenderer();
+      } catch (e) {
+        this.fallback = String(e);
+      }
   }
   async render(
     p: Project,
@@ -18,32 +44,36 @@ export class Compositor {
   ) {
     const ctx = this.canvas.getContext("2d", { alpha: false });
     if (!ctx) throw new Error("Canvas2D is unavailable");
-    if (this.canvas.width !== p.settings.width)
-      this.canvas.width = p.settings.width;
-    if (this.canvas.height !== p.settings.height)
-      this.canvas.height = p.settings.height;
-    const active = p.clips.filter(
-        (c) => frame >= c.start && frame < c.start + c.duration,
-      ),
+    const scale = strict ? 1 : (this.options.scale ?? 1);
+    const width = Math.max(1, Math.round(p.settings.width * scale)),
+      height = Math.max(1, Math.round(p.settings.height * scale));
+    if (this.canvas.width !== width) this.canvas.width = width;
+    if (this.canvas.height !== height) this.canvas.height = height;
+    const index = projectIndex(p),
+      active = index.all
+        .range(frame, frame + 1)
+        .sort((a, b) => index.order.get(a.id)! - index.order.get(b.id)!),
       solo = p.tracks.some((t) => t.solo),
       prepared = new Map<string, CanvasImageSource>();
+    this.pool.setActive(new Set(active.map((c) => c.id)));
     let failure: Error | null = null;
     await Promise.all(
       active.map(async (c) => {
-        const track = p.tracks.find((t) => t.id === c.trackId),
-          asset = p.assets.find((a) => a.id === c.assetId);
+        const track = index.trackById.get(c.trackId),
+          asset = c.assetId ? index.assets.get(c.assetId) : undefined;
         if (!track || !asset) return;
         if (track.kind === "video" && track.hidden) return;
         try {
           const r = await this.pool.prepare(c, asset, p, frame, playing, speed);
           if (!(r.element instanceof HTMLAudioElement))
-            prepared.set(c.id, r.element);
+            prepared.set(
+              c.id,
+              await this.pool.visual(r, c, asset, p, frame, playing),
+            );
           if (asset.hasAudio)
             await this.pool.audio(
+              r,
               c,
-              asset,
-              p,
-              frame,
               playing,
               speed,
               !track.muted && (!solo || track.solo),
@@ -53,6 +83,11 @@ export class Compositor {
         }
       }),
     );
+    if (this.cancelled) {
+      this.pool.pauseInactive(new Set());
+      this.pool.releaseFrames();
+      return null;
+    }
     await this.pool.pauseInactive(
       new Set(
         active
@@ -60,20 +95,58 @@ export class Compositor {
           .map((c) => c.id),
       ),
     );
-    if (strict && failure) throw failure;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.filter = "none";
-    ctx.fillStyle = "#000";
-    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    // Topmost video track in the UI composites last. Track order is persistent.
-    for (const track of [...p.tracks].reverse()) {
-      if (track.kind !== "video" || track.hidden) continue;
-      for (const c of active.filter((c) => c.trackId === track.id))
-        this.draw(ctx, p, c, frame, prepared.get(c.id));
+    if (strict && failure) {
+      this.pool.releaseFrames();
+      throw failure;
     }
-    void this.pool.prune(new Set(active.map((c) => c.id)));
-    return failure as Error | null;
+    const drawLayers = (draw: (c: Clip) => void) => {
+      for (const track of [...p.tracks].reverse()) {
+        if (track.kind !== "video" || track.hidden) continue;
+        for (const c of active) if (c.trackId === track.id) draw(c);
+      }
+    };
+    try {
+      let gpuRendered = false;
+      if (this.gpu)
+        try {
+          this.gpu.begin(width, height);
+          drawLayers((c) => this.gpu!.draw(p, c, frame, prepared.get(c.id)));
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.globalAlpha = 1;
+          ctx.filter = "none";
+          ctx.drawImage(this.gpu.canvas, 0, 0);
+          gpuRendered = true;
+        } catch (e) {
+          this.fallback = String(e);
+          this.gpu.dispose();
+          this.gpu = null;
+        }
+      if (!gpuRendered) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = 1;
+        ctx.filter = "none";
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        ctx.scale(scale, scale);
+        drawLayers((c) =>
+          this.draw(ctx, p, c, frame, prepared.get(c.id), scale),
+        );
+      }
+      const activeIds = new Set(active.map((c) => c.id));
+      this.pool.prune(activeIds);
+      if (!strict)
+        this.pool.prefetch(
+          p,
+          index.all.range(
+            frame + 1,
+            frame + Math.ceil(p.settings.fps.num / p.settings.fps.den),
+          ),
+          activeIds,
+        );
+      return failure as Error | null;
+    } finally {
+      this.pool.releaseFrames();
+    }
   }
   private draw(
     ctx: CanvasRenderingContext2D,
@@ -81,6 +154,7 @@ export class Compositor {
     c: Clip,
     frame: number,
     source?: CanvasImageSource,
+    resolution = 1,
   ) {
     const t = animated(c, frame),
       { width, height } = p.settings;
@@ -89,7 +163,7 @@ export class Compositor {
     ctx.rotate((t.rotation * Math.PI) / 180);
     ctx.scale(t.scale, t.scale);
     ctx.globalAlpha = t.opacity;
-    ctx.filter = `blur(${c.effects.blur}px) brightness(${c.effects.brightness}) contrast(${c.effects.contrast}) saturate(${c.effects.saturation})`;
+    ctx.filter = `blur(${c.effects.blur * resolution}px) brightness(${c.effects.brightness}) contrast(${c.effects.contrast}) saturate(${c.effects.saturation})`;
     if (c.mask) {
       const m = c.mask,
         x = (m.x - 0.5) * width,
@@ -156,6 +230,8 @@ export class Compositor {
     ctx.restore();
   }
   dispose() {
+    this.gpu?.dispose();
+    this.gpu = null;
     return this.pool.dispose();
   }
 }

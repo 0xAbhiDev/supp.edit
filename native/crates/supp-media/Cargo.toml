@@ -6,3 +6,6 @@ edition.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 supp-project = { path = "../supp-project" }
+tempfile.workspace = true
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_SystemInformation"] }

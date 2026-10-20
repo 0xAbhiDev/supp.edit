@@ -7,6 +7,8 @@ import {
   fps,
 } from "../project-schema";
 import { readLocal, writeLocal, deleteLocal, type Recovery } from "./storage";
+import { DerivedMemory, readDerived, writeDerived } from "./derived";
+export { useDerivedRevision } from "./derived";
 export const desktop = isTauri();
 export interface Capabilities {
   ffmpeg: boolean;
@@ -16,46 +18,144 @@ export interface Capabilities {
   hardwareAccels: string[];
   cpuCores: number;
   platform: string;
+  machine: {
+    gpus: {
+      name: string;
+      dedicatedBytes: number;
+      sharedBytes: number;
+      software: boolean;
+    }[];
+    ramBytes: number | null;
+    inventoryError: string | null;
+    probes: {
+      name: string;
+      kind: string;
+      advertised: boolean;
+      available: boolean;
+      detail: string;
+    }[];
+  };
 }
 export interface Imported {
   asset: Asset;
   thumbnail: string | null;
 }
 const urls = new Map<string, string>();
-export const thumbnails = new Map<string, string>();
-export const waveforms = new Map<string, number[]>();
+export const thumbnails = new DerivedMemory<string>(
+  16 * 1024 * 1024,
+  512,
+  (v) => v.length * 2,
+);
+export const waveforms = new DerivedMemory<number[]>(
+  8 * 1024 * 1024,
+  512,
+  (v) => v.length * 8,
+);
+export const derivedErrors = new DerivedMemory<string>(
+  1024 * 1024,
+  512,
+  (v) => v.length * 2,
+);
+const analysis = new Map<string, Promise<void>>();
+const derivedVersions = new Map<string, string>();
+let waveformQueue: Promise<unknown> = Promise.resolve();
 export async function restoreThumbnail(asset: Asset): Promise<void> {
-  if (thumbnails.has(asset.id) || asset.kind === "audio") return;
-  if (desktop) {
-    const path = await invoke<string | null>("get_thumbnail", {
-      assetId: asset.id,
-      path: asset.path,
-    });
-    if (path) thumbnails.set(asset.id, convertFileSrc(path));
-  } else {
-    const cached = await readLocal<string>("state", `thumbnail:${asset.id}`);
-    if (cached) thumbnails.set(asset.id, cached);
+  const key = asset.id + ":" + asset.fingerprint;
+  if (derivedVersions.get(asset.id) !== asset.fingerprint) {
+    thumbnails.delete(asset.id);
+    waveforms.delete(asset.id);
+    derivedErrors.delete(asset.id);
+    derivedVersions.set(asset.id, asset.fingerprint);
+  }
+  if (derivedErrors.has(asset.id)) return;
+  const existing = analysis.get(key);
+  if (existing) return existing;
+  const task = restoreDerived(asset)
+    .catch((e) => {
+      if (derivedVersions.get(asset.id) === asset.fingerprint)
+        derivedErrors.set(asset.id, e instanceof Error ? e.message : String(e));
+    })
+    .finally(() => analysis.delete(key));
+  analysis.set(key, task);
+  return task;
+}
+async function restoreDerived(asset: Asset) {
+  if (asset.kind !== "audio" && !thumbnails.has(asset.id)) {
+    if (desktop) {
+      const path = await invoke<string | null>("get_thumbnail", {
+        assetId: asset.id,
+        path: asset.path,
+      });
+      if (path && derivedVersions.get(asset.id) === asset.fingerprint)
+        thumbnails.set(asset.id, convertFileSrc(path));
+    } else {
+      const cached =
+        (await readDerived<string>(
+          `thumbnail:${asset.id}:${asset.fingerprint}`,
+        )) ?? (await readLocal<string>("state", `thumbnail:${asset.id}`));
+      if (cached && derivedVersions.get(asset.id) === asset.fingerprint)
+        thumbnails.set(asset.id, cached);
+    }
+  }
+  if (asset.hasAudio && !waveforms.has(asset.id)) {
+    const cached = await readDerived<number[]>(
+      `waveform:${asset.id}:${asset.fingerprint}`,
+    );
+    if (cached) {
+      if (derivedVersions.get(asset.id) === asset.fingerprint)
+        waveforms.set(asset.id, cached);
+      return;
+    }
+    const job = waveformQueue
+      .catch(() => undefined)
+      .then(async () => {
+        const peaks = desktop
+          ? await invoke<number[]>("get_waveform", { path: asset.path })
+          : await browserWaveform(asset);
+        if (derivedVersions.get(asset.id) === asset.fingerprint)
+          waveforms.set(asset.id, peaks);
+        await writeDerived(
+          `waveform:${asset.id}:${asset.fingerprint}`,
+          peaks,
+          peaks.length * 8,
+        );
+      });
+    waveformQueue = job;
+    await job;
   }
 }
 export async function sourceUrl(asset: Asset): Promise<string> {
   if (desktop) return convertFileSrc(asset.path);
-  const cached = urls.get(asset.id);
+  const key = `${asset.id}:${asset.fingerprint}`;
+  const cached = urls.get(key);
   if (cached) return cached;
-  const file = await readLocal<Blob>("media", asset.id);
+  const file = await assetBlob(asset);
   if (!file)
     throw new Error(
       `Media offline: ${asset.name}. Use Relink in the asset menu.`,
     );
   const url = URL.createObjectURL(file);
-  urls.set(asset.id, url);
+  urls.set(key, url);
   return url;
 }
+export function assetStorageKey(asset: Asset) {
+  return `${asset.id}:${asset.fingerprint}`;
+}
+export async function assetBlob(asset: Asset) {
+  return (
+    (await readLocal<Blob>("media", assetStorageKey(asset))) ??
+    (await readLocal<Blob>("media", asset.id))
+  );
+}
 export function invalidateAsset(id: string) {
-  const url = urls.get(id);
-  if (url) URL.revokeObjectURL(url);
-  urls.delete(id);
+  for (const [key, url] of urls)
+    if (key === id || key.startsWith(id + ":")) {
+      URL.revokeObjectURL(url);
+      urls.delete(key);
+    }
   thumbnails.delete(id);
   waveforms.delete(id);
+  derivedErrors.delete(id);
 }
 export function waitEvent(
   target: EventTarget,
@@ -165,17 +265,17 @@ export async function importBrowser(
         media.removeAttribute("src");
         media.load();
       }
-      await writeLocal("media", id, file);
-      urls.set(id, url);
+      await writeLocal("media", assetStorageKey(asset), file);
+      urls.set(assetStorageKey(asset), url);
       if (thumbnail) {
         thumbnails.set(id, thumbnail);
-        await writeLocal("state", `thumbnail:${id}`, thumbnail);
+        await writeDerived(
+          `thumbnail:${id}:${asset.fingerprint}`,
+          thumbnail,
+          thumbnail.length * 2,
+        );
       }
       imported.push({ asset, thumbnail });
-      if (kind === "audio" && file.size < 64 * 1024 * 1024)
-        void extractWaveform(id, file).catch(() => {
-          /* Waveforms are optional; decoding errors surface in playback. */
-        });
     } catch (error) {
       URL.revokeObjectURL(url);
       errors.push(
@@ -185,20 +285,37 @@ export async function importBrowser(
   }
   return { imported, errors };
 }
-async function extractWaveform(id: string, file: File) {
+async function browserWaveform(asset: Asset): Promise<number[]> {
+  const file = await assetBlob(asset);
+  if (!file) throw new Error("Waveform source is offline");
+  if (file.size > 64 * 1024 * 1024 || asset.duration > 600)
+    throw new Error(
+      "Browser waveform analysis is limited to 64 MiB / 10 minutes. Use the desktop worker for larger sources.",
+    );
   const context = new AudioContext();
   try {
-    const buffer = await context.decodeAudioData(await file.arrayBuffer()),
-      data = buffer.getChannelData(0),
-      peaks: number[] = [];
-    const step = Math.max(1, Math.floor(data.length / 400));
-    for (let i = 0; i < data.length; i += step) {
-      let peak = 0;
-      for (let j = i; j < Math.min(data.length, i + step); j++)
-        peak = Math.max(peak, Math.abs(data[j]));
-      peaks.push(peak);
-    }
-    waveforms.set(id, peaks);
+    const buffer = await context.decodeAudioData(await file.arrayBuffer());
+    const data = buffer.getChannelData(0).slice(),
+      worker = new Worker(new URL("./waveform.worker.ts", import.meta.url), {
+        type: "module",
+      });
+    return await new Promise<number[]>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        worker.terminate();
+        reject(new Error("Waveform worker timed out"));
+      }, 30000);
+      worker.onmessage = (e) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        resolve(e.data);
+      };
+      worker.onerror = (e) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        reject(new Error(e.message));
+      };
+      worker.postMessage({ samples: data }, [data.buffer]);
+    });
   } finally {
     await context.close();
   }
@@ -296,6 +413,12 @@ export async function capabilities(): Promise<Capabilities> {
         hardwareAccels: [],
         cpuCores: navigator.hardwareConcurrency || 1,
         platform: "Web companion",
+        machine: {
+          gpus: [],
+          ramBytes: null,
+          inventoryError: "Native hardware probes require the desktop app",
+          probes: [],
+        },
       };
 }
 export function validateRelink(project: Project, old: Asset, next: Asset) {

@@ -22,13 +22,14 @@ npm run launch        # launch a previously built desktop binary
 npm run doctor        # report native tool availability
 ```
 
-The Windows development executable supplied in `bin/` embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** in this folder to launch it with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. The executable is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
+The current Windows development executable is `bin/supp-edit-gpu.exe`; the earlier executable is retained alongside it. It embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** to launch the current build with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. This is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
 
 ## Working features
 
 - Versioned `.supp` project graph with validation, rational frame rates, linked media, atomic native saves, a previous-save backup, and five rotating native recovery snapshots.
 - Native file picker, real FFprobe metadata, native thumbnails, duplicate-file detection, missing-media errors, and explicit relinking. Browser imports store blobs locally in IndexedDB.
-- Source monitor and a canvas program monitor. Multitrack video/image/audio editing, split, bounded trim, drag move, horizontal timeline culling, snapping, markers, track locks, visibility, mute, solo, and track-local ripple delete.
+- Source In/Out and track-targeted insert/overwrite; program monitor and previous/next edit navigation. Multitrack video/image/audio editing, split, bounded trim, ripple trim, roll, slip, slide, drag move, horizontal timeline indexing, snapping, markers, track locks, visibility, mute, solo, and track-local ripple delete.
+- WebGL2 texture compositing with CPU fallback, full/half/quarter playback resolution, bounded frame/texture/derived-media caches, source prefetch, and dropped-frame diagnostics. Windows GPU/RAM inventory and real H.264 hardware codec probes report capabilities separately from the active decoder/exporter.
 - Reversible structural patch history, up to 500 editing commands, without copying media buffers.
 - Text and shape layers; nondestructive translation, scale, rotation, opacity; linear, hold, and eased keyframes for X/Y/scale/opacity; rectangular and elliptical masks; blur, brightness, contrast, saturation; clip audio gain.
 - Space and J/K/L playback, frame stepping, loop, safe margins, full-screen monitor, source preview, searchable command palette, resizable persisted panels, and dark/light themes.
@@ -38,7 +39,7 @@ The Windows development executable supplied in `bin/` embeds the frontend and do
 
 1. Create a project. Import MP4, PNG/JPEG, and WAV files.
 2. Use an asset's **Insert** button to insert at the playhead, or drag it to a compatible track. Click its preview for the source monitor.
-3. Select a timeline clip. Press **S** to split; drag edges to trim; drag its body to move. Use **Undo** / **Redo** as needed.
+3. Select a timeline clip. Press **S** to split; choose a timeline edit tool. Selection moves/trims; Ripple trim and Roll use edges; Slip and Slide use the clip body. Roll needs an adjacent clip; Slide needs neighbors on both sides. Open a source preview to mark In/Out and Insert or Overwrite on the chosen track. Use **Undo** / **Redo** as needed.
 4. Add **Title**, **Shape**, or another video track. Edit appearance in the inspector. Click the diamond beside Position X, move the playhead, and change Position X to animate it.
 5. Save as `.supp`, reopen, and relink any moved sources.
 6. Open **Export**, choose **Export MP4**, and select a destination. The app must have an FFmpeg build with `libx264` and AAC.
@@ -47,7 +48,7 @@ The web companion downloads project JSON and persists media in the same browser 
 
 ## Current boundaries
 
-This release is **8-bit sRGB, Canvas2D, system-webview decoding, and a single sequence**. It is not a GPU NLE, an HDR/color-managed grading system, or a complete image editor. “Composite”, “Color”, and “Audio” operate on the same graph; their controls are a limited subset, not full separate workstations. AI Studio is explicitly disabled. There is no simulated AI, transcription, RAW development, proxy engine, 3D, plugin execution, or cloud service.
+This release is **8-bit sRGB, WebGL2 with Canvas2D fallback, system-webview decoding, and a single sequence**. Native GPU decoding/texture sharing, an HDR/color-managed grading system, and a complete image editor remain unfinished. “Composite”, “Color”, and “Audio” operate on the same graph; their controls are a limited subset, not full separate workstations. AI Studio is explicitly disabled. Transcription, RAW development, proxies, 3D, plugin execution, and cloud services remain absent. See [CURRENT_STATE.md](CURRENT_STATE.md) for the completed cycle and exact outstanding scope.
 
 The system webview must support the imported codec for preview and frame export; FFprobe's ability to inspect a file does not imply the webview can decode it. Transcode incompatible media to H.264/AAC MP4, WAV, or PNG. Reverse shuttle is silent. Browser FPS metadata is unavailable and is reported as such. Playback can drop visual frames under load; offline export seeks and renders every requested frame. It is not a sample-accurate professional audio transport. Export is one job at a time, at most 128 audible clips, no pause/retry queue, and 8-bit H.264 only.
 

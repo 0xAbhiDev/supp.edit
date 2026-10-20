@@ -19,18 +19,11 @@ fn import_one(app: &AppHandle, path: &std::path::Path, id: String) -> Result<Imp
     app.asset_protocol_scope()
         .allow_file(&path)
         .map_err(|e| e.to_string())?;
-    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
-    let thumb = cache.join(format!("{}.jpg", asset.id));
-    let thumbnail = if asset.kind != "audio" && supp_media::thumbnail(&path, &thumb).is_ok() {
-        app.asset_protocol_scope()
-            .allow_file(&thumb)
-            .map_err(|e| e.to_string())?;
-        Some(thumb.to_string_lossy().into())
-    } else {
-        None
-    };
-    Ok(Imported { asset, thumbnail })
+    // Metadata returns first. The library requests derived media on the background analysis worker.
+    Ok(Imported {
+        asset,
+        thumbnail: None,
+    })
 }
 #[tauri::command]
 pub async fn import_media(app: AppHandle) -> Result<ImportResult, String> {
@@ -78,9 +71,12 @@ pub async fn relink_media(app: AppHandle, asset_id: String) -> Result<Option<Imp
 }
 #[tauri::command]
 pub async fn probe_capabilities() -> Result<supp_media::Capabilities, String> {
-    tauri::async_runtime::spawn_blocking(supp_media::capabilities)
-        .await
-        .map_err(|e| e.to_string())
+    static CAPABILITIES: std::sync::OnceLock<supp_media::Capabilities> = std::sync::OnceLock::new();
+    tauri::async_runtime::spawn_blocking(|| {
+        CAPABILITIES.get_or_init(supp_media::capabilities).clone()
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 #[tauri::command]
 pub async fn get_thumbnail(
@@ -93,16 +89,32 @@ pub async fn get_thumbnail(
         let source = app
             .state::<Session>()
             .require(std::path::Path::new(&path))?;
-        let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-        std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
-        let thumb = cache.join(format!("{asset_id}.jpg"));
-        if !thumb.exists() {
-            supp_media::thumbnail(&source, &thumb)?;
-        }
+        let cache = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("derived-v2");
+        let thumb = supp_media::cache::thumbnail(&cache, &source)?;
         app.asset_protocol_scope()
             .allow_file(&thumb)
             .map_err(|e| e.to_string())?;
         Ok(Some(thumb.to_string_lossy().into()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn get_waveform(app: AppHandle, path: String) -> Result<Vec<f32>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = app
+            .state::<Session>()
+            .require(std::path::Path::new(&path))?;
+        let cache = app
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("derived-v2");
+        supp_media::cache::waveform(&cache, &source)
     })
     .await
     .map_err(|e| e.to_string())?

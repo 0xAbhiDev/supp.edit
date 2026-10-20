@@ -20,6 +20,7 @@ import {
 import { useEditor, type Workspace } from "../../packages/editor-state";
 import { parseProject } from "../../packages/project-schema";
 import { clock } from "../../packages/engine/clock";
+import { usePlayback } from "../../packages/engine/diagnostics";
 
 import * as platform from "../../packages/platform";
 
@@ -32,8 +33,10 @@ import { IconButton } from "./components/Controls";
 
 import { useWorkspaceSession } from "./hooks/useWorkspaceSession";
 import { Modal, NewProject } from "./components/Dialogs";
+import { EngineDiagnostics } from "./components/EngineDiagnostics";
 
 export function App() {
+  const renderer = usePlayback((s) => s.renderer);
   const {
     project,
     dirty,
@@ -244,7 +247,7 @@ export function App() {
           {savedAt ? `Recovery saved ${savedAt}` : "Original media preserved"}
           <span className="status-separator">·</span>
           <Cpu size={12} />
-          Canvas2D / sRGB
+          {renderer} / sRGB
         </span>
         <button onClick={() => setDialog("settings")}>
           <Keyboard size={12} />
@@ -305,7 +308,11 @@ export function App() {
             <span className="eyebrow">APPEARANCE</span>
             <label>
               Theme
-              <select value={theme} onChange={(e) => setTheme(e.target.value)}>
+              <select
+                aria-label="Theme"
+                value={theme}
+                onChange={(e) => setTheme(e.target.value)}
+              >
                 <option value="dark">Studio dark</option>
                 <option value="light">Studio light</option>
               </select>
@@ -314,6 +321,7 @@ export function App() {
               Accent color
               <input
                 type="color"
+                aria-label="Accent color"
                 value={accent}
                 onChange={(e) => setAccent(e.target.value)}
               />
@@ -347,11 +355,7 @@ export function App() {
               <dt>Advertised hardware APIs</dt>
               <dd>{caps?.hardwareAccels.join(", ") || "None reported"}</dd>
             </dl>
-            <p className="field-hint">
-              Advertised APIs do not confirm usable hardware. This release uses
-              system webview decoding and a CPU compositor. No hardware data
-              leaves your device.
-            </p>
+            <EngineDiagnostics capabilities={caps} />
             <span className="eyebrow">KEYBOARD</span>
             <div className="shortcuts">
               {commands

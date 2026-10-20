@@ -1,4 +1,7 @@
 //! Media tools are invoked with argument arrays, never shell command strings.
+pub mod cache;
+pub mod hardware;
+mod process;
 use serde::Serialize;
 use serde_json::Value;
 use std::{
@@ -24,7 +27,7 @@ pub fn command(name: &str) -> Command {
     }
     command
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub ffmpeg: bool,
@@ -34,9 +37,14 @@ pub struct Capabilities {
     pub hardware_accels: Vec<String>,
     pub cpu_cores: usize,
     pub platform: String,
+    pub machine: hardware::Machine,
 }
 pub fn capabilities() -> Capabilities {
-    let version = command("ffmpeg").arg("-version").output();
+    let version = process::capture(
+        command("ffmpeg").arg("-version"),
+        std::time::Duration::from_secs(8),
+        1024 * 1024,
+    );
     let ffmpeg = version.as_ref().is_ok_and(|o| o.status.success());
     let ffmpeg_version = version
         .map(|o| {
@@ -47,39 +55,46 @@ pub fn capabilities() -> Capabilities {
                 .to_string()
         })
         .unwrap_or_default();
-    let encoders = command("ffmpeg")
-        .args(["-hide_banner", "-encoders"])
-        .output()
-        .ok()
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .filter_map(|l| {
-                    let v: Vec<_> = l.split_whitespace().collect();
-                    (v.len() > 1 && v[0].len() == 6 && v[1] != "=").then(|| v[1].to_owned())
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    let hardware_accels = command("ffmpeg")
-        .args(["-hide_banner", "-hwaccels"])
-        .output()
-        .ok()
-        .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .skip(1)
-                .filter(|l| !l.trim().is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
+    let encoders: Vec<String> = process::capture(
+        command("ffmpeg").args(["-hide_banner", "-encoders"]),
+        std::time::Duration::from_secs(8),
+        1024 * 1024,
+    )
+    .ok()
+    .map(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|l| {
+                let v: Vec<_> = l.split_whitespace().collect();
+                (v.len() > 1 && v[0].len() == 6 && v[1] != "=").then(|| v[1].to_owned())
+            })
+            .collect()
+    })
+    .unwrap_or_default();
+    let hardware_accels: Vec<String> = process::capture(
+        command("ffmpeg").args(["-hide_banner", "-hwaccels"]),
+        std::time::Duration::from_secs(8),
+        1024 * 1024,
+    )
+    .ok()
+    .map(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .skip(1)
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_owned)
+            .collect()
+    })
+    .unwrap_or_default();
+    let machine = hardware::probe(&encoders, &hardware_accels);
     Capabilities {
         ffmpeg,
-        ffprobe: command("ffprobe")
-            .arg("-version")
-            .output()
-            .is_ok_and(|o| o.status.success()),
+        ffprobe: process::capture(
+            command("ffprobe").arg("-version"),
+            std::time::Duration::from_secs(8),
+            1024 * 1024,
+        )
+        .is_ok_and(|o| o.status.success()),
         ffmpeg_version,
         encoders,
         hardware_accels,
@@ -87,6 +102,7 @@ pub fn capabilities() -> Capabilities {
             .map(|n| n.get())
             .unwrap_or(1),
         platform: std::env::consts::OS.into(),
+        machine,
     }
 }
 pub fn validate_path(path: &Path) -> Result<PathBuf, String> {
@@ -114,24 +130,25 @@ pub fn validate_path(path: &Path) -> Result<PathBuf, String> {
 pub fn inspect(path: &Path, id: String) -> Result<Asset, String> {
     let path = validate_path(path)?;
     let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    let output = command("ffprobe")
-        .args([
-            "-v",
-            "error",
-            "-protocol_whitelist",
-            "file,pipe",
-            "-show_format",
-            "-show_streams",
-            "-of",
-            "json",
-        ])
-        .arg(&path)
-        .output()
-        .map_err(|e| {
-            format!(
-                "FFprobe is required. Install FFmpeg and add it to PATH, or set SUPP_FFPROBE. {e}"
-            )
-        })?;
+    let output = process::capture(
+        command("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "file,pipe",
+                "-show_format",
+                "-show_streams",
+                "-of",
+                "json",
+            ])
+            .arg(&path),
+        std::time::Duration::from_secs(20),
+        4 * 1024 * 1024,
+    )
+    .map_err(|e| {
+        format!("FFprobe is required. Install FFmpeg and add it to PATH, or set SUPP_FFPROBE. {e}")
+    })?;
     if !output.status.success() {
         return Err(format!(
             "Cannot inspect media: {}",
@@ -199,20 +216,25 @@ pub fn inspect(path: &Path, id: String) -> Result<Asset, String> {
     })
 }
 pub fn thumbnail(path: &Path, out: &Path) -> Result<(), String> {
-    let output = command("ffmpeg")
-        .args([
-            "-v",
-            "error",
-            "-nostdin",
-            "-protocol_whitelist",
-            "file,pipe",
-            "-i",
-        ])
-        .arg(path)
-        .args(["-frames:v", "1", "-vf", "scale=320:-2", "-y"])
-        .arg(out)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let output = process::capture(
+        command("ffmpeg")
+            .args([
+                "-v",
+                "error",
+                "-nostdin",
+                "-threads",
+                "1",
+                "-protocol_whitelist",
+                "file,pipe",
+                "-i",
+            ])
+            .arg(path)
+            .args(["-frames:v", "1", "-vf", "scale=320:-2", "-y"])
+            .arg(out),
+        std::time::Duration::from_secs(30),
+        1024,
+    )
+    .map_err(|e| e.to_string())?;
     if output.status.success() {
         Ok(())
     } else {

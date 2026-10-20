@@ -3,9 +3,14 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { mediaEnvironment } from "./runtime.mjs";
 const file = process.platform === "win32" ? "supp-edit.exe" : "supp-edit";
-const candidate = ["bin", "target/release", "target/debug"]
-  .map((dir) => path.resolve(dir, file))
-  .find(existsSync);
+const candidate = [
+  ...(process.platform === "win32"
+    ? [path.resolve("bin", "supp-edit-gpu.exe")]
+    : []),
+  ...["bin", "target/release", "target/debug"].map((dir) =>
+    path.resolve(dir, file),
+  ),
+].find(existsSync);
 if (!candidate)
   throw new Error("Build the desktop application first: npm run build:desktop");
 const child = spawn(candidate, [], {

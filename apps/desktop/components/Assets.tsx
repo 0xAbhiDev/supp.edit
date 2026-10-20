@@ -16,6 +16,8 @@ import {
   thumbnails,
   desktop,
   restoreThumbnail,
+  useDerivedRevision,
+  derivedErrors,
 } from "../../../packages/platform";
 import { insertAsset } from "../../../packages/commands";
 import { newTrack, fps } from "../../../packages/project-schema";
@@ -30,6 +32,7 @@ export function Assets({
   onRelink: (id: string) => void;
   busy: boolean;
 }) {
+  useDerivedRevision();
   const project = useEditor((s) => s.project),
     source = useEditor((s) => s.source),
     setSource = useEditor((s) => s.setSource),
@@ -43,13 +46,12 @@ export function Assets({
     void (async () => {
       for (const asset of project.assets) {
         if (stopped) return;
-        if (!thumbnails.has(asset.id))
-          try {
-            await restoreThumbnail(asset);
-            if (!stopped) refresh((n) => n + 1);
-          } catch {
-            /* Offline sources keep their type icon; playback reports the source failure. */
-          }
+        try {
+          await restoreThumbnail(asset);
+          if (!stopped) refresh((n) => n + 1);
+        } catch {
+          /* Offline sources keep their type icon; playback reports the source failure. */
+        }
       }
     })();
     return () => {
@@ -142,7 +144,6 @@ export function Assets({
             <button
               className="asset-preview"
               onClick={() => setSource(a.id)}
-              onDoubleClick={() => append(a.id)}
               aria-label={`Preview ${a.name}`}
             >
               {thumbnails.has(a.id) ? (
@@ -176,6 +177,14 @@ export function Assets({
                 <Link2 size={12} />
               </IconButton>
             </div>
+            {derivedErrors.has(a.id) && (
+              <small
+                className="asset-analysis-error"
+                title={derivedErrors.get(a.id)}
+              >
+                Preview analysis unavailable: {derivedErrors.get(a.id)}
+              </small>
+            )}
           </div>
         ))}
         {!assets.length && (

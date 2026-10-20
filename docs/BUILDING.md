@@ -11,7 +11,7 @@ npm run build
 cargo build -p supp-desktop --features tauri/custom-protocol
 ```
 
-Plain `cargo build -p supp-desktop` uses the configured development URL; the `tauri/custom-protocol` feature embeds the built frontend. `npm run launch` chooses `bin`, then release, then debug output.
+Plain `cargo build -p supp-desktop` uses the configured development URL; the `tauri/custom-protocol` feature embeds the built frontend. `npm run launch` prefers the current `bin/supp-edit-gpu.exe`, then the original `bin` executable, release, and debug output. After rebuilding locally, copy the embedded executable to the current bin filename to update the launcher.
 
 FFmpeg and FFprobe are external tools. Runtime detection reads `SUPP_FFMPEG` / `SUPP_FFPROBE` or PATH. `npm run dev`, `npm run launch`, and the Windows `Start supp.edit.cmd` launcher load `.env` and discover tools from `npm run setup:media`. Directly double-clicking the executable requires tools on PATH or environment variables already configured. `.env.example` documents variable names; it is not loaded into the frontend.
 

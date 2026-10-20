@@ -13,6 +13,7 @@ import {
 } from "../../../packages/engine/export";
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock } from "../../../packages/engine/clock";
+import { usePlayback } from "../../../packages/engine/diagnostics";
 export function ExportPanel({
   capabilities,
 }: {
@@ -38,7 +39,9 @@ export function ExportPanel({
   async function frame() {
     clock.pause();
     const canvas = document.createElement("canvas"),
-      renderer = new Compositor(canvas, true);
+      renderer = new Compositor(canvas, true, {
+        renderer: usePlayback.getState().mode,
+      });
     try {
       await renderer.render(project, clock.get().frame, false, 1, true);
       const blob = await new Promise<Blob>((resolve, reject) =>
