@@ -1,3 +1,4 @@
+import { GraphEditor } from "./components/GraphEditor";
 import type React from "react";
 import {
   FolderOpen,
@@ -235,7 +236,7 @@ export function App() {
         onPointerDown={(e) => resize(e, "height")}
         title="Resize timeline"
       />
-      <Timeline />
+      {workspace === "Composite" ? <GraphEditor /> : <Timeline />}
       <footer className="statusbar">
         <span>
           <span className="status-dot" />

@@ -1,0 +1,331 @@
+{
+  "schemaVersion": 2,
+  "id": "ce36beec-e433-429e-82d8-ca0616227e33",
+  "name": "Animation — flower study",
+  "createdAt": "2026-10-23T18:23:05.800Z",
+  "modifiedAt": "2026-10-23T18:23:05.800Z",
+  "settings": {
+    "width": 320,
+    "height": 180,
+    "fps": {
+      "num": 30,
+      "den": 1
+    },
+    "colorSpace": "srgb"
+  },
+  "assets": [
+    {
+      "id": "47e488a9-2efc-4b4b-b2ec-8937c2e7054f",
+      "name": "footage.mp4",
+      "kind": "video",
+      "path": "footage.mp4",
+      "size": 1128375,
+      "duration": 5.055,
+      "width": 960,
+      "height": 540,
+      "fps": 0,
+      "codec": "video/mp4",
+      "hasAudio": true,
+      "fingerprint": "footage.mp4:1128375:1792521147413"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "0226a53c-198a-499c-b5fb-83995db55c73",
+      "name": "Video 2",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "d4e16521-8698-4b09-ac17-efcb2758e80e",
+      "name": "Video 1",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "e5ecf44d-41b0-46ef-83bf-0ed28be8ffd3",
+      "name": "Audio 1",
+      "kind": "audio",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    }
+  ],
+  "clips": [
+    {
+      "id": "f44bfc50-4139-470e-91df-7cb934349a4c",
+      "trackId": "d4e16521-8698-4b09-ac17-efcb2758e80e",
+      "assetId": "47e488a9-2efc-4b4b-b2ec-8937c2e7054f",
+      "kind": "media",
+      "name": "footage.mp4",
+      "start": 0,
+      "duration": 60,
+      "sourceIn": 0,
+      "gain": 0,
+      "transform": {
+        "x": 0,
+        "y": 0,
+        "scale": 1,
+        "rotation": 0,
+        "opacity": 1,
+        "scaleX": 1,
+        "scaleY": 1,
+        "anchorX": 0,
+        "anchorY": 0
+      },
+      "crop": {
+        "cropLeft": 0,
+        "cropTop": 0,
+        "cropRight": 0,
+        "cropBottom": 0
+      },
+      "effects": {
+        "blur": 0,
+        "brightness": 1,
+        "contrast": 1,
+        "saturation": 1
+      },
+      "keyframes": {
+        "x": [],
+        "y": [],
+        "scale": [],
+        "opacity": [],
+        "rotation": [
+          {
+            "frame": 0,
+            "value": -4,
+            "easing": "auto-bezier"
+          },
+          {
+            "frame": 59,
+            "value": 4,
+            "easing": "linear"
+          }
+        ],
+        "scaleX": [
+          {
+            "frame": 0,
+            "value": 0.85,
+            "easing": "bezier",
+            "outHandle": {
+              "x": 0.6,
+              "y": 0.02
+            }
+          },
+          {
+            "frame": 59,
+            "value": 1.1,
+            "easing": "linear",
+            "inHandle": {
+              "x": 0.2,
+              "y": -0.1
+            }
+          }
+        ],
+        "scaleY": [
+          {
+            "frame": 0,
+            "value": 0.9,
+            "easing": "ease-out"
+          },
+          {
+            "frame": 59,
+            "value": 1,
+            "easing": "linear"
+          }
+        ],
+        "anchorX": [
+          {
+            "frame": 0,
+            "value": -8,
+            "easing": "ease-in"
+          },
+          {
+            "frame": 59,
+            "value": 8,
+            "easing": "linear"
+          }
+        ],
+        "anchorY": [],
+        "blur": [
+          {
+            "frame": 0,
+            "value": 0,
+            "easing": "linear"
+          },
+          {
+            "frame": 59,
+            "value": 2,
+            "easing": "linear"
+          }
+        ],
+        "brightness": [
+          {
+            "frame": 0,
+            "value": 0.8,
+            "easing": "ease-in"
+          },
+          {
+            "frame": 59,
+            "value": 1.1,
+            "easing": "linear"
+          }
+        ],
+        "contrast": [],
+        "saturation": [
+          {
+            "frame": 0,
+            "value": 0.5,
+            "easing": "ease-out"
+          },
+          {
+            "frame": 59,
+            "value": 1.3,
+            "easing": "linear"
+          }
+        ],
+        "cropLeft": [
+          {
+            "frame": 0,
+            "value": 0,
+            "easing": "linear"
+          },
+          {
+            "frame": 59,
+            "value": 0.1,
+            "easing": "linear"
+          }
+        ],
+        "cropTop": [],
+        "cropRight": [],
+        "cropBottom": []
+      },
+      "mask": {
+        "type": "ellipse",
+        "x": 0.02,
+        "y": 0.02,
+        "width": 0.96,
+        "height": 0.96
+      },
+      "text": {
+        "content": "Your title",
+        "size": 96,
+        "color": "#ffffff",
+        "font": "sans-serif",
+        "weight": "bold",
+        "align": "center"
+      },
+      "shape": {
+        "type": "rectangle",
+        "color": "#c3f96b",
+        "width": 480,
+        "height": 270
+      }
+    },
+    {
+      "id": "ce552ab9-9ed7-43aa-a306-128cc8a9a1e7",
+      "trackId": "0226a53c-198a-499c-b5fb-83995db55c73",
+      "kind": "text",
+      "name": "Flower study",
+      "start": 0,
+      "duration": 60,
+      "sourceIn": 0,
+      "gain": 0,
+      "transform": {
+        "x": 0,
+        "y": 55,
+        "scale": 1,
+        "rotation": 0,
+        "opacity": 1,
+        "scaleX": 1,
+        "scaleY": 1,
+        "anchorX": 0,
+        "anchorY": 0
+      },
+      "crop": {
+        "cropLeft": 0,
+        "cropTop": 0,
+        "cropRight": 0,
+        "cropBottom": 0
+      },
+      "effects": {
+        "blur": 0,
+        "brightness": 1,
+        "contrast": 1,
+        "saturation": 1
+      },
+      "keyframes": {
+        "x": [
+          {
+            "frame": 0,
+            "value": -45,
+            "easing": "bezier",
+            "outHandle": {
+              "x": 0.6,
+              "y": 0
+            }
+          },
+          {
+            "frame": 59,
+            "value": 35,
+            "easing": "linear",
+            "inHandle": {
+              "x": 0.1,
+              "y": 0
+            }
+          }
+        ],
+        "y": [],
+        "scale": [
+          {
+            "frame": 0,
+            "value": 0.8,
+            "easing": "continuous-bezier"
+          },
+          {
+            "frame": 59,
+            "value": 1,
+            "easing": "linear"
+          }
+        ],
+        "opacity": [],
+        "rotation": [],
+        "scaleX": [],
+        "scaleY": [],
+        "anchorX": [],
+        "anchorY": [],
+        "blur": [],
+        "brightness": [],
+        "contrast": [],
+        "saturation": [],
+        "cropLeft": [],
+        "cropTop": [],
+        "cropRight": [],
+        "cropBottom": []
+      },
+      "mask": null,
+      "text": {
+        "content": "FLOWER / 01",
+        "size": 20,
+        "color": "#ffffff",
+        "font": "sans-serif",
+        "weight": "bold",
+        "align": "center"
+      },
+      "shape": {
+        "type": "rectangle",
+        "color": "#c3f96b",
+        "width": 480,
+        "height": 270
+      }
+    }
+  ],
+  "markers": []
+}

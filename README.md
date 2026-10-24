@@ -22,7 +22,7 @@ npm run launch        # launch a previously built desktop binary
 npm run doctor        # report native tool availability
 ```
 
-The current Windows development executable is `bin/supp-edit-gpu.exe`; the earlier executable is retained alongside it. It embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** to launch the current build with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. This is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
+The current Windows development executable is `bin/supp-edit-animation.exe`; the earlier executable is retained alongside it. It embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** to launch the current build with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. This is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
 
 ## Working features
 
@@ -31,7 +31,8 @@ The current Windows development executable is `bin/supp-edit-gpu.exe`; the earli
 - Source In/Out and track-targeted insert/overwrite; program monitor and previous/next edit navigation. Multitrack video/image/audio editing, split, bounded trim, ripple trim, roll, slip, slide, drag move, horizontal timeline indexing, snapping, markers, track locks, visibility, mute, solo, and track-local ripple delete.
 - WebGL2 texture compositing with CPU fallback, full/half/quarter playback resolution, bounded frame/texture/derived-media caches, source prefetch, and dropped-frame diagnostics. Windows GPU/RAM inventory and real H.264 hardware codec probes report capabilities separately from the active decoder/exporter.
 - Reversible structural patch history, up to 500 editing commands, without copying media buffers.
-- Text and shape layers; nondestructive translation, scale, rotation, opacity; linear, hold, and eased keyframes for X/Y/scale/opacity; rectangular and elliptical masks; blur, brightness, contrast, saturation; clip audio gain.
+- Text and shape layers; nondestructive translation, scale, rotation, opacity; 17 animated transform/crop/effect channels with Hold, Linear, Ease In/Out, Bezier, Auto and Continuous Bezier; rectangular and elliptical masks; blur, brightness, contrast, saturation; clip audio gain.
+- Composite value/speed graph editor: multi-property curves, Shift-select, key/tangent drag, numeric edits, copy/paste/duplicate/delete, previous/next keys, zoom, pan, snapping, fit all/selection. Every edit uses structural undo and v1→v2 migration.
 - Space and J/K/L playback, frame stepping, loop, safe margins, full-screen monitor, source preview, searchable command palette, resizable persisted panels, and dark/light themes.
 - Actual MP4/H.264/AAC encoding through FFmpeg, from the same composited frames shown in preview, with trimmed/delayed/gained source audio. Progress is based on submitted frames. Cancellation removes the temporary output. PNG frame export also works in the browser.
 
@@ -41,8 +42,9 @@ The current Windows development executable is `bin/supp-edit-gpu.exe`; the earli
 2. Use an asset's **Insert** button to insert at the playhead, or drag it to a compatible track. Click its preview for the source monitor.
 3. Select a timeline clip. Press **S** to split; choose a timeline edit tool. Selection moves/trims; Ripple trim and Roll use edges; Slip and Slide use the clip body. Roll needs an adjacent clip; Slide needs neighbors on both sides. Open a source preview to mark In/Out and Insert or Overwrite on the chosen track. Use **Undo** / **Redo** as needed.
 4. Add **Title**, **Shape**, or another video track. Edit appearance in the inspector. Click the diamond beside Position X, move the playhead, and change Position X to animate it.
-5. Save as `.supp`, reopen, and relink any moved sources.
-6. Open **Export**, choose **Export MP4**, and select a destination. The app must have an FFmpeg build with `libx264` and AAC.
+5. In **Composite**, select a property and **Enable animation**. Change Local frame and an inspector value to add another key. Select keys to change easing, drag tangents, or use the key editing buttons. Speed view shows signed velocity; edit tangents in Value view. Middle-drag pans; the wheel zooms. Disable animation retains the value at the playhead.
+6. Save as `.supp`, reopen, and relink any moved sources.
+7. Open **Export**, choose **Export MP4**, and select a destination. The app must have an FFmpeg build with `libx264` and AAC.
 
 The web companion downloads project JSON and persists media in the same browser profile. Moving that file to another browser/computer requires relinking sources. Browser storage is not a backup.
 
@@ -68,6 +70,6 @@ cargo run -p supp-export --example render_frames -- test-results/render-media
 node scripts/verify-render.mjs test-results/render-media
 ```
 
-Fixtures are synthesized by FFmpeg for tests only. They are never inserted into a user's project. The render verification decodes the actual MP4 and checks frame count, dimensions, AAC audio, audio energy, and pixel agreement with the compositor. See [VALIDATION.md](docs/VALIDATION.md) for this build's results and remaining validation gaps.
+Default fixtures are synthesized by FFmpeg for tests only. The animation test also accepts SUPP_TEST_VIDEO for real footage; this build was checked with the MDN flower sample. They are never inserted into a user's project. The render verification decodes the actual MP4 and checks frame count, dimensions, AAC audio, audio energy, and pixel agreement with the compositor. See [VALIDATION.md](docs/VALIDATION.md) for this build's results and remaining validation gaps.
 
 Architecture and extension points: [ARCHITECTURE.md](docs/ARCHITECTURE.md), [PROJECT_FORMAT.md](docs/PROJECT_FORMAT.md), [RENDER_ENGINE.md](docs/RENDER_ENGINE.md), [ROADMAP.md](docs/ROADMAP.md), [BUILDING.md](docs/BUILDING.md), [AI_ARCHITECTURE.md](docs/AI_ARCHITECTURE.md), [PLUGIN_API.md](docs/PLUGIN_API.md), [CONTRIBUTING.md](CONTRIBUTING.md), [THIRD_PARTY.md](THIRD_PARTY.md).

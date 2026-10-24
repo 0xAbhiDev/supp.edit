@@ -1,3 +1,4 @@
+import { animationMetrics } from "../../../packages/animation";
 import {
   usePlayback,
   type RendererMode,
@@ -54,6 +55,10 @@ export function EngineDiagnostics({
         </dd>
         <dt>Texture allocation</dt>
         <dd>{(s.textureBytes / 1048576).toFixed(1)} MiB</dd>
+        <dt>Animation evaluations / sort cache hits</dt>
+        <dd>
+          {animationMetrics.evaluations} / {animationMetrics.sortedCacheHits}
+        </dd>
         <dt>Open media resources</dt>
         <dd>{s.resourceCount} / 24</dd>
       </dl>

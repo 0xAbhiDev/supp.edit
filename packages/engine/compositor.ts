@@ -1,5 +1,5 @@
 import { type Project, type Clip } from "../project-schema";
-import { animated } from "../commands";
+import { resolveClip } from "../animation";
 import { ResourcePool } from "./resources";
 import { GpuRenderer } from "./gpu";
 import { projectIndex } from "./project-index";
@@ -156,12 +156,23 @@ export class Compositor {
     source?: CanvasImageSource,
     resolution = 1,
   ) {
-    const t = animated(c, frame),
+    c = resolveClip(c, frame);
+    const t = c.transform,
       { width, height } = p.settings;
     ctx.save();
     ctx.translate(width / 2 + t.x, height / 2 + t.y);
     ctx.rotate((t.rotation * Math.PI) / 180);
-    ctx.scale(t.scale, t.scale);
+    ctx.scale(t.scale * t.scaleX, t.scale * t.scaleY);
+    ctx.translate(-t.anchorX, -t.anchorY);
+    const crop = c.crop;
+    ctx.beginPath();
+    ctx.rect(
+      (crop.cropLeft - 0.5) * width,
+      (crop.cropTop - 0.5) * height,
+      Math.max(0, 1 - crop.cropLeft - crop.cropRight) * width,
+      Math.max(0, 1 - crop.cropTop - crop.cropBottom) * height,
+    );
+    ctx.clip();
     ctx.globalAlpha = t.opacity;
     ctx.filter = `blur(${c.effects.blur * resolution}px) brightness(${c.effects.brightness}) contrast(${c.effects.contrast}) saturate(${c.effects.saturation})`;
     if (c.mask) {

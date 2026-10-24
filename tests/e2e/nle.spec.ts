@@ -5,7 +5,11 @@ async function setup(page: Page) {
   await page.goto("/");
   await page
     .getByTestId("media-input")
-    .setInputFiles(path.resolve("test-results/fixtures/footage.mp4"));
+    .setInputFiles(
+      path.resolve(
+        process.env.SUPP_TEST_VIDEO || "test-results/fixtures/footage.mp4",
+      ),
+    );
   await expect(page.getByLabel("Preview footage.mp4")).toBeVisible();
   const saved = await graph(page);
   const p = await page.evaluate(async (saved) => {
@@ -21,13 +25,11 @@ async function setup(page: Page) {
     });
     return p;
   }, saved);
-  await page
-    .getByTestId("project-input")
-    .setInputFiles({
-      name: "setup.supp",
-      mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(p)),
-    });
+  await page.getByTestId("project-input").setInputFiles({
+    name: "setup.supp",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(p)),
+  });
   await expect(
     page.getByRole("button", { name: "Clip footage.mp4" }),
   ).toHaveCount(3);
@@ -58,7 +60,9 @@ async function exportFrames(page: Page, name: string) {
     await r.dispose();
     return { p, frames };
   }, saved);
-  result.p.assets[0].path = path.resolve("test-results/fixtures/footage.mp4");
+  result.p.assets[0].path = path.resolve(
+    process.env.SUPP_TEST_VIDEO || "test-results/fixtures/footage.mp4",
+  );
   const dir = path.resolve("test-results", `nle-${name}`);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, "project.supp"), JSON.stringify(result.p));
@@ -114,13 +118,11 @@ for (const tool of ["ripple", "roll", "slip", "slide"])
       page.getByRole("button", { name: "Save project", exact: true }).click(),
     ]);
     const saved = await fs.readFile((await download.path())!);
-    await page
-      .getByTestId("project-input")
-      .setInputFiles({
-        name: "edited.supp",
-        mimeType: "application/json",
-        buffer: saved,
-      });
+    await page.getByTestId("project-input").setInputFiles({
+      name: "edited.supp",
+      mimeType: "application/json",
+      buffer: saved,
+    });
     expect((await graph(page)).clips).toEqual(changed.clips);
     await exportFrames(page, tool);
   });

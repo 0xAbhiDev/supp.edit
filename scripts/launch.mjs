@@ -5,7 +5,10 @@ import { mediaEnvironment } from "./runtime.mjs";
 const file = process.platform === "win32" ? "supp-edit.exe" : "supp-edit";
 const candidate = [
   ...(process.platform === "win32"
-    ? [path.resolve("bin", "supp-edit-gpu.exe")]
+    ? [
+        path.resolve("bin", "supp-edit-animation.exe"),
+        path.resolve("bin", "supp-edit-gpu.exe"),
+      ]
     : []),
   ...["bin", "target/release", "target/debug"].map((dir) =>
     path.resolve(dir, file),

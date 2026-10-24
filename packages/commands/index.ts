@@ -9,7 +9,6 @@ import {
 import {
   type Project,
   type Clip,
-  type Keyframe,
   type AnimatedProperty,
   fps,
   uid,
@@ -89,31 +88,10 @@ export function editable(p: Project, clipId: string) {
   const c = p.clips.find((c) => c.id === clipId);
   return c && !p.tracks.find((t) => t.id === c.trackId)?.locked ? c : undefined;
 }
-export function evaluate(
-  keys: Keyframe[],
-  frame: number,
-  base: number,
-): number {
-  if (!keys.length) return base;
-  const sorted = [...keys].sort((a, b) => a.frame - b.frame);
-  if (frame <= sorted[0].frame) return sorted[0].value;
-  const right = sorted.findIndex((k) => k.frame > frame);
-  if (right === -1) return sorted[sorted.length - 1].value;
-  const a = sorted[right - 1],
-    b = sorted[right];
-  let t = (frame - a.frame) / (b.frame - a.frame);
-  if (a.easing === "hold") t = 0;
-  if (a.easing === "ease-in-out") t = t * t * (3 - 2 * t);
-  return a.value + (b.value - a.value) * t;
-}
-export function animated(clip: Clip, frame: number) {
-  const t = { ...clip.transform };
-  for (const key of Object.keys(clip.keyframes) as AnimatedProperty[])
-    t[key] = evaluate(clip.keyframes[key], frame - clip.start, t[key]);
-  t.opacity = Math.min(1, Math.max(0, t.opacity));
-  t.scale = Math.min(10, Math.max(0.01, t.scale));
-  return t;
-}
+export { evaluate, animated } from "../animation";
+import { propertyValue } from "../animation";
+import { setProperty } from "./animation";
+export * from "./animation";
 export function splitClip(id: string, at: number): Edit {
   return (p) => {
     const c = editable(p, id);
@@ -219,28 +197,10 @@ export function toggleKeyframe(
     else
       keys.push({
         frame: local,
-        value: animated(c, frame)[key],
+        value: propertyValue(c, key, frame),
         easing: "linear",
       });
     keys.sort((a, b) => a.frame - b.frame);
   };
 }
-export function setTransform(
-  id: string,
-  key: keyof Clip["transform"],
-  value: number,
-  frame: number,
-): Edit {
-  return (p) => {
-    const c = editable(p, id);
-    if (!c) return;
-    const keys = key in c.keyframes ? c.keyframes[key as AnimatedProperty] : [];
-    if (keys.length) {
-      const local = Math.max(0, frame - c.start),
-        existing = keys.find((k) => k.frame === local);
-      if (existing) existing.value = value;
-      else keys.push({ frame: local, value, easing: "linear" });
-      keys.sort((a, b) => a.frame - b.frame);
-    } else c.transform[key] = value;
-  };
-}
+export const setTransform = setProperty;

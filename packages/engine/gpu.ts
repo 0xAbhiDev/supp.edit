@@ -1,5 +1,5 @@
 import type { Clip, Project } from "../project-schema";
-import { animated } from "../commands";
+import { resolveClip } from "../animation";
 import { LruCache } from "./lru";
 
 const vertex = `#version 300 es
@@ -7,10 +7,11 @@ in vec2 a_position;
 uniform vec2 u_output;
 uniform vec4 u_rect;
 uniform vec4 u_transform;
+uniform vec4 u_axes;
 out vec2 v_uv;
 void main(){
   v_uv=a_position;
-  vec2 local=u_rect.xy+a_position*u_rect.zw;
+  vec2 local=(u_rect.xy+a_position*u_rect.zw-u_axes.zw)*u_axes.xy;
   float cs=cos(u_transform.z),sn=sin(u_transform.z);
   vec2 position=vec2(cs*local.x-sn*local.y,sn*local.x+cs*local.y)*u_transform.w+u_transform.xy;
   gl_Position=vec4(position.x/u_output.x*2.0-1.0,1.0-position.y/u_output.y*2.0,0,1);
@@ -25,6 +26,8 @@ uniform float u_sigma;
 uniform vec4 u_color;
 uniform vec4 u_maskTransform;
 uniform vec4 u_mask;
+uniform vec4 u_maskAxes;
+uniform vec4 u_crop;
 uniform int u_maskType;
 uniform float u_opacity;
 uniform vec2 u_project;
@@ -47,13 +50,17 @@ void main(){
   float luminance=dot(rgb,vec3(0.2126,0.7152,0.0722));
   rgb=mix(vec3(luminance),rgb,u_color.z);
   float mask=1.0;
-  if(u_maskType>0){
+  {
     vec2 offset=v_uv*u_project-u_maskTransform.xy;
     float cs=cos(u_maskTransform.z),sn=sin(u_maskTransform.z);
-    vec2 local=vec2(cs*offset.x+sn*offset.y,-sn*offset.x+cs*offset.y)/u_maskTransform.w;
+    vec2 local=vec2(cs*offset.x+sn*offset.y,-sn*offset.x+cs*offset.y)/(u_maskTransform.w*u_maskAxes.xy)+u_maskAxes.zw;
+    vec2 uv=local/u_project+0.5;
+    mask=float(all(greaterThanEqual(uv,u_crop.xy))&&all(lessThanEqual(uv,vec2(1)-u_crop.zw)));
+    if(u_maskType>0){
     vec2 normalized=(local-u_mask.xy)/u_mask.zw;
-    if(u_maskType==1) mask=float(all(greaterThanEqual(normalized,vec2(0)))&&all(lessThanEqual(normalized,vec2(1))));
-    else {float d=length(normalized*2.0-1.0);float edge=max(fwidth(d),0.0001);mask=1.0-smoothstep(1.0-edge,1.0+edge,d);}
+    if(u_maskType==1) mask*=float(all(greaterThanEqual(normalized,vec2(0)))&&all(lessThanEqual(normalized,vec2(1))));
+    else {float d=length(normalized*2.0-1.0);float edge=max(fwidth(d),0.0001);mask*=1.0-smoothstep(1.0-edge,1.0+edge,d);}
+  }
   }
   float alpha=pixel.a*u_opacity*mask;
   result=vec4(clamp(rgb,0.0,1.0)*alpha,alpha);
@@ -233,6 +240,7 @@ export class GpuRenderer {
     const gl = this.gl;
     gl.uniform4f(this.uniform("u_rect"), 0, 0, this.width, this.height);
     gl.uniform4f(this.uniform("u_transform"), 0, 0, 0, 1);
+    gl.uniform4f(this.uniform("u_axes"), 1, 1, 0, 0);
   }
   private generated(p: Project, c: Clip): Generated {
     const key = JSON.stringify([
@@ -299,8 +307,9 @@ export class GpuRenderer {
     return value;
   }
   draw(p: Project, c: Clip, frame: number, source?: CanvasImageSource) {
+    c = resolveClip(c, frame);
     const gl = this.gl,
-      t = animated(c, frame),
+      t = c.transform,
       scale = this.width / p.settings.width;
     let left: number,
       top: number,
@@ -384,6 +393,13 @@ export class GpuRenderer {
       (t.rotation * Math.PI) / 180,
       t.scale,
     );
+    gl.uniform4f(
+      this.uniform("u_axes"),
+      t.scaleX,
+      t.scaleY,
+      t.anchorX * scale,
+      t.anchorY * scale,
+    );
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     if (c.effects.blur > 0) {
       this.full();
@@ -412,6 +428,20 @@ export class GpuRenderer {
       0,
     );
     gl.uniform1f(this.uniform("u_opacity"), t.opacity);
+    gl.uniform4f(
+      this.uniform("u_maskAxes"),
+      t.scaleX,
+      t.scaleY,
+      t.anchorX,
+      t.anchorY,
+    );
+    gl.uniform4f(
+      this.uniform("u_crop"),
+      c.crop.cropLeft,
+      c.crop.cropTop,
+      c.crop.cropRight,
+      c.crop.cropBottom,
+    );
     gl.uniform2f(
       this.uniform("u_project"),
       p.settings.width,

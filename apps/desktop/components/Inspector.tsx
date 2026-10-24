@@ -1,3 +1,4 @@
+import { propertyValue } from "../../../packages/animation";
 import {
   Diamond,
   SlidersHorizontal,
@@ -8,8 +9,7 @@ import {
 } from "lucide-react";
 import { useEditor } from "../../../packages/editor-state";
 import {
-  animated,
-  setTransform,
+  setProperty,
   toggleKeyframe,
   editable,
 } from "../../../packages/commands";
@@ -18,6 +18,7 @@ import {
   type Clip,
   fps,
   timecode,
+  interpolationModes,
 } from "../../../packages/project-schema";
 import { useClock } from "../../../packages/engine/clock";
 import { Section, NumberField, IconButton } from "./Controls";
@@ -74,22 +75,22 @@ export function Inspector() {
         <History entries={history} />
       </aside>
     );
-  const t = animated(clip, frame);
+
   const number = (
     label: string,
-    key: keyof Clip["transform"],
+    key: AnimatedProperty,
     min: number,
     max: number,
     step = 1,
   ) => (
     <NumberField
       label={label}
-      value={t[key]}
+      value={propertyValue(clip, key, frame)}
       min={min}
       max={max}
       step={step}
       onChange={(v) =>
-        execute(`Set ${label}`, setTransform(clip.id, key, v, frame))
+        execute(`Set ${label}`, setProperty(clip.id, key, v, frame))
       }
     >
       {key in clip.keyframes && (
@@ -293,6 +294,10 @@ export function Inspector() {
                 {number("Position X", "x", -32768, 32768)}
                 {number("Position Y", "y", -32768, 32768)}
                 {number("Scale", "scale", 0.01, 10, 0.01)}
+                {number("Scale X", "scaleX", 0.01, 10, 0.01)}
+                {number("Scale Y", "scaleY", 0.01, 10, 0.01)}
+                {number("Anchor X", "anchorX", -32768, 32768)}
+                {number("Anchor Y", "anchorY", -32768, 32768)}
                 {number("Rotation", "rotation", -36000, 36000)}
                 {number("Opacity", "opacity", 0, 1, 0.01)}
                 <p className="field-hint">
@@ -301,39 +306,18 @@ export function Inspector() {
                 </p>
               </Section>
               <Section title="Color & effects">
-                <NumberField
-                  label="Gaussian blur"
-                  value={clip.effects.blur}
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  onChange={(v) =>
-                    edit("Set blur", (c) => {
-                      c.effects.blur = v;
-                    })
-                  }
-                />
-                {(["brightness", "contrast", "saturation"] as const).map(
-                  (key) => (
-                    <NumberField
-                      key={key}
-                      label={key[0].toUpperCase() + key.slice(1)}
-                      value={clip.effects[key]}
-                      min={0}
-                      max={3}
-                      step={0.05}
-                      onChange={(v) =>
-                        edit(`Set ${key}`, (c) => {
-                          c.effects[key] = v;
-                        })
-                      }
-                    />
-                  ),
-                )}
+                {number("Gaussian blur", "blur", 0, 100, 0.5)}
+                {number("Brightness", "brightness", 0, 3, 0.05)}
+                {number("Contrast", "contrast", 0, 3, 0.05)}
+                {number("Saturation", "saturation", 0, 3, 0.05)}
                 <button
                   className="text-button"
                   onClick={() =>
                     edit("Reset effects", (c) => {
+                      c.keyframes.blur = [];
+                      c.keyframes.brightness = [];
+                      c.keyframes.contrast = [];
+                      c.keyframes.saturation = [];
                       c.effects = {
                         blur: 0,
                         brightness: 1,
@@ -345,6 +329,12 @@ export function Inspector() {
                 >
                   <RotateCcw size={12} /> Reset effects
                 </button>
+              </Section>
+              <Section title="Crop" open={false}>
+                {number("Crop left", "cropLeft", 0, 1, 0.01)}
+                {number("Crop top", "cropTop", 0, 1, 0.01)}
+                {number("Crop right", "cropRight", 0, 1, 0.01)}
+                {number("Crop bottom", "cropBottom", 0, 1, 0.01)}
               </Section>
               <Section title="Layer mask" open={!!clip.mask}>
                 <label className="number-field">
@@ -432,9 +422,11 @@ export function Inspector() {
                           })
                         }
                       >
-                        <option value="linear">Linear</option>
-                        <option value="hold">Hold</option>
-                        <option value="ease-in-out">Ease in/out</option>
+                        {interpolationModes.map((mode) => (
+                          <option key={mode} value={mode}>
+                            {mode}
+                          </option>
+                        ))}
                       </select>
                       <IconButton
                         label={`Delete ${key} frame ${k.frame}`}

@@ -1,6 +1,11 @@
 //! Versioned project graph and crash-safe local persistence. No media buffers.
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, fs, io::Write, path::Path};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fs,
+    io::Write,
+    path::Path,
+};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -75,6 +80,7 @@ pub struct Track {
 pub struct Clip {
     pub id: String,
     pub track_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub asset_id: Option<String>,
     pub kind: String,
     pub name: String,
@@ -83,6 +89,8 @@ pub struct Clip {
     pub source_in: u32,
     pub gain: f64,
     pub transform: Transform,
+    #[serde(default)]
+    pub crop: Crop,
     pub effects: Effects,
     pub keyframes: Keyframes,
     pub mask: Option<Mask>,
@@ -90,12 +98,36 @@ pub struct Clip {
     pub shape: Shape,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Transform {
     pub x: f64,
     pub y: f64,
     pub scale: f64,
     pub rotation: f64,
     pub opacity: f64,
+    #[serde(default = "one")]
+    pub scale_x: f64,
+    #[serde(default = "one")]
+    pub scale_y: f64,
+    #[serde(default)]
+    pub anchor_x: f64,
+    #[serde(default)]
+    pub anchor_y: f64,
+}
+fn one() -> f64 {
+    1.
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Crop {
+    #[serde(default)]
+    pub crop_left: f64,
+    #[serde(default)]
+    pub crop_top: f64,
+    #[serde(default)]
+    pub crop_right: f64,
+    #[serde(default)]
+    pub crop_bottom: f64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Effects {
@@ -105,17 +137,29 @@ pub struct Effects {
     pub saturation: f64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Keyframe {
     pub frame: i64,
     pub value: f64,
     pub easing: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_handle: Option<Handle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_handle: Option<Handle>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Keyframes {
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Vec<Keyframe>>,
     pub x: Vec<Keyframe>,
     pub y: Vec<Keyframe>,
     pub scale: Vec<Keyframe>,
     pub opacity: Vec<Keyframe>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Handle {
+    pub x: f64,
+    pub y: f64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mask {
@@ -173,8 +217,8 @@ fn unique<'a>(ids: impl Iterator<Item = &'a str>) -> bool {
 impl Project {
     pub fn validate(&self) -> Result<(), Error> {
         ensure(
-            self.schema_version == 1,
-            "Unsupported schema version (expected 1)",
+            [1, 2].contains(&self.schema_version),
+            "Unsupported schema version (expected 1 or 2)",
         )?;
         ensure(
             !self.name.is_empty() && self.name.len() <= 1024,
@@ -244,7 +288,11 @@ impl Project {
                     && range(c.transform.opacity, 0., 1.)
                     && range(c.transform.x, -32768., 32768.)
                     && range(c.transform.y, -32768., 32768.)
-                    && range(c.transform.rotation, -36000., 36000.),
+                    && range(c.transform.rotation, -36000., 36000.)
+                    && range(c.transform.scale_x, 0.01, 10.)
+                    && range(c.transform.scale_y, 0.01, 10.)
+                    && range(c.transform.anchor_x, -32768., 32768.)
+                    && range(c.transform.anchor_y, -32768., 32768.),
                 "Invalid transform or gain",
             )?;
             ensure(
@@ -254,19 +302,68 @@ impl Project {
                     && range(c.effects.saturation, 0., 3.),
                 "Invalid effect parameters",
             )?;
+            ensure(
+                [
+                    c.crop.crop_left,
+                    c.crop.crop_top,
+                    c.crop.crop_right,
+                    c.crop.crop_bottom,
+                ]
+                .iter()
+                .all(|v| range(*v, 0., 1.)),
+                "Invalid crop",
+            )?;
+            ensure(
+                c.keyframes.extra.keys().all(|k| {
+                    [
+                        "rotation",
+                        "scaleX",
+                        "scaleY",
+                        "anchorX",
+                        "anchorY",
+                        "blur",
+                        "brightness",
+                        "contrast",
+                        "saturation",
+                        "cropLeft",
+                        "cropTop",
+                        "cropRight",
+                        "cropBottom",
+                    ]
+                    .contains(&k.as_str())
+                }),
+                "Unknown animation channel",
+            )?;
             for keys in [
                 &c.keyframes.x,
                 &c.keyframes.y,
                 &c.keyframes.scale,
                 &c.keyframes.opacity,
-            ] {
+            ]
+            .into_iter()
+            .chain(c.keyframes.extra.values())
+            {
                 let mut times = HashSet::new();
                 ensure(
                     keys.len() <= 10000
                         && keys.iter().all(|k| {
                             range(k.value, -100000., 100000.)
                                 && (-2_000_000_000..=2_000_000_000).contains(&k.frame)
-                                && ["linear", "hold", "ease-in-out"].contains(&k.easing.as_str())
+                                && [
+                                    "linear",
+                                    "hold",
+                                    "ease-in",
+                                    "ease-out",
+                                    "ease-in-out",
+                                    "bezier",
+                                    "auto-bezier",
+                                    "continuous-bezier",
+                                ]
+                                .contains(&k.easing.as_str())
+                                && [&k.in_handle, &k.out_handle]
+                                    .into_iter()
+                                    .flatten()
+                                    .all(|h| range(h.x, 0., 1.) && range(h.y, -100000., 100000.))
                                 && times.insert(k.frame)
                         }),
                     "Invalid animation",
@@ -337,8 +434,9 @@ pub fn read(path: &Path) -> Result<Project, Error> {
         fs::metadata(path)?.len() <= 64 * 1024 * 1024,
         "Project exceeds 64 MiB limit",
     )?;
-    let p: Project = serde_json::from_reader(fs::File::open(path)?)?;
+    let mut p: Project = serde_json::from_reader(fs::File::open(path)?)?;
     p.validate()?;
+    p.schema_version = 2;
     Ok(p)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
@@ -364,6 +462,47 @@ pub fn save(path: &Path, project: &Project) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn animation_v2_contract_and_legacy_migration() {
+        let mut p: Project =
+            serde_json::from_str(include_str!("../../../../tests/fixtures/animation.supp"))
+                .unwrap();
+        p.validate().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("animation.supp");
+        save(&path, &p).unwrap();
+        let reopened = read(&path).unwrap();
+        assert_eq!(reopened.schema_version, 2);
+        assert_eq!(reopened.clips[0].transform.scale_x, 1.);
+        assert_eq!(
+            reopened.clips[0].keyframes.extra["scaleX"][0]
+                .out_handle
+                .as_ref()
+                .unwrap()
+                .x,
+            0.6
+        );
+        assert_eq!(
+            serde_json::to_value(&p).unwrap(),
+            serde_json::to_value(reopened).unwrap()
+        );
+        p.clips[0].keyframes.extra.get_mut("scaleX").unwrap()[0]
+            .out_handle
+            .as_mut()
+            .unwrap()
+            .x = 2.;
+        assert!(p.validate().is_err());
+        let old = dir.path().join("old.supp");
+        fs::write(
+            &old,
+            include_str!("../../../../tests/fixtures/project.supp"),
+        )
+        .unwrap();
+        assert_eq!(read(&old).unwrap().schema_version, 2);
+        assert!(fs::read_to_string(old)
+            .unwrap()
+            .contains("\"schemaVersion\":1"));
+    }
     #[test]
     fn atomic_replace_preserves_previous_until_commit() {
         let dir = tempfile::tempdir().unwrap();

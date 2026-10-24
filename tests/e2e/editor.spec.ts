@@ -51,7 +51,7 @@ test("real editing, rendering, serialization, and crash recovery", async ({
   await page.getByRole("button", { name: "Title", exact: true }).click();
   await page.getByLabel("Title text").fill("A real first cut");
   await page.getByLabel("Font size", { exact: true }).fill("84");
-  await page.getByLabel("Gaussian blur").fill("1.5");
+  await page.getByLabel("Gaussian blur", { exact: true }).fill("1.5");
   await page.getByLabel("Toggle Position X keyframe").click();
   await page.keyboard.press("Tab");
   await page.locator(".ruler-ticks").click({ position: { x: 75, y: 15 } });
@@ -80,7 +80,9 @@ test("real editing, rendering, serialization, and crash recovery", async ({
     page.getByRole("button", { name: "Clip A real first cut" }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Clip A real first cut" }).click();
-  await expect(page.getByLabel("Gaussian blur")).toHaveValue("1.5");
+  await expect(page.getByLabel("Gaussian blur", { exact: true })).toHaveValue(
+    "1.5",
+  );
   await page.getByLabel("Title text").fill("Recovered title");
   await expect(page.getByText(/Recovery saved/)).toBeVisible();
   await page.waitForTimeout(1800);

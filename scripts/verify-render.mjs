@@ -95,7 +95,9 @@ const audio = execFileSync(
 let energy = 0;
 for (let i = 0; i < audio.length; i += 4) energy += audio.readFloatLE(i) ** 2;
 const rms = Math.sqrt(energy / (audio.length / 4));
-if (project.assets.some((a) => a.hasAudio))
+if (process.argv.includes("--silent-source"))
+  assert(rms < 0.00001, `Expected silent source audio, got ${rms}`);
+else if (project.assets.some((a) => a.hasAudio))
   assert(rms > 0.005 && rms < 0.5, `Unexpected mixed audio level ${rms}`);
 const report = {
   frames,

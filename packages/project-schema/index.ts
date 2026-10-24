@@ -3,10 +3,26 @@ import { z } from "zod";
 const finite = z.number().finite();
 const frame = finite.int().min(0).max(2_000_000_000);
 const id = z.string().min(1).max(128);
+export const interpolationModes = [
+  "linear",
+  "hold",
+  "ease-in",
+  "ease-out",
+  "ease-in-out",
+  "bezier",
+  "auto-bezier",
+  "continuous-bezier",
+] as const;
+const handle = z.object({
+  x: finite.min(0).max(1),
+  y: finite.min(-100000).max(100000),
+});
 export const keyframeSchema = z.object({
   frame: finite.int().min(-2_000_000_000).max(2_000_000_000),
   value: finite.min(-100000).max(100000),
-  easing: z.enum(["linear", "hold", "ease-in-out"]),
+  easing: z.enum(interpolationModes),
+  inHandle: handle.optional(),
+  outHandle: handle.optional(),
 });
 export const transformSchema = z.object({
   x: finite.min(-32768).max(32768),
@@ -14,6 +30,17 @@ export const transformSchema = z.object({
   scale: finite.min(0.01).max(10),
   rotation: finite.min(-36000).max(36000),
   opacity: finite.min(0).max(1),
+  scaleX: finite.min(0.01).max(10).default(1),
+  scaleY: finite.min(0.01).max(10).default(1),
+  anchorX: finite.min(-32768).max(32768).default(0),
+  anchorY: finite.min(-32768).max(32768).default(0),
+});
+const channel = () => z.array(keyframeSchema).max(10000).default([]);
+const cropSchema = z.object({
+  cropLeft: finite.min(0).max(1).default(0),
+  cropTop: finite.min(0).max(1).default(0),
+  cropRight: finite.min(0).max(1).default(0),
+  cropBottom: finite.min(0).max(1).default(0),
 });
 export const assetSchema = z.object({
   id,
@@ -32,7 +59,8 @@ export const assetSchema = z.object({
 export const clipSchema = z.object({
   id,
   trackId: id,
-  assetId: id.optional(),
+  // Older native saves serialized Option::None as null for generated layers.
+  assetId: z.preprocess((v) => (v === null ? undefined : v), id.optional()),
   kind: z.enum(["media", "text", "shape"]),
   name: z.string().max(1024),
   start: frame,
@@ -40,6 +68,7 @@ export const clipSchema = z.object({
   sourceIn: frame,
   gain: finite.min(-60).max(12),
   transform: transformSchema,
+  crop: cropSchema.default({}),
   effects: z.object({
     blur: finite.min(0).max(100),
     brightness: finite.min(0).max(3),
@@ -51,6 +80,19 @@ export const clipSchema = z.object({
     y: z.array(keyframeSchema).max(10000),
     scale: z.array(keyframeSchema).max(10000),
     opacity: z.array(keyframeSchema).max(10000),
+    rotation: channel(),
+    scaleX: channel(),
+    scaleY: channel(),
+    anchorX: channel(),
+    anchorY: channel(),
+    blur: channel(),
+    brightness: channel(),
+    contrast: channel(),
+    saturation: channel(),
+    cropLeft: channel(),
+    cropTop: channel(),
+    cropRight: channel(),
+    cropBottom: channel(),
   }),
   mask: z
     .object({
@@ -86,7 +128,7 @@ export const trackSchema = z.object({
   solo: z.boolean(),
 });
 const projectBase = z.object({
-  schemaVersion: z.literal(1),
+  schemaVersion: z.literal(2),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -175,7 +217,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     id: uid(),
     name,
     createdAt: now,
@@ -215,9 +257,21 @@ export function newClip(
     assetId: asset?.id,
     name: asset?.name ?? (kind === "text" ? "Your title" : "Shape"),
     gain: 0,
-    transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1 },
+    transform: transformSchema.parse({
+      x: 0,
+      y: 0,
+      scale: 1,
+      rotation: 0,
+      opacity: 1,
+    }),
+    crop: cropSchema.parse({}),
     effects: { blur: 0, brightness: 1, contrast: 1, saturation: 1 },
-    keyframes: { x: [], y: [], scale: [], opacity: [] },
+    keyframes: clipSchema.shape.keyframes.parse({
+      x: [],
+      y: [],
+      scale: [],
+      opacity: [],
+    }),
     mask: null,
     text: {
       content: "Your title",
@@ -237,11 +291,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (input.schemaVersion !== 1)
+  if (input.schemaVersion !== 1 && input.schemaVersion !== 2)
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build supports version 1. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–2. The file was not changed.`,
     );
-  return projectSchema.parse(input);
+  // Copy before migration; old files and callers' objects remain untouched.
+  return projectSchema.parse({ ...input, schemaVersion: 2 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),
