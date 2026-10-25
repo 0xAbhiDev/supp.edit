@@ -14,6 +14,7 @@ import {
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock } from "../../../packages/engine/clock";
 import { usePlayback } from "../../../packages/engine/diagnostics";
+import { backgroundJobs } from "../../../packages/jobs";
 export function ExportPanel({
   capabilities,
 }: {
@@ -22,14 +23,36 @@ export function ExportPanel({
   const project = useEditor((s) => s.project),
     [progress, setProgress] = useState<RenderProgress | null>(null),
     [busy, setBusy] = useState(false),
-    controller = useRef<AbortController | null>(null);
+    jobId = useRef<string | null>(null);
   async function render() {
     clock.pause();
     setBusy(true);
     setProgress(null);
-    controller.current = new AbortController();
     try {
-      await exportMp4(project, setProgress, controller.current.signal);
+      const job = backgroundJobs.enqueue({
+        label: "MP4 export",
+        scope: project.id,
+        run: async (context) => {
+          const path = await exportMp4(
+            project,
+            (p) => {
+              setProgress(p);
+              if (p.status === "rendering")
+                context.report({
+                  completed: p.frame,
+                  total: p.total,
+                  unit: "frames",
+                });
+            },
+            context.signal,
+          );
+          if (!path) backgroundJobs.cancel(job.id);
+          return path;
+        },
+      });
+      jobId.current = job.id;
+      const result = await job.finished;
+      if (result.state === "Failed") throw new Error(result.error);
     } catch (e) {
       useEditor.getState().report(e);
     } finally {
@@ -122,7 +145,9 @@ export function ExportPanel({
         {busy && (
           <button
             className="text-button"
-            onClick={() => controller.current?.abort()}
+            onClick={() => {
+              if (jobId.current) backgroundJobs.cancel(jobId.current);
+            }}
           >
             <X size={14} />
             Cancel render

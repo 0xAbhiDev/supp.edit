@@ -1,4 +1,6 @@
 import { GraphEditor } from "./components/GraphEditor";
+import { CompositionsPanel } from "./components/CompositionsPanel";
+import { AIStudio } from "./components/AIStudio";
 import type React from "react";
 import {
   FolderOpen,
@@ -15,7 +17,6 @@ import {
   Check,
   Cpu,
   Keyboard,
-  Sparkles,
 } from "lucide-react";
 
 import { useEditor, type Workspace } from "../../packages/editor-state";
@@ -166,7 +167,14 @@ export function App() {
         </div>
         <div className="workspace-tabs">
           {(
-            ["Edit", "Composite", "Color", "Audio", "Export"] as Workspace[]
+            [
+              "Edit",
+              "Composite",
+              "Color",
+              "Audio",
+              "Export",
+              "AI Studio",
+            ] as Workspace[]
           ).map((w) => (
             <button
               key={w}
@@ -176,14 +184,6 @@ export function App() {
               {w}
             </button>
           ))}
-          <button
-            disabled
-            title="AI provider execution is not implemented in this release"
-          >
-            <Sparkles size={12} />
-            AI Studio
-            <span className="soon-dot" />
-          </button>
         </div>
         <button
           className="export-trigger"
@@ -209,26 +209,36 @@ export function App() {
         </div>
       )}
       <main className="workbench">
-        <Assets
-          onImport={() => void importMedia()}
-          onRelink={(id) => void relinkMedia(id)}
-          busy={busy}
-        />
-        <div
-          className="splitter vertical"
-          onPointerDown={(e) => resize(e, "left")}
-          title="Resize library"
-        />
-        <Monitor onImport={() => void importMedia()} onCanvas={onCanvas} />
-        <div
-          className="splitter vertical"
-          onPointerDown={(e) => resize(e, "right")}
-          title="Resize inspector"
-        />
-        {workspace === "Export" ? (
-          <ExportPanel capabilities={caps} />
+        {workspace === "AI Studio" ? (
+          <AIStudio />
         ) : (
-          <Inspector />
+          <>
+            {workspace === "Composite" ? (
+              <CompositionsPanel />
+            ) : (
+              <Assets
+                onImport={() => void importMedia()}
+                onRelink={(id) => void relinkMedia(id)}
+                busy={busy}
+              />
+            )}
+            <div
+              className="splitter vertical"
+              onPointerDown={(e) => resize(e, "left")}
+              title="Resize library"
+            />
+            <Monitor onImport={() => void importMedia()} onCanvas={onCanvas} />
+            <div
+              className="splitter vertical"
+              onPointerDown={(e) => resize(e, "right")}
+              title="Resize inspector"
+            />
+            {workspace === "Export" ? (
+              <ExportPanel capabilities={caps} />
+            ) : (
+              <Inspector />
+            )}
+          </>
         )}
       </main>
       <div

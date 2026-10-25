@@ -98,7 +98,7 @@ export class GpuRenderer {
   private lost = false;
   constructor() {
     const gl = this.canvas.getContext("webgl2", {
-      alpha: false,
+      alpha: true,
       antialias: false,
       preserveDrawingBuffer: true,
       premultipliedAlpha: true,
@@ -192,7 +192,7 @@ export class GpuRenderer {
       this.targets.reduce((n, t) => n + t.width * t.height * 4, 0)
     );
   }
-  begin(width: number, height: number) {
+  begin(width: number, height: number, background = "#000000") {
     const gl = this.gl;
     if (this.lost || gl.isContextLost())
       throw new Error("GPU context lost; CPU fallback active");
@@ -218,7 +218,16 @@ export class GpuRenderer {
     gl.uniform2f(this.uniform("u_output"), width, height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.disable(gl.BLEND);
-    gl.clearColor(0, 0, 0, 1);
+    const color =
+      background === "transparent"
+        ? [0, 0, 0, 0]
+        : [
+            parseInt(background.slice(1, 3), 16) / 255,
+            parseInt(background.slice(3, 5), 16) / 255,
+            parseInt(background.slice(5, 7), 16) / 255,
+            1,
+          ];
+    gl.clearColor(color[0], color[1], color[2], color[3]);
     gl.clear(gl.COLOR_BUFFER_BIT);
   }
   private target(texture: Texture | null) {
@@ -329,8 +338,11 @@ export class GpuRenderer {
       ]);
     } else {
       if (!source) return;
-      const a = p.assets.find((a) => a.id === c.assetId);
-      if (!a || a.kind === "audio") return;
+      const a =
+        c.kind === "composition"
+          ? p.compositions.find((a) => a.id === c.compositionId)?.settings
+          : p.assets.find((a) => a.id === c.assetId);
+      if (!a || ("kind" in a && a.kind === "audio")) return;
       const fit = Math.min(
         p.settings.width / a.width,
         p.settings.height / a.height,
@@ -340,7 +352,7 @@ export class GpuRenderer {
       left = -width / 2;
       top = -height / 2;
       input = source as TexImageSource;
-      key = c.id + ":" + a.fingerprint;
+      key = c.id + ":" + ("fingerprint" in a ? a.fingerprint : c.compositionId);
     }
     const dimensions = input as HTMLVideoElement &
       HTMLImageElement &
@@ -350,6 +362,10 @@ export class GpuRenderer {
       h =
         dimensions.videoHeight || dimensions.naturalHeight || dimensions.height;
     let texture = this.textures.get(key);
+    if (texture && (texture.width !== w || texture.height !== h)) {
+      this.textures.delete(key);
+      texture = undefined;
+    }
     if (!texture) {
       texture = this.texture(w, h);
       if (!this.textures.set(key, texture, w * h * 4))
@@ -362,7 +378,11 @@ export class GpuRenderer {
         : input instanceof ImageBitmap
           ? frame
           : 0;
-    if (texture.stamp !== stamp || texture.input !== input) {
+    if (
+      c.kind === "composition" ||
+      texture.stamp !== stamp ||
+      texture.input !== input
+    ) {
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,

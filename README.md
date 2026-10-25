@@ -22,7 +22,7 @@ npm run launch        # launch a previously built desktop binary
 npm run doctor        # report native tool availability
 ```
 
-The current Windows development executable is `bin/supp-edit-animation.exe`; the earlier executable is retained alongside it. It embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** to launch the current build with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. This is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
+The current Windows development executable is `bin/supp-edit-foundation.exe`; the earlier executable is retained alongside it. It embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** to launch the current build with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. This is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
 
 ## Working features
 
@@ -32,7 +32,9 @@ The current Windows development executable is `bin/supp-edit-animation.exe`; the
 - WebGL2 texture compositing with CPU fallback, full/half/quarter playback resolution, bounded frame/texture/derived-media caches, source prefetch, and dropped-frame diagnostics. Windows GPU/RAM inventory and real H.264 hardware codec probes report capabilities separately from the active decoder/exporter.
 - Reversible structural patch history, up to 500 editing commands, without copying media buffers.
 - Text and shape layers; nondestructive translation, scale, rotation, opacity; 17 animated transform/crop/effect channels with Hold, Linear, Ease In/Out, Bezier, Auto and Continuous Bezier; rectangular and elliptical masks; blur, brightness, contrast, saturation; clip audio gain.
-- Composite value/speed graph editor: multi-property curves, Shift-select, key/tangent drag, numeric edits, copy/paste/duplicate/delete, previous/next keys, zoom, pan, snapping, fit all/selection. Every edit uses structural undo and v1→v2 migration.
+- Composite value/speed graph editor: multi-property curves, Shift-select, key/tangent drag, numeric edits, copy/paste/duplicate/delete, previous/next keys, zoom, pan, snapping, fit all/selection. Every edit uses structural undo and v1/v2→v3 migration.
+- Nested composition sources, transparent backgrounds, instance/precompose commands, scoped layer and animation editing, mixed-rate rendering and recursive source audio.
+- AI Studio imports supplied SRT into timestamped transcripts and actual caption text clips; the shared job queue reports cue/frame progress. No inference or external execution is installed.
 - Space and J/K/L playback, frame stepping, loop, safe margins, full-screen monitor, source preview, searchable command palette, resizable persisted panels, and dark/light themes.
 - Actual MP4/H.264/AAC encoding through FFmpeg, from the same composited frames shown in preview, with trimmed/delayed/gained source audio. Progress is based on submitted frames. Cancellation removes the temporary output. PNG frame export also works in the browser.
 
@@ -43,16 +45,17 @@ The current Windows development executable is `bin/supp-edit-animation.exe`; the
 3. Select a timeline clip. Press **S** to split; choose a timeline edit tool. Selection moves/trims; Ripple trim and Roll use edges; Slip and Slide use the clip body. Roll needs an adjacent clip; Slide needs neighbors on both sides. Open a source preview to mark In/Out and Insert or Overwrite on the chosen track. Use **Undo** / **Redo** as needed.
 4. Add **Title**, **Shape**, or another video track. Edit appearance in the inspector. Click the diamond beside Position X, move the playhead, and change Position X to animate it.
 5. In **Composite**, select a property and **Enable animation**. Change Local frame and an inspector value to add another key. Select keys to change easing, drag tangents, or use the key editing buttons. Speed view shows signed velocity; edit tangents in Value view. Middle-drag pans; the wheel zooms. Disable animation retains the value at the playhead.
-6. Save as `.supp`, reopen, and relink any moved sources.
-7. Open **Export**, choose **Export MP4**, and select a destination. The app must have an FFmpeg build with `libx264` and AAC.
+6. Use the Composite source/layer panel to create or enter a composition, add instances, or precompose a contiguous unlocked stack. In AI Studio, paste/import SRT and use **Generate captions**, inspect the preview, then **Apply**.
+7. Save as `.supp`, reopen, and relink any moved sources.
+8. Open **Export**, choose **Export MP4**, and select a destination. The app must have an FFmpeg build with `libx264` and AAC.
 
 The web companion downloads project JSON and persists media in the same browser profile. Moving that file to another browser/computer requires relinking sources. Browser storage is not a backup.
 
 ## Current boundaries
 
-This release is **8-bit sRGB, WebGL2 with Canvas2D fallback, system-webview decoding, and a single sequence**. Native GPU decoding/texture sharing, an HDR/color-managed grading system, and a complete image editor remain unfinished. “Composite”, “Color”, and “Audio” operate on the same graph; their controls are a limited subset, not full separate workstations. AI Studio is explicitly disabled. Transcription, RAW development, proxies, 3D, plugin execution, and cloud services remain absent. See [CURRENT_STATE.md](CURRENT_STATE.md) for the completed cycle and exact outstanding scope.
+This release is **8-bit sRGB, WebGL2 with Canvas2D fallback, system-webview decoding, and a main sequence with nested compositions**. Native GPU decoding/texture sharing, an HDR/color-managed grading system, and a complete image editor remain unfinished. “Composite”, “Color”, and “Audio” operate on the same graph; their controls are a limited subset, not full separate workstations. AI Studio provides LOCAL SRT caption generation with preview, Apply and Undo; provider/model/operation/privacy interfaces prepare future runtimes. Transcription, RAW development, proxies, 3D, plugin execution, and cloud services remain absent. See [CURRENT_STATE.md](CURRENT_STATE.md) for the completed cycle and exact outstanding scope.
 
-The system webview must support the imported codec for preview and frame export; FFprobe's ability to inspect a file does not imply the webview can decode it. Transcode incompatible media to H.264/AAC MP4, WAV, or PNG. Reverse shuttle is silent. Browser FPS metadata is unavailable and is reported as such. Playback can drop visual frames under load; offline export seeks and renders every requested frame. It is not a sample-accurate professional audio transport. Export is one job at a time, at most 128 audible clips, no pause/retry queue, and 8-bit H.264 only.
+The system webview must support the imported codec for preview and frame export; FFprobe's ability to inspect a file does not imply the webview can decode it. Transcode incompatible media to H.264/AAC MP4, WAV, or PNG. Reverse shuttle is silent. Browser FPS metadata is unavailable and is reported as such. Playback can drop visual frames under load; offline export seeks and renders every requested frame. It is not a sample-accurate professional audio transport. Export is one job at a time, at most 128 audible segments including nested instances, a session queue with cancellation but no export pause/retry, and 8-bit H.264 only.
 
 Panel resizing is implemented; arbitrary docking, detachable panels, and multi-monitor layouts are not. Timeline clipping is culled horizontally; large-project vertical virtualization and performance certification remain future work. Image thumbnails are regenerated/cached independently of project data. Edits never rewrite original sources.
 

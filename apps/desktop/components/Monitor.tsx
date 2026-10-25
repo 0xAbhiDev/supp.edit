@@ -12,7 +12,7 @@ import {
   X,
   Volume2,
 } from "lucide-react";
-import { useEditor } from "../../../packages/editor-state";
+import { useEditor, editorProject } from "../../../packages/editor-state";
 import { fps, duration, timecode } from "../../../packages/project-schema";
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock, useClock } from "../../../packages/engine/clock";
@@ -35,7 +35,7 @@ export function Monitor({
   const canvas = useRef<HTMLCanvasElement>(null),
     container = useRef<HTMLDivElement>(null),
     renderRef = useRef<Compositor | null>(null),
-    project = useEditor((s) => s.project),
+    project = useEditor(editorProject),
     selected = useEditor((s) => s.selected);
   const mode = usePlayback((s) => s.mode),
     resolution = usePlayback((s) => s.scale);
@@ -87,11 +87,23 @@ export function Monitor({
       running = true;
       while (pending && !disposed) {
         pending = false;
-        const p = useEditor.getState().project,
+        const p = editorProject(useEditor.getState()),
           s = clock.get();
         try {
           const start = performance.now();
-          const error = await renderer.render(p, s.frame, s.playing, s.speed);
+          const state = useEditor.getState();
+          const background =
+            state.project.compositions.find(
+              (c) => c.id === state.activeComposition,
+            )?.background ?? "#000000";
+          const error = await renderer.render(
+            p,
+            s.frame,
+            s.playing,
+            s.speed,
+            false,
+            background,
+          );
           if (
             s.playing &&
             lastFrame !== null &&
@@ -134,7 +146,11 @@ export function Monitor({
     };
     const u1 = clock.subscribe(request),
       u2 = useEditor.subscribe((s, old) => {
-        if (s.project !== old.project) request();
+        if (
+          s.project !== old.project ||
+          s.activeComposition !== old.activeComposition
+        )
+          request();
       });
     request();
     return () => {
@@ -182,7 +198,7 @@ export function Monitor({
         dy =
           ((event.clientY - startY) * project.settings.height) / bounds.height;
       if (Math.abs(dx) + Math.abs(dy) > 1)
-        useEditor.getState().execute("Move layer on canvas", (p) => {
+        useEditor.getState().executeScoped("Move layer on canvas", (p) => {
           setTransform(
             c.id,
             "x",
@@ -299,7 +315,7 @@ function RendererLabel() {
 }
 function Transport() {
   const s = useClock(),
-    p = useEditor((s) => s.project),
+    p = useEditor(editorProject),
     rate = fps(p);
   return (
     <div className="transport">
@@ -367,7 +383,7 @@ function Transport() {
 }
 export function SourceViewer() {
   const source = useEditor((s) => s.source),
-    project = useEditor((s) => s.project),
+    project = useEditor(editorProject),
     asset = useEditor((s) => s.project.assets.find((a) => a.id === source)),
     [url, setUrl] = useState(""),
     [error, setError] = useState("");
@@ -395,8 +411,8 @@ export function SourceViewer() {
   function insert(mode: "insert" | "overwrite") {
     if (!asset || !targetId) return;
     const state = useEditor.getState(),
-      before = state.project;
-    state.execute(
+      before = editorProject(state);
+    state.executeScoped(
       `${mode === "insert" ? "Insert" : "Overwrite"} source range`,
       sourceEdit(
         asset.id,
@@ -407,7 +423,7 @@ export function SourceViewer() {
         markOut - markIn,
       ),
     );
-    const after = useEditor.getState().project;
+    const after = editorProject(useEditor.getState());
     if (after !== before) {
       state.select(after.clips.at(-1)!.id);
       state.setSource(null);

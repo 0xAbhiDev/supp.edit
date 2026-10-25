@@ -1,3 +1,3 @@
 # Roadmap
 
-The maintained roadmap is [docs/ROADMAP.md](docs/ROADMAP.md). Current priority: composition/nesting, masks/mattes/blends, ordered effects, then Photo documents. The animation foundation is delivered; the full milestone remains open.
+The maintained status is [docs/ROADMAP.md](docs/ROADMAP.md). Nested compositions and the AI Studio foundation are delivered. Next: parenting/Null controllers and the full layer timeline, then masks/mattes/blends, ordered effects and Photo documents. The full compositor milestone remains open.

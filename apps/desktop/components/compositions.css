@@ -1,0 +1,74 @@
+.compositions {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.composition-controls {
+  padding: 12px;
+  display: grid;
+  gap: 9px;
+  border-bottom: 1px solid var(--border);
+}
+.composition-controls label {
+  display: grid;
+  gap: 5px;
+}
+.composition-controls input,
+.composition-controls select {
+  width: 100%;
+  min-width: 0;
+}
+.composition-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.composition-inline > input:not([type="checkbox"]),
+.composition-inline > select {
+  flex: 1;
+  min-width: 0;
+}
+.composition-inline label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.composition-inline input[type="checkbox"] {
+  width: auto;
+}
+.composition-layer-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 50px;
+}
+.composition-layer-list article {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 8px;
+}
+.composition-layer-list article.selected {
+  background: var(--surface-2, #25292b);
+  box-shadow: inset 3px 0 #c3f96b;
+}
+.composition-layer-list .layer-name {
+  text-align: left;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.compositions > p {
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 10px;
+}
+.composition-inline span {
+  flex: 1;
+  font-size: 10px;
+}
+.composition-inline button {
+  white-space: nowrap;
+  font-size: 10px;
+  padding: 5px;
+}

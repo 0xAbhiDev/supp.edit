@@ -6,6 +6,7 @@ const file = process.platform === "win32" ? "supp-edit.exe" : "supp-edit";
 const candidate = [
   ...(process.platform === "win32"
     ? [
+        path.resolve("bin", "supp-edit-foundation.exe"),
         path.resolve("bin", "supp-edit-animation.exe"),
         path.resolve("bin", "supp-edit-gpu.exe"),
       ]

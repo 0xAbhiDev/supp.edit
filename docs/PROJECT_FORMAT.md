@@ -1,8 +1,8 @@
-# Project format v2
+# Project format v3
 
-`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 2`. Both readers accept v1 and v2 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Shared fixtures cover both versions.
+`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 3`. Both readers accept v1, v2 and v3 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Migration also fills empty compositions and transcripts. Shared fixtures cover all three versions.
 
-Root fields: `id`, `name`, `createdAt`, `modifiedAt` (UTC ISO timestamps), `settings`, `assets`, `tracks`, `clips`, `markers`. Settings store width/height, `{num, den}` FPS, and `colorSpace: "srgb"`.
+Root fields: `id`, `name`, `createdAt`, `modifiedAt` (UTC ISO timestamps), `settings`, `assets`, `tracks`, `clips`, `markers`, `compositions`, `transcripts`. Settings store width/height, `{num, den}` FPS, and `colorSpace: "srgb"`.
 
 All timeline positions and durations are **integer project frames**. Rational rate conversion happens at media boundaries; source time = `(sourceIn + timelineFrame - clip.start) * fps.den / fps.num`. Timecode labels are non-drop-frame, including at 29.97 / 59.94. VFR sources are sought by timestamp through the webview.
 
@@ -18,4 +18,10 @@ Native validation caps project files at 64 MiB on read and rejects duplicate IDs
 
 Save writes a sibling temporary file, flushes it, and atomically replaces the destination. A previous-save `.supp.bak` is kept. Native autosave rotates five independent recovery JSON files in the app data directory. Recovery opens as unsaved and requests a new save location so a recovery file cannot smuggle a write destination. Project files do not embed thumbnails, decoded frames or media buffers.
 
-Crop edges are normalized in the same project-sized local coordinate system as existing masks, applied after transform/effects clipping in both backends. Opposite crop sums of one or more produce an empty region. Crop is not a destructive source resize. The renderer resolves all animated channels once per layer and frame through `packages/animation`, shared with export. No composition/photo/blend/effect-stack fields are invented in v2; those require a future migration.
+Crop edges are normalized in the same project-sized local coordinate system as existing masks, applied after transform/effects clipping in both backends. Opposite crop sums of one or more produce an empty region. Crop is not a destructive source resize. The renderer resolves all animated channels once per layer and frame through `packages/animation`, shared with export. Photo, blend and effect-stack fields remain deferred.
+
+## Composition and transcript additions
+
+A Composition has globally unique id, name, settings, duration, background (transparent or hex RGB), tracks and layers. Clips of kind composition reference compositionId; null clips render no pixels. Child timing uses (parentFrame - start + sourceIn) / parentFPS * childFPS, retaining fractional frames. Source-in and clip duration are in the containing scope's frame rate. Cycles, missing sources and source overruns fail validation. Limits: 64 definitions, 16 levels, 100,000 layers total; rendering adds expansion/memory budgets.
+
+Transcripts contain id, name, source (srt or transcription), optional language/assetId and ordered segments with id, startMs, endMs and text. Timestamps are integer milliseconds. SRT captions persist ordinary text clips and a caption track in the main sequence. No media buffers, AI model files, job state, provider credentials or cloud-consent tokens belong in project JSON. See ../AI_ARCHITECTURE.md for safe execution contracts.

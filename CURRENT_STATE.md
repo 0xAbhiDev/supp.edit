@@ -1,27 +1,36 @@
-# Current state — animation foundation, 24 October 2026
+# Current state — composition and AI foundation, 25 October 2026
 
-Continued from commit `272c555` in the existing repository. This cycle completes the extended numeric animation and graph editor slice. The entire compositor/effects/photo milestone remains open.
+Continued from commit ebe3e89 in the existing repository. This session completes the nested-composition vertical slice and the requested AI Studio foundation. The full compositor and Photo milestone remains open.
 
-## Delivered this cycle
+## COMPLETE in this slice
 
-- Shared evaluator and metadata for 17 channels: X/Y, uniform and separate X/Y scale, rotation, anchor X/Y, opacity, four crop edges, Gaussian blur, brightness, contrast and saturation. Both renderers and frame export resolve the same values.
-- Hold, Linear, Ease In, Ease Out, legacy Ease In/Out, Bezier, Auto Bezier and Continuous Bezier. Cubic time inversion, monotone automatic tangents, linked continuous tangent editing, numeric domain limits and immutable sort caching.
-- Composite now has a functional value/signed-speed graph editor. Multi-property display; Shift key selection; key/tangent drag; numeric edits; animation enable/disable; add/remove; previous/next; copy/paste/duplicate; zoom, middle-drag pan, snapping and fit all/selection. Edits use structural undo/redo; colliding moves/pastes reject atomically. Speed curves are inspected here; tangent editing is in Value view.
-- Schema v2 migrates v1 without writing the original, with matching TypeScript/Rust validation and fixtures. Old projects remain readable. Out-of-range keys survive source edits to preserve interpolation.
-- Curve generation timing is shown in the panel; evaluator/cache counters appear in diagnostics. Playhead updates change the graph cursor directly and only the small transport readout subscribes to the clock.
+- Schema v3 with nested composition definitions, per-source dimensions/rational frame rate/duration/background, reference validation, cycle/depth limits and v1/v2 migration. Native saves preserve compositions and timestamped transcripts.
+- Create, instance and precompose commands; scoped Inspector/Graph Editor edits; shared undo/redo. Precompose preserves source timing and animation. Referenced sources cannot be deleted. Undoing composition creation safely returns editing to Main.
+- Child-first rendering through the shared WebGL2/Canvas2D compositor with transparent reusable surfaces, per-instance media resources, mixed-rate timing and bounded expansion. Native MP4 audio recursively applies ancestor timing, gain, mute and solo. Soloing audio keeps video visible.
+- AI provider, model manager, typed operations/results, immutable project-context interfaces, command plans, explicit local/cloud privacy contracts and native credential-store interface.
+- Functional AI Studio: command input, context, model metadata, history, jobs, result preview, Apply and Undo. The only executor converts supplied SRT into real transcript data and caption text layers. Apply is one validated history command; stale previews are rejected.
+- Shared bounded in-memory job queue used by captions and MP4 export. Real progress, cancellation and cooperative pause where supported. No inference, downloads, network transport or credential collection.
+
+## PARTIAL
+
+Composite has a source/layer panel with ordering, selection, visibility, lock, solo, duplicate, split, delete and precompose. Controls operate on tracks, including all clips on a shared track. The complete layer timeline remains unfinished. Null layers save and animate but have no parenting/controller behavior.
+
+AI context has an active-composition adapter contract; the working caption path targets Main. Unsupported operations have typed contracts but no executors or Apply adapters. Job history is not crash persistent. Credential storage and cloud transport are interfaces, not implementations.
 
 ## Verification
 
-Baseline: launched the prior Windows build; imported MDN’s real flower MP4, played, saved/reopened and visually inspected the browser and decoded export. Five NLE regressions and five native encodes passed with real footage. Source AAC is silent (-91 dB); output silence was explicitly checked. Headless 1080p playback dropped frames under concurrent software-rendering load.
+54 TypeScript unit tests, 10 Rust tests, strict TypeScript/Vite production build and Clippy with warnings denied. All 18 Chromium integration cases passed; targeted composition/caption checks were rerun after final fixes.
 
-Current checks: 39 TypeScript tests, seven Rust tests, strict TypeScript/Vite production build, and workspace Clippy with warnings denied. Browser regression coverage has 14 cases including graph interactions and repeated animation export. Animated GPU/CPU RGB MAE is 1.05–1.22/255 in three sampled frames. The real-MP4 sample includes text, animated position/axis scale/rotation/anchor, Bezier easing, ellipse mask, animated blur/color and crop. Save/reopen produces all 60 identical PNG frames. Both native H.264/AAC encodes pass dimensions, count, audio and first/middle/last decoded-frame checks (MAE 1.27–2.66/255).
+The two-level real-footage sample renders 60 identical PNGs before/after reopen. Sampled GPU/Canvas RGBA MAE is 0.297–0.314/255. Native CLI H.264/AAC export is 320×180, 30 fps, 60 frames / 2 seconds; decoded RGB MAE is 2.87–3.46/255. The source AAC is silent and output silence is checked.
 
-Native Windows UI: real project open, playback, Composite curves, save/reopen and MP4 destination/export were exercised. The 60-frame native UI export passes sampled RGB comparisons (1.41–2.99/255). Fixed a pre-existing Rust-null/TypeScript-optional asset ID incompatibility exposed by recovery of generated layers. The latest launcher selects bin/supp-edit-animation.exe. Sample project, source footage, both repeat exports, native UI export and reports are in ../verification/animation. Historical records are linked separately below.
+A 1080p ten-layer scene on headless SwiftShader averaged 3,438 ms/frame over 15 sequential renders: it is not real-time. Composition surfaces used 8.29 MB and returned to zero after rendering an empty graph; textures used 27.27 MB and the frame cache 31.10 MB. The short playback probe is inconclusive for steady-state dropped frames. Physical GPU and sustained-load certification remain pending.
 
-## Exact remaining scope from the new brief
+Native Windows acceptance is recorded in docs/VALIDATION.md. Launcher: bin/supp-edit-foundation.exe. Sample and evidence: ../verification/foundation. Historical animation evidence is retained separately.
 
-Composition/layer/precomp models and nesting; adjustment/null layers and parenting; a composition layer timeline with ordering/precompose; bounding-box scale/rotation/anchor canvas handles; multiple Bezier masks and path animation, mask feather/expansion/opacity animation; alpha/luma mattes; 17 blend modes; ordered effect stacks, expanded effects and RGB curves/search; independent Photo documents and layer groups, brushes, selections, fills, layer masks and adjustments. The requested nested/blended MP4 and Photo PNG acceptance samples cannot exist until those features are implemented. No such controls or completed samples are claimed.
+## NOT STARTED / exact next work
 
-Animation-specific boundaries: scalar channels only, whole-frame timing, no spatial/path/expression animation, no marquee key selection, speed view displays signed velocity, tangent drags commit to the monitor on release. Very large curve selections have not been performance-certified. Native export still uses browser-decoded frames and FFmpeg libx264, and the general prior release limitations remain.
+Next: parenting and Null controllers with full affine transform composition, cycle prevention and a proper composition layer timeline. Then canvas scale/rotation/anchor handles; multiple Bezier masks and animated feather/expansion/opacity/paths; alpha/luma mattes; 17 blend modes; ordered effect stacks, expanded effects, RGB curves and adjustment layers. Independent Photo documents, painting, selections and layer tools follow the compositor.
 
-Previous milestone: [GPU/media history](docs/HISTORY_GPU.md). Current roadmap: [docs/ROADMAP.md](docs/ROADMAP.md).
+The requested COMPOSITOR_STRESS_TEST and Photo PNG acceptance samples require these missing subsystems. COMPOSITION_FOUNDATION_TEST is a smaller validated slice, not the full stress sample. AI inference, transcription, segmentation, tracking, external APIs, model installation and OS credential implementation remain deferred.
+
+See AI_ARCHITECTURE.md, RENDER_ENGINE.md and docs/ROADMAP.md. Prior state: docs/HISTORY_ANIMATION.md.

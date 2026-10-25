@@ -117,7 +117,7 @@ describe("shared animation engine", () => {
     const copy = JSON.stringify(old),
       p = parseProject(old);
     expect(JSON.stringify(old)).toBe(copy);
-    expect(p.schemaVersion).toBe(2);
+    expect(p.schemaVersion).toBe(3);
     expect(p.clips[0].transform.scaleX).toBe(1);
     expect(p.clips[0].crop.cropLeft).toBe(0);
     p.clips[0].keyframes.rotation = [
@@ -130,7 +130,7 @@ describe("shared animation engine", () => {
     p.clips[0].assetId = null;
     expect(parseProject(p).clips[0].assetId).toBeUndefined();
     p.schemaVersion = 1;
-    expect(parseProject(p).schemaVersion).toBe(2);
+    expect(parseProject(p).schemaVersion).toBe(3);
   });
   it("commands animate all channels, retain values when disabled, undo and reload", () => {
     let p = setup();

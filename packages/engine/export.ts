@@ -21,7 +21,7 @@ export async function exportMp4(
     );
   const snapshot = parseProject(structuredClone(project)),
     path = await invoke<string | null>("begin_export", { project: snapshot });
-  if (!path) return;
+  if (!path) return null;
   const canvas = document.createElement("canvas"),
     renderer = new Compositor(canvas, true, {
       renderer: usePlayback.getState().mode,
@@ -65,6 +65,7 @@ export async function exportMp4(
       path,
       elapsed: (performance.now() - start) / 1000,
     });
+    return path;
   } catch (error) {
     await invoke("cancel_export");
     if (error instanceof DOMException && error.name === "AbortError")
@@ -76,6 +77,7 @@ export async function exportMp4(
         elapsed: (performance.now() - start) / 1000,
       });
     else throw error;
+    return null;
   } finally {
     await renderer.dispose();
   }

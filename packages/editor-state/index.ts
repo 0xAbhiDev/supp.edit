@@ -1,11 +1,22 @@
 import { create } from "zustand";
 import { type Project, newProject } from "../project-schema";
 import { History, type Edit } from "../commands";
+import { compositionView, inComposition } from "../commands/compositions";
 const initialProject = newProject();
 let history = new History(initialProject);
-export type Workspace = "Edit" | "Composite" | "Color" | "Audio" | "Export";
+function validScope(project: Project, activeComposition: string | null) {
+  return activeComposition &&
+    !project.compositions.some((c) => c.id === activeComposition)
+    ? { activeComposition: null, selected: null }
+    : {};
+}
+export type Workspace =
+  "Edit" | "Composite" | "Color" | "Audio" | "Export" | "AI Studio";
 interface State {
   project: Project;
+  activeComposition: string | null;
+  setComposition: (id: string | null) => void;
+  executeScoped: (name: string, edit: Edit) => void;
   selected: string | null;
   source: string | null;
   workspace: Workspace;
@@ -30,6 +41,15 @@ interface State {
 }
 export const useEditor = create<State>((set, get) => ({
   project: initialProject,
+  activeComposition: null,
+  setComposition: (id) =>
+    set({
+      activeComposition:
+        id && get().project.compositions.some((c) => c.id === id) ? id : null,
+      selected: null,
+    }),
+  executeScoped: (name, edit) =>
+    get().execute(name, inComposition(get().activeComposition, edit)),
   selected: null,
   source: null,
   workspace: "Edit",
@@ -54,6 +74,7 @@ export const useEditor = create<State>((set, get) => ({
     if (old === project) return;
     set((s) => ({
       project,
+      ...validScope(project, s.activeComposition),
       dirty: history.currentVersion !== s.savedVersion,
       revision: s.revision + 1,
       historyNames: history.past.map((x) => x.name),
@@ -64,6 +85,7 @@ export const useEditor = create<State>((set, get) => ({
     const project = history.undo(get().project);
     set((s) => ({
       project,
+      ...validScope(project, s.activeComposition),
       dirty: history.currentVersion !== s.savedVersion,
       revision: s.revision + 1,
       historyNames: history.past.map((x) => x.name),
@@ -74,6 +96,7 @@ export const useEditor = create<State>((set, get) => ({
     const project = history.redo(get().project);
     set((s) => ({
       project,
+      ...validScope(project, s.activeComposition),
       dirty: history.currentVersion !== s.savedVersion,
       revision: s.revision + 1,
       historyNames: history.past.map((x) => x.name),
@@ -85,6 +108,7 @@ export const useEditor = create<State>((set, get) => ({
     set((s) => ({
       project,
       path,
+      activeComposition: null,
       savedVersion: dirty ? null : 0,
       dirty,
       selected: null,
@@ -103,8 +127,15 @@ export const useEditor = create<State>((set, get) => ({
     })),
   select: (selected) => set({ selected }),
   setSource: (source) => set({ source }),
-  setWorkspace: (workspace) => set({ workspace }),
+  setWorkspace: (workspace) =>
+    set({
+      workspace,
+      ...(workspace !== "Composite" ? { activeComposition: null } : {}),
+    }),
   report: (e) =>
     set({ error: e instanceof Error ? e.message : String(e), notice: null }),
   inform: (notice) => set({ notice, error: null }),
 }));
+export const editorProject = (
+  s: Pick<State, "project" | "activeComposition">,
+) => compositionView(s.project, s.activeComposition);

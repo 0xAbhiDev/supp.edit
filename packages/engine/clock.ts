@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { useEditor } from "../editor-state";
+import { useEditor, editorProject } from "../editor-state";
 import { duration, fps } from "../project-schema";
 type Snapshot = {
   frame: number;
@@ -34,8 +34,11 @@ class PlaybackClock {
   }
   play(speed = 1) {
     this.pause();
-    if (!duration(useEditor.getState().project)) return;
-    if (this.state.frame >= duration(useEditor.getState().project) && speed > 0)
+    if (!duration(editorProject(useEditor.getState()))) return;
+    if (
+      this.state.frame >= duration(editorProject(useEditor.getState())) &&
+      speed > 0
+    )
       this.seek(0);
     this.last = performance.now();
     this.emit({ playing: true, speed });
@@ -48,7 +51,7 @@ class PlaybackClock {
     this.emit({ loop: !this.state.loop });
   }
   private tick = (now: number) => {
-    const p = useEditor.getState().project,
+    const p = editorProject(useEditor.getState()),
       end = duration(p);
     this.fraction +=
       Math.min(0.25, (now - this.last) / 1000) * fps(p) * this.state.speed;

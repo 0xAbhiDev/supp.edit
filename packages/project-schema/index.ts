@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { transcriptSchema } from "../ai/transcript";
 
 const finite = z.number().finite();
 const frame = finite.int().min(0).max(2_000_000_000);
@@ -61,7 +62,8 @@ export const clipSchema = z.object({
   trackId: id,
   // Older native saves serialized Option::None as null for generated layers.
   assetId: z.preprocess((v) => (v === null ? undefined : v), id.optional()),
-  kind: z.enum(["media", "text", "shape"]),
+  kind: z.enum(["media", "text", "shape", "composition", "null"]),
+  compositionId: id.optional(),
   name: z.string().max(1024),
   start: frame,
   duration: frame.min(1),
@@ -127,8 +129,32 @@ export const trackSchema = z.object({
   muted: z.boolean(),
   solo: z.boolean(),
 });
+export const settingsSchema = z.object({
+  width: finite.int().min(64).max(8192),
+  height: finite.int().min(64).max(8192),
+  fps: z
+    .object({
+      num: finite.int().min(1).max(120000),
+      den: finite.int().min(1).max(10000),
+    })
+    .refine(
+      (v) => v.num / v.den >= 1 && v.num / v.den <= 120,
+      "Frame rate must be 1–120",
+    ),
+  colorSpace: z.literal("srgb"),
+});
+export const compositionSchema = z.object({
+  id,
+  name: z.string().min(1).max(256),
+  settings: settingsSchema,
+  duration: frame.min(1),
+  background: z.string().regex(/^(transparent|#[0-9a-fA-F]{6})$/),
+  tracks: z.array(trackSchema).min(1).max(1000),
+  layers: z.array(clipSchema).max(100000),
+});
+export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(2),
+  schemaVersion: z.literal(3),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -150,54 +176,142 @@ const projectBase = z.object({
   assets: z.array(assetSchema).max(100000),
   tracks: z.array(trackSchema).min(1).max(1000),
   clips: z.array(clipSchema).max(100000),
+  compositions: z.array(compositionSchema).max(64).default([]),
+  transcripts: z.array(transcriptSchema).max(10000).default([]),
   markers: z
     .array(z.object({ id, frame, name: z.string().max(256) }))
     .max(100000),
 });
 export const projectSchema = projectBase.superRefine((p, ctx) => {
-  for (const list of [p.assets, p.tracks, p.clips, p.markers])
+  const scopes = [
+    { settings: p.settings, tracks: p.tracks, layers: p.clips },
+    ...p.compositions,
+  ];
+  const allLayers = scopes.flatMap((s) => s.layers);
+  if (allLayers.length > 100000)
+    ctx.addIssue({ code: "custom", message: "Project layer limit exceeded" });
+  for (const list of [
+    [
+      { id: p.id },
+      ...p.assets,
+      ...scopes.flatMap((s) => s.tracks),
+      ...allLayers,
+      ...p.markers,
+      ...p.compositions,
+      ...p.transcripts,
+    ],
+  ])
     if (new Set(list.map((x) => x.id)).size !== list.length)
       ctx.addIssue({
         code: "custom",
         message: "Duplicate IDs in project graph",
       });
-  for (const c of p.clips) {
-    const track = p.tracks.find((t) => t.id === c.trackId),
-      asset = p.assets.find((a) => a.id === c.assetId);
-    if (!track || (c.kind === "media" && !asset))
-      ctx.addIssue({
-        code: "custom",
-        message: `Broken reference on clip ${c.name}`,
-      });
-    if (
-      track?.kind === "audio" &&
-      (c.kind !== "media" || asset?.kind !== "audio")
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "Audio tracks only accept audio assets",
-      });
-    if (track?.kind === "video" && asset?.kind === "audio")
-      ctx.addIssue({
-        code: "custom",
-        message: "Audio assets require an audio track",
-      });
-    if (
-      asset &&
-      asset.kind !== "image" &&
-      c.sourceIn + c.duration >
-        Math.ceil((asset.duration * p.settings.fps.num) / p.settings.fps.den) +
-          1
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: `Clip exceeds source duration: ${c.name}`,
-      });
-    for (const keys of Object.values(c.keyframes)) {
-      if (new Set(keys.map((k) => k.frame)).size !== keys.length)
-        ctx.addIssue({ code: "custom", message: "Duplicate keyframe times" });
+  for (const scope of scopes)
+    for (const c of scope.layers) {
+      if (
+        c.start + c.duration > 2_000_000_000 ||
+        (c.kind !== "media" && c.assetId)
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "Invalid layer timing or source",
+        });
+      const track = scope.tracks.find((t) => t.id === c.trackId),
+        asset = p.assets.find((a) => a.id === c.assetId);
+      if (c.kind === "composition") {
+        const comp = p.compositions.find((x) => x.id === c.compositionId);
+        if (
+          !comp ||
+          (c.sourceIn + c.duration) /
+            (scope.settings.fps.num / scope.settings.fps.den) >
+            comp.duration / (comp.settings.fps.num / comp.settings.fps.den) +
+              1e-8
+        )
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "Missing composition or layer exceeds composition duration",
+          });
+      } else if (c.compositionId)
+        ctx.addIssue({
+          code: "custom",
+          message: "Only composition layers can reference a composition",
+        });
+      if (!track || (c.kind === "media" && !asset))
+        ctx.addIssue({
+          code: "custom",
+          message: `Broken reference on clip ${c.name}`,
+        });
+      if (
+        track?.kind === "audio" &&
+        (c.kind !== "media" || asset?.kind !== "audio")
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "Audio tracks only accept audio assets",
+        });
+      if (track?.kind === "video" && asset?.kind === "audio")
+        ctx.addIssue({
+          code: "custom",
+          message: "Audio assets require an audio track",
+        });
+      if (
+        asset &&
+        asset.kind !== "image" &&
+        c.sourceIn + c.duration >
+          Math.ceil(
+            (asset.duration * scope.settings.fps.num) / scope.settings.fps.den,
+          ) +
+            1
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: `Clip exceeds source duration: ${c.name}`,
+        });
+      for (const keys of Object.values(c.keyframes)) {
+        if (new Set(keys.map((k) => k.frame)).size !== keys.length)
+          ctx.addIssue({ code: "custom", message: "Duplicate keyframe times" });
+      }
     }
-  }
+  for (const t of p.transcripts)
+    if (t.assetId && !p.assets.some((a) => a.id === t.assetId))
+      ctx.addIssue({
+        code: "custom",
+        message: "Transcript references missing asset",
+      });
+  const done = new Map<string, number>();
+  const visit = (id: string, path: Set<string>): number => {
+    if (path.has(id)) {
+      ctx.addIssue({ code: "custom", message: "Cyclic composition reference" });
+      return 17;
+    }
+    if (done.has(id)) return done.get(id)!;
+    if (path.size >= 16) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Composition nesting exceeds 16 levels",
+      });
+      return 17;
+    }
+    const next = new Set(path).add(id),
+      comp = p.compositions.find((c) => c.id === id);
+    const depth =
+      1 +
+      Math.max(
+        0,
+        ...(comp?.layers
+          .filter((c) => c.kind === "composition")
+          .map((c) => visit(c.compositionId!, next)) ?? []),
+      );
+    done.set(id, depth);
+    return depth;
+  };
+  for (const c of p.compositions)
+    if (visit(c.id, new Set()) > 16)
+      ctx.addIssue({
+        code: "custom",
+        message: "Composition nesting exceeds 16 levels",
+      });
 });
 export type Project = z.infer<typeof projectBase>;
 export type Asset = z.infer<typeof assetSchema>;
@@ -208,7 +322,8 @@ export type AnimatedProperty = keyof Clip["keyframes"];
 export const uid = () => crypto.randomUUID();
 export const fps = (p: Project) => p.settings.fps.num / p.settings.fps.den;
 export const duration = (p: Project) =>
-  Math.max(0, ...p.clips.map((c) => c.start + c.duration));
+  p.compositions.find((c) => c.layers === p.clips)?.duration ??
+  p.clips.reduce((end, c) => Math.max(end, c.start + c.duration), 0);
 export function newProject(
   name = "Untitled project",
   width = 1920,
@@ -217,7 +332,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     id: uid(),
     name,
     createdAt: now,
@@ -226,6 +341,8 @@ export function newProject(
     assets: [],
     tracks: [newTrack("video", 1), newTrack("audio", 1)],
     clips: [],
+    compositions: [],
+    transcripts: [],
     markers: [],
   };
 }
@@ -291,12 +408,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (input.schemaVersion !== 1 && input.schemaVersion !== 2)
+  if (![1, 2, 3].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–2. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–3. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 2 });
+  return projectSchema.parse({ ...input, schemaVersion: 3 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

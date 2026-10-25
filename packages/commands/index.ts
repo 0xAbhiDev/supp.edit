@@ -12,6 +12,7 @@ import {
   type AnimatedProperty,
   fps,
   uid,
+  newTrack,
 } from "../project-schema";
 enablePatches();
 export {
@@ -87,6 +88,21 @@ export class History {
 export function editable(p: Project, clipId: string) {
   const c = p.clips.find((c) => c.id === clipId);
   return c && !p.tracks.find((t) => t.id === c.trackId)?.locked ? c : undefined;
+}
+export function duplicateClip(id: string): Edit {
+  return (p) => {
+    const c = editable(p, id);
+    if (!c) return;
+    const track = p.tracks.find((t) => t.id === c.trackId)!;
+    const copy = structuredClone(current(c));
+    copy.id = uid();
+    copy.name += " copy";
+    const nextTrack = newTrack(track.kind, p.tracks.length + 1);
+    nextTrack.name = copy.name;
+    p.tracks.splice(p.tracks.indexOf(track), 0, nextTrack);
+    copy.trackId = nextTrack.id;
+    p.clips.push(copy);
+  };
 }
 export { evaluate, animated } from "../animation";
 import { propertyValue } from "../animation";

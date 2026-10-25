@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useEditor } from "../../../packages/editor-state";
+import { useEditor, editorProject } from "../../../packages/editor-state";
 import { fps } from "../../../packages/project-schema";
 import { clock } from "../../../packages/engine/clock";
 import { splitClip, deleteClip } from "../../../packages/commands";
@@ -331,13 +331,13 @@ export function useWorkspaceSession() {
         clock.seek(
           clock.get().frame +
             (e.key === "ArrowRight" ? 1 : -1) *
-              (e.shiftKey ? Math.round(fps(s.project)) : 1),
+              (e.shiftKey ? Math.round(fps(editorProject(s))) : 1),
         );
       } else if (key === "s" && s.selected)
-        s.execute("Split clip", splitClip(s.selected, clock.get().frame));
+        s.executeScoped("Split clip", splitClip(s.selected, clock.get().frame));
       else if ((e.key === "Delete" || e.key === "Backspace") && s.selected) {
         e.preventDefault();
-        s.execute("Delete clip", deleteClip(s.selected, e.shiftKey));
+        s.executeScoped("Delete clip", deleteClip(s.selected, e.shiftKey));
       }
     };
     window.addEventListener("keydown", key);
@@ -397,7 +397,10 @@ export function useWorkspaceSession() {
       run: () => {
         const s = useEditor.getState();
         if (s.selected)
-          s.execute("Split clip", splitClip(s.selected, clock.get().frame));
+          s.executeScoped(
+            "Split clip",
+            splitClip(s.selected, clock.get().frame),
+          );
       },
     },
     {

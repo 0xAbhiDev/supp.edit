@@ -7,7 +7,7 @@ import {
   Lock,
   Trash2,
 } from "lucide-react";
-import { useEditor } from "../../../packages/editor-state";
+import { useEditor, editorProject } from "../../../packages/editor-state";
 import {
   setProperty,
   toggleKeyframe,
@@ -23,9 +23,9 @@ import {
 import { useClock } from "../../../packages/engine/clock";
 import { Section, NumberField, IconButton } from "./Controls";
 export function Inspector() {
-  const project = useEditor((s) => s.project),
+  const project = useEditor(editorProject),
     id = useEditor((s) => s.selected),
-    execute = useEditor((s) => s.execute),
+    execute = useEditor((s) => s.executeScoped),
     workspace = useEditor((s) => s.workspace),
     history = useEditor((s) => s.historyNames),
     { frame } = useClock();

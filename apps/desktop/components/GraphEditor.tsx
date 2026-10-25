@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { produce } from "immer";
-import { useEditor } from "../../../packages/editor-state";
+import { useEditor, editorProject } from "../../../packages/editor-state";
 import { clock, useClock } from "../../../packages/engine/clock";
 import {
   properties,
@@ -48,7 +48,7 @@ type Drag =
   | { kind: "pan"; x: number; y: number; view: View };
 
 export function GraphEditor() {
-  const project = useEditor((s) => s.project),
+  const project = useEditor(editorProject),
     selected = useEditor((s) => s.selected);
   const clip = project.clips.find((c) => c.id === selected);
   return (
@@ -85,8 +85,8 @@ export function GraphEditor() {
   );
 }
 function Curves({ clip }: { clip: Clip }) {
-  const project = useEditor((s) => s.project),
-    execute = useEditor((s) => s.execute);
+  const project = useEditor(editorProject),
+    execute = useEditor((s) => s.executeScoped);
   const locked = !!project.tracks.find((t) => t.id === clip.trackId)?.locked;
   const [visible, setVisible] = useState<AnimatedProperty[]>(["x"]),
     [primary, setPrimary] = useState<AnimatedProperty>("x");
@@ -677,7 +677,7 @@ function Curves({ clip }: { clip: Clip }) {
                         "Move keyframe",
                         moveKeys(clip.id, selection, f - selectedKey.frame),
                       );
-                      if (useEditor.getState().project !== project)
+                      if (editorProject(useEditor.getState()) !== project)
                         setSelected([{ ...selection[0], frame: f }]);
                     }
                   }}

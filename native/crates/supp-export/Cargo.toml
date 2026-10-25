@@ -6,3 +6,5 @@ edition.workspace = true
 supp-project = { path = "../supp-project" }
 supp-media = { path = "../supp-media" }
 tempfile.workspace = true
+[dev-dependencies]
+serde_json.workspace = true

@@ -1,19 +1,29 @@
-# Animation validation — 24 October 2026
+# Foundation validation — 25 October 2026
 
-- 39 TypeScript tests and seven Rust tests, including all interpolation modes, cubic time inversion, monotonic auto tangents, continuous slope linking, commands, collisions, locks, history, split continuity, domain limits and v1/v2 migration.
-- TypeScript and production Vite build pass; workspace Clippy passes with warnings denied.
-- 14 browser cases cover existing editing, cache behavior, graph interactions, tangent edits, multi-selection/copy/paste/duplicate/delete, numeric editing, undo/redo, save/reopen, shader parity and export. One old locator required exact matching because Gaussian blur now has an adjacent keyframe button; the behavior was unchanged.
-- The graph screenshot was visually reviewed for usable controls, plotted data and monitor output. Curve generation in that sample was about 2 ms; this is an observation, not large-project certification.
-- Actual [MDN flower video](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/video): 960×540 H.264, 29.97 fps; silent AAC. Baseline edit exports passed before implementation.
-- Animation sample: 320×180, 30 fps, 60 frames. GPU/CPU MAE 1.161, 1.048, 1.222/255. All pre/post-reopen PNG frames are byte-identical. Both H.264/AAC outputs pass decoded frame comparisons (1.27–2.66/255). Headless GPU is SwiftShader; physical GPU performance is not inferred.
-- Sample deliberately contains only implemented features: real MP4, animated title/position/scales/rotation/anchor/crop, Bezier, simple mask and animated blur/color. Nested compositions/blends and the Photo sample remain pending.
+## Automated checks
+
+- 54 TypeScript tests: previous animation/editing tests plus composition migration, scoped history, cycles, mixed-rate timing, audio-solo visibility, removed-scope recovery, AI result validation, stale Apply rejection, privacy consent binding and job lifecycle.
+- 10 Rust tests: project validation/migration, composition/transcript roundtrip, media tests, nested audio timing/source offsets/gain and ancestor mute/solo.
+- Strict TypeScript and production Vite build; workspace Clippy with warnings denied.
+- All 18 Chromium integration cases passed. Four foundation cases exercise AI captions, composition commands/animation/history, nested render/reopen parity and a bounded 1080p profile. Targeted caption/composition UI tests were rerun after final edge-case fixes.
+- The first targeted caption rerun timed out loading the development page before interaction while the native build was running. An isolated rerun passed in 48.7 seconds; no application error was reported. The final keyboard-scoping correction uses the active composition rate for one-second stepping and was checked by the production build.
+- GPU/Canvas comparison of the two-level sample at frames 0/30/59: RGBA mean absolute error 0.2969 / 0.3136 / 0.3018 out of 255; WebGL2 without fallback. All 60 PNG frames are byte-identical after save/reopen.
+- Native CLI MP4: H.264/AAC, 320×180, 30 fps, 60 frames, 2 seconds. Decoded RGB errors 2.8650 / 3.0328 / 3.4634 out of 255. Source AAC is silent; decoded output RMS is zero. Nested audible timing/gain is separately covered by native unit tests.
+
+## Performance boundary
+
+Headless ANGLE/SwiftShader software renderer: ten root visual layers including one nested title, real MP4, animated shapes, simple masks and existing blur/color effects at 1920×1080. Fifteen sequential renders averaged 3,438 ms/frame (range 2,851–3,993 ms). This is not real-time playback or a physical GPU benchmark.
+
+Composition surfaces: 8,294,400 bytes; source textures: 27,266,672; frame cache: 31,104,000. Rendering an empty graph released all composition surfaces. These counters exclude driver/webview allocations. A two-second playback probe was shorter than a rendered frame, so its displayed dropped-frame value is inconclusive.
 
 ## Native packaged acceptance
 
-The embedded Windows executable launches successfully. Windows Computer Use exercised native Open, real MP4 playback, Composite layer/graph display, Save, the MP4 Save As dialog and export completion. Native save preserves all Bezier handles, and reopening that native save restores the rendered sample. The 320×180/60-frame native UI export is H.264/AAC, 2 seconds, silence RMS 0, with decoded RGB MAE 1.412/1.986/2.989 against browser reference frames. This exposed and fixed legacy null asset IDs for generated layers; native serde now omits absent IDs and the frontend accepts legacy nulls. The 16-group browser control audit also passes.
+The pre-final-fix foundation executable launched and rendered the nested real-footage/title/shape sample in the native monitor. Computer Use was stopped with the physical Escape key before final open/play/save/reopen/export and AI UI checks. No further UI automation was performed. The refreshed binary is built, but its complete native UI acceptance remains pending. Browser workflows and native CLI encoding do not substitute for that check. Earlier animation UI evidence remains in VALIDATION_ANIMATION.md.
 
-Native dialogs now have a smoke check, but cancellation, all codecs, installer/signing, long/VFR/4K playback and other platforms remain unverified. Unavailable-tool notes in the archived record apply to the previous milestone. The new scalar animation subsystem does not complete composition nesting, advanced masks, mattes/blends, ordered effects or Photo.
+## Evidence and gaps
 
----
+../verification/foundation contains COMPOSITION_FOUNDATION_TEST.supp, source footage, rendered MP4, screenshots and measurement reports. It covers only implemented nesting, animation, masks and basic effects. No full COMPOSITOR_STRESS_TEST or Photo acceptance is claimed.
 
-Previous milestone results: [VALIDATION_GPU.md](VALIDATION_GPU.md).
+Physical-GPU performance, long/VFR/4K media, native export cancellation during finalization, broad codecs, installer/signing and other operating systems remain unverified. Cloud and model inference have no executor to test. Current captions run locally without network access.
+
+Historical records: VALIDATION_ANIMATION.md and VALIDATION_GPU.md.
