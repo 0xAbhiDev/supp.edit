@@ -25,6 +25,12 @@ import {
 } from "../../../packages/commands";
 import { IconButton } from "./Controls";
 import { usePlayback } from "../../../packages/engine/diagnostics";
+import {
+  canvasMatrix,
+  inverse,
+  layerTransforms,
+  point,
+} from "../../../packages/animation/affine";
 export function Monitor({
   onImport,
   onCanvas,
@@ -178,12 +184,26 @@ export function Monitor({
       frame = clock.get().frame,
       t = animated(c, frame),
       target = e.currentTarget;
-    target.setPointerCapture(e.pointerId);
-    const update = (event: PointerEvent) => {
+    let basis;
+    try {
+      basis = inverse(layerTransforms(project, frame).basis(c.id));
+    } catch (error) {
+      useEditor.getState().report(error);
+      return;
+    }
+    const offset = (event: PointerEvent) => {
       const dx =
           ((event.clientX - startX) * project.settings.width) / bounds.width,
         dy =
           ((event.clientY - startY) * project.settings.height) / bounds.height;
+      return {
+        dx: basis[0] * dx + basis[2] * dy,
+        dy: basis[1] * dx + basis[3] * dy,
+      };
+    };
+    target.setPointerCapture(e.pointerId);
+    const update = (event: PointerEvent) => {
+      const { dx, dy } = offset(event);
       target.setAttribute(
         "data-moving",
         `${Math.round(dx)}, ${Math.round(dy)}`,
@@ -192,11 +212,9 @@ export function Monitor({
     const done = (event: PointerEvent) => {
       target.removeEventListener("pointermove", update as EventListener);
       target.removeEventListener("pointerup", done as EventListener);
+      target.removeEventListener("pointercancel", cancel as EventListener);
       target.removeAttribute("data-moving");
-      const dx =
-          ((event.clientX - startX) * project.settings.width) / bounds.width,
-        dy =
-          ((event.clientY - startY) * project.settings.height) / bounds.height;
+      const { dx, dy } = offset(event);
       if (Math.abs(dx) + Math.abs(dy) > 1)
         useEditor.getState().executeScoped("Move layer on canvas", (p) => {
           setTransform(
@@ -213,8 +231,17 @@ export function Monitor({
           )(p);
         });
     };
+    const cancel = () => {
+      target.removeEventListener("pointermove", update as EventListener);
+      target.removeEventListener("pointerup", done as EventListener);
+      target.removeEventListener("pointercancel", cancel as EventListener);
+      target.removeAttribute("data-moving");
+    };
     target.addEventListener("pointermove", update as EventListener);
     target.addEventListener("pointerup", done as EventListener, { once: true });
+    target.addEventListener("pointercancel", cancel as EventListener, {
+      once: true,
+    });
   }
   return (
     <section className="monitor panel">
@@ -238,6 +265,7 @@ export function Monitor({
           onPointerDown={move}
         >
           <canvas ref={canvas} aria-label="Program monitor" />
+          <ControllerOverlay />
           {safe && <div className="safe-guides" />}
           {!project.clips.length && (
             <div className="monitor-empty">
@@ -303,6 +331,76 @@ export function Monitor({
       </div>
     </section>
   );
+}
+function ControllerOverlay() {
+  const project = useEditor(editorProject),
+    selected = useEditor((s) => s.selected),
+    workspace = useEditor((s) => s.workspace),
+    { frame } = useClock();
+  const clip = project.clips.find((c) => c.id === selected);
+  if (workspace !== "Composite" || !clip) return null;
+  try {
+    const transforms = layerTransforms(project, frame),
+      matrix = canvasMatrix(project, transforms.world(clip.id));
+    const t = animated(clip, frame);
+    const origin = point(matrix, t.anchorX, t.anchorY);
+    const parent = clip.parentId
+      ? point(canvasMatrix(project, transforms.world(clip.parentId)), 0, 0)
+      : null;
+    return (
+      <svg
+        aria-label="Layer controller overlay"
+        viewBox={`0 0 ${project.settings.width} ${project.settings.height}`}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          pointerEvents: "none",
+          overflow: "visible",
+        }}
+      >
+        {parent && (
+          <line
+            x1={origin.x}
+            y1={origin.y}
+            x2={parent.x}
+            y2={parent.y}
+            stroke="#c3f96b"
+            strokeDasharray="5 4"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {clip.kind === "null" && (
+          <g
+            transform={`matrix(${matrix.join(" ")})`}
+            stroke="#c3f96b"
+            fill="none"
+            strokeWidth="1.5"
+          >
+            <rect
+              x="-25"
+              y="-25"
+              width="50"
+              height="50"
+              vectorEffect="non-scaling-stroke"
+            />
+            <path d="M-35 0H35M0 -35V35" vectorEffect="non-scaling-stroke" />
+          </g>
+        )}
+        <circle
+          cx={origin.x}
+          cy={origin.y}
+          r={Math.max(project.settings.width / 200, 2)}
+          fill="none"
+          stroke="#c3f96b"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    );
+  } catch {
+    return null;
+  }
 }
 function RendererLabel() {
   const renderer = usePlayback((s) => s.renderer),

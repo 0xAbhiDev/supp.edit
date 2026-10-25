@@ -1,19 +1,25 @@
 import type { Clip, Project } from "../project-schema";
 import { resolveClip } from "../animation";
+import {
+  canvasMatrix,
+  identity,
+  inverse,
+  localMatrix,
+  matrix3,
+  multiply,
+  type Affine,
+} from "../animation/affine";
 import { LruCache } from "./lru";
 
 const vertex = `#version 300 es
 in vec2 a_position;
 uniform vec2 u_output;
 uniform vec4 u_rect;
-uniform vec4 u_transform;
-uniform vec4 u_axes;
+uniform mat3 u_matrix;
 out vec2 v_uv;
 void main(){
   v_uv=a_position;
-  vec2 local=(u_rect.xy+a_position*u_rect.zw-u_axes.zw)*u_axes.xy;
-  float cs=cos(u_transform.z),sn=sin(u_transform.z);
-  vec2 position=vec2(cs*local.x-sn*local.y,sn*local.x+cs*local.y)*u_transform.w+u_transform.xy;
+  vec2 position=(u_matrix*vec3(u_rect.xy+a_position*u_rect.zw,1.0)).xy;
   gl_Position=vec4(position.x/u_output.x*2.0-1.0,1.0-position.y/u_output.y*2.0,0,1);
 }`;
 const fragment = `#version 300 es
@@ -24,9 +30,8 @@ uniform vec2 u_output;
 uniform vec2 u_direction;
 uniform float u_sigma;
 uniform vec4 u_color;
-uniform vec4 u_maskTransform;
+uniform mat3 u_inverse;
 uniform vec4 u_mask;
-uniform vec4 u_maskAxes;
 uniform vec4 u_crop;
 uniform int u_maskType;
 uniform float u_opacity;
@@ -51,9 +56,7 @@ void main(){
   rgb=mix(vec3(luminance),rgb,u_color.z);
   float mask=1.0;
   {
-    vec2 offset=v_uv*u_project-u_maskTransform.xy;
-    float cs=cos(u_maskTransform.z),sn=sin(u_maskTransform.z);
-    vec2 local=vec2(cs*offset.x+sn*offset.y,-sn*offset.x+cs*offset.y)/(u_maskTransform.w*u_maskAxes.xy)+u_maskAxes.zw;
+    vec2 local=(u_inverse*vec3(v_uv*u_project,1.0)).xy;
     vec2 uv=local/u_project+0.5;
     mask=float(all(greaterThanEqual(uv,u_crop.xy))&&all(lessThanEqual(uv,vec2(1)-u_crop.zw)));
     if(u_maskType>0){
@@ -248,8 +251,7 @@ export class GpuRenderer {
   private full() {
     const gl = this.gl;
     gl.uniform4f(this.uniform("u_rect"), 0, 0, this.width, this.height);
-    gl.uniform4f(this.uniform("u_transform"), 0, 0, 0, 1);
-    gl.uniform4f(this.uniform("u_axes"), 1, 1, 0, 0);
+    gl.uniformMatrix3fv(this.uniform("u_matrix"), false, matrix3(identity()));
   }
   private generated(p: Project, c: Clip): Generated {
     const key = JSON.stringify([
@@ -315,7 +317,14 @@ export class GpuRenderer {
     this.generators.set(key, value, canvas.width * canvas.height * 4);
     return value;
   }
-  draw(p: Project, c: Clip, frame: number, source?: CanvasImageSource) {
+  draw(
+    p: Project,
+    c: Clip,
+    frame: number,
+    source?: CanvasImageSource,
+    world?: Affine,
+  ) {
+    const matrix = canvasMatrix(p, world ?? localMatrix(c, frame));
     c = resolveClip(c, frame);
     const gl = this.gl,
       t = c.transform,
@@ -399,26 +408,11 @@ export class GpuRenderer {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform1i(this.uniform("u_pass"), 0);
-    gl.uniform4f(
-      this.uniform("u_rect"),
-      left * scale,
-      top * scale,
-      width * scale,
-      height * scale,
-    );
-    gl.uniform4f(
-      this.uniform("u_transform"),
-      (p.settings.width / 2 + t.x) * scale,
-      (p.settings.height / 2 + t.y) * scale,
-      (t.rotation * Math.PI) / 180,
-      t.scale,
-    );
-    gl.uniform4f(
-      this.uniform("u_axes"),
-      t.scaleX,
-      t.scaleY,
-      t.anchorX * scale,
-      t.anchorY * scale,
+    gl.uniform4f(this.uniform("u_rect"), left, top, width, height);
+    gl.uniformMatrix3fv(
+      this.uniform("u_matrix"),
+      false,
+      matrix3(multiply([scale, 0, 0, scale, 0, 0], matrix)),
     );
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     if (c.effects.blur > 0) {
@@ -448,12 +442,10 @@ export class GpuRenderer {
       0,
     );
     gl.uniform1f(this.uniform("u_opacity"), t.opacity);
-    gl.uniform4f(
-      this.uniform("u_maskAxes"),
-      t.scaleX,
-      t.scaleY,
-      t.anchorX,
-      t.anchorY,
+    gl.uniformMatrix3fv(
+      this.uniform("u_inverse"),
+      false,
+      matrix3(inverse(matrix)),
     );
     gl.uniform4f(
       this.uniform("u_crop"),
@@ -480,13 +472,6 @@ export class GpuRenderer {
         c.mask.width * p.settings.width,
         c.mask.height * p.settings.height,
       );
-    gl.uniform4f(
-      this.uniform("u_maskTransform"),
-      p.settings.width / 2 + t.x,
-      p.settings.height / 2 + t.y,
-      (t.rotation * Math.PI) / 180,
-      t.scale,
-    );
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     const error = gl.getError();
     if (error !== gl.NO_ERROR) throw new Error(`GPU rendering error ${error}`);

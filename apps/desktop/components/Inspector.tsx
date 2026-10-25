@@ -1,4 +1,9 @@
 import { propertyValue } from "../../../packages/animation";
+import { useState } from "react";
+import {
+  parentCandidates,
+  setParent,
+} from "../../../packages/commands/parenting";
 import {
   Diamond,
   SlidersHorizontal,
@@ -23,6 +28,7 @@ import {
 import { useClock } from "../../../packages/engine/clock";
 import { Section, NumberField, IconButton } from "./Controls";
 export function Inspector() {
+  const [preserveWorld, setPreserveWorld] = useState(true);
   const project = useEditor(editorProject),
     id = useEditor((s) => s.selected),
     execute = useEditor((s) => s.executeScoped),
@@ -147,6 +153,54 @@ export function Inspector() {
           {timecode(clip.start + clip.duration, fps(project))}
         </div>
         <fieldset disabled={!!locked}>
+          {project.tracks.find((t) => t.id === clip.trackId)?.kind ===
+            "video" && (
+            <Section title="Parent & controller">
+              <label>
+                Parent layer
+                <select
+                  aria-label="Parent layer"
+                  value={clip.parentId ?? ""}
+                  onChange={(e) =>
+                    execute(
+                      "Change layer parent",
+                      setParent(
+                        clip.id,
+                        e.target.value || null,
+                        frame,
+                        preserveWorld,
+                      ),
+                    )
+                  }
+                >
+                  <option value="">None</option>
+                  {parentCandidates(project, clip.id).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} · {c.kind}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={preserveWorld}
+                  onChange={(e) => setPreserveWorld(e.target.checked)}
+                />{" "}
+                Keep current appearance
+              </label>
+              {clip.kind === "null" && (
+                <p className="field-hint">
+                  Animate this controller to move its children. Its outline is
+                  visible only while editing.
+                </p>
+              )}
+              <p className="field-hint">
+                Parent transforms are inherited. Visibility and opacity stay
+                independent.
+              </p>
+            </Section>
+          )}
           {clip.kind === "text" && (
             <Section title="Typography">
               <textarea

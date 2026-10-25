@@ -1,6 +1,6 @@
-# Project format v3
+# Project format v4
 
-`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 3`. Both readers accept v1, v2 and v3 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Migration also fills empty compositions and transcripts. Shared fixtures cover all three versions.
+`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 4`. Both readers accept v1, v2, v3 and v4 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Migration also fills empty compositions and transcripts. Shared fixtures cover all four versions.
 
 Root fields: `id`, `name`, `createdAt`, `modifiedAt` (UTC ISO timestamps), `settings`, `assets`, `tracks`, `clips`, `markers`, `compositions`, `transcripts`. Settings store width/height, `{num, den}` FPS, and `colorSpace: "srgb"`.
 
@@ -25,3 +25,5 @@ Crop edges are normalized in the same project-sized local coordinate system as e
 A Composition has globally unique id, name, settings, duration, background (transparent or hex RGB), tracks and layers. Clips of kind composition reference compositionId; null clips render no pixels. Child timing uses (parentFrame - start + sourceIn) / parentFPS * childFPS, retaining fractional frames. Source-in and clip duration are in the containing scope's frame rate. Cycles, missing sources and source overruns fail validation. Limits: 64 definitions, 16 levels, 100,000 layers total; rendering adds expansion/memory budgets.
 
 Transcripts contain id, name, source (srt or transcription), optional language/assetId and ordered segments with id, startMs, endMs and text. Timestamps are integer milliseconds. SRT captions persist ordinary text clips and a caption track in the main sequence. No media buffers, AI model files, job state, provider credentials or cloud-consent tokens belong in project JSON. See ../AI_ARCHITECTURE.md for safe execution contracts.
+
+Parenting: optional parentId names a visual clip in the same scope. parentOffset defaults to [1,0,0,1,0,0] and is a finite affine matrix with each component bounded to ±1e9. The matrix preserves shear when reparenting/unparenting. Maximum 64 parent links, with cycles/self/missing/cross-scope/audio parents rejected. Parent opacity/visibility/effects are independent of children.

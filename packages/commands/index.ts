@@ -13,6 +13,7 @@ import {
   fps,
   uid,
   newTrack,
+  assertParenting,
 } from "../project-schema";
 enablePatches();
 export {
@@ -49,6 +50,7 @@ export class History {
       this.versions.set(project, this.currentVersion);
     const [next, forward, inverse] = produceWithPatches(project, edit);
     if (!forward.length) return project;
+    assertParenting(next);
     const modifiedAt = new Date().toISOString();
     forward.push({ op: "replace", path: ["modifiedAt"], value: modifiedAt });
     inverse.unshift({
@@ -134,8 +136,16 @@ export function trimClip(id: string, edge: "in" | "out", target: number): Edit {
     const c = editable(p, id);
     if (!c) return;
     const asset = p.assets.find((a) => a.id === c.assetId);
-    const max =
-      asset && asset.kind !== "image"
+    const composition =
+      c.kind === "composition"
+        ? p.compositions.find((x) => x.id === c.compositionId)
+        : undefined;
+    const max = composition
+      ? Math.floor(
+          (composition.duration * fps(p) * composition.settings.fps.den) /
+            composition.settings.fps.num,
+        )
+      : asset && asset.kind !== "image"
         ? Math.floor(asset.duration * fps(p))
         : 2_000_000_000;
     if (edge === "out") {
@@ -174,6 +184,8 @@ export function deleteClip(id: string, ripple = false): Edit {
   return (p) => {
     const c = editable(p, id);
     if (!c) return;
+    if (p.clips.some((child) => child.parentId === id))
+      throw new Error("Unparent child layers before deleting their controller");
     if (ripple)
       for (const other of p.clips)
         if (other.trackId === c.trackId && other.start >= c.start + c.duration)

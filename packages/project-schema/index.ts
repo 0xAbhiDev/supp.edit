@@ -64,6 +64,17 @@ export const clipSchema = z.object({
   assetId: z.preprocess((v) => (v === null ? undefined : v), id.optional()),
   kind: z.enum(["media", "text", "shape", "composition", "null"]),
   compositionId: id.optional(),
+  parentId: id.optional(),
+  parentOffset: z
+    .tuple([
+      finite.min(-1e9).max(1e9),
+      finite.min(-1e9).max(1e9),
+      finite.min(-1e9).max(1e9),
+      finite.min(-1e9).max(1e9),
+      finite.min(-1e9).max(1e9),
+      finite.min(-1e9).max(1e9),
+    ])
+    .default([1, 0, 0, 1, 0, 0]),
   name: z.string().max(1024),
   start: frame,
   duration: frame.min(1),
@@ -154,7 +165,7 @@ export const compositionSchema = z.object({
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(3),
+  schemaVersion: z.literal(4),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -188,6 +199,14 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
     ...p.compositions,
   ];
   const allLayers = scopes.flatMap((s) => s.layers);
+  try {
+    assertParenting(p);
+  } catch (error) {
+    ctx.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
   if (allLayers.length > 100000)
     ctx.addIssue({ code: "custom", message: "Project layer limit exceeded" });
   for (const list of [
@@ -319,6 +338,38 @@ export type Clip = z.infer<typeof clipSchema>;
 export type Track = z.infer<typeof trackSchema>;
 export type Keyframe = z.infer<typeof keyframeSchema>;
 export type AnimatedProperty = keyof Clip["keyframes"];
+/** Runs at every history boundary, including NLE edits that might remove parents. */
+export function assertParenting(project: Project) {
+  for (const scope of [
+    { layers: project.clips, tracks: project.tracks },
+    ...project.compositions,
+  ]) {
+    const clips = new Map(scope.layers.map((c) => [c.id, c]));
+    const visual = new Set(
+      scope.tracks.filter((t) => t.kind === "video").map((t) => t.id),
+    );
+    for (const c of scope.layers) {
+      if (
+        c.parentId &&
+        (!visual.has(c.trackId) ||
+          !visual.has(clips.get(c.parentId)?.trackId ?? ""))
+      )
+        throw new Error(
+          "Parent must reference a visual layer in the same composition",
+        );
+      const visited = new Set([c.id]);
+      let cursor = c;
+      while (cursor.parentId) {
+        if (visited.has(cursor.parentId) || visited.size > 64)
+          throw new Error("Cyclic parenting or parenting exceeds 64 levels");
+        visited.add(cursor.parentId);
+        const parent = clips.get(cursor.parentId);
+        if (!parent) throw new Error("Missing parent layer");
+        cursor = parent;
+      }
+    }
+  }
+}
 export const uid = () => crypto.randomUUID();
 export const fps = (p: Project) => p.settings.fps.num / p.settings.fps.den;
 export const duration = (p: Project) =>
@@ -332,7 +383,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     id: uid(),
     name,
     createdAt: now,
@@ -371,6 +422,7 @@ export function newClip(
     duration: Math.max(1, length),
     sourceIn: 0,
     kind,
+    parentOffset: [1, 0, 0, 1, 0, 0],
     assetId: asset?.id,
     name: asset?.name ?? (kind === "text" ? "Your title" : "Shape"),
     gain: 0,
@@ -408,12 +460,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (![1, 2, 3].includes(input.schemaVersion as number))
+  if (![1, 2, 3, 4].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–3. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–4. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 3 });
+  return projectSchema.parse({ ...input, schemaVersion: 4 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

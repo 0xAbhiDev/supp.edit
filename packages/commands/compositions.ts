@@ -100,6 +100,14 @@ export function precompose(
   return (p) => {
     const selected = p.clips.filter((c) => ids.includes(c.id));
     if (!selected.length) throw new Error("Select at least one layer");
+    if (
+      p.clips.some(
+        (c) => c.parentId && ids.includes(c.id) !== ids.includes(c.parentId),
+      )
+    )
+      throw new Error(
+        "Select the complete parent hierarchy before precomposing",
+      );
     if (selected.some((c) => p.tracks.find((t) => t.id === c.trackId)?.locked))
       throw new Error("Unlock selected layers first");
     if (

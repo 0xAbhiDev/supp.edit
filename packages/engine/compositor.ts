@@ -1,5 +1,6 @@
 import { type Project, type Clip } from "../project-schema";
 import { resolveClip } from "../animation";
+import { canvasMatrix, type Affine } from "../animation/affine";
 import { ResourcePool } from "./resources";
 import { GpuRenderer } from "./gpu";
 import { projectIndex } from "./project-index";
@@ -163,6 +164,7 @@ export class Compositor {
                 { ...l.clip, id: l.resourceId },
                 scope.frame,
                 prepared.get(l.resourceId),
+                l.matrix,
               );
             ctx.drawImage(this.gpu.canvas, 0, 0);
             gpuRendered = true;
@@ -185,6 +187,7 @@ export class Compositor {
               scope.frame,
               prepared.get(l.resourceId),
               scale,
+              l.matrix,
             );
         }
       };
@@ -215,15 +218,14 @@ export class Compositor {
     frame: number,
     source?: CanvasImageSource,
     resolution = 1,
+    matrix?: Affine,
   ) {
     c = resolveClip(c, frame);
     const t = c.transform,
       { width, height } = p.settings;
     ctx.save();
-    ctx.translate(width / 2 + t.x, height / 2 + t.y);
-    ctx.rotate((t.rotation * Math.PI) / 180);
-    ctx.scale(t.scale * t.scaleX, t.scale * t.scaleY);
-    ctx.translate(-t.anchorX, -t.anchorY);
+    if (!matrix) throw new Error("Missing layer transform");
+    ctx.transform(...canvasMatrix(p, matrix));
     const crop = c.crop;
     ctx.beginPath();
     ctx.rect(

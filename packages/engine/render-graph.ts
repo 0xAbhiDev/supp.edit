@@ -1,10 +1,12 @@
 import { fps, type Clip, type Project } from "../project-schema";
 import { compositionView } from "../commands/compositions";
 import { projectIndex } from "./project-index";
+import { layerTransforms, type Affine } from "../animation/affine";
 
 export interface RenderLayer {
   clip: Clip;
   resourceId: string;
+  matrix: Affine;
   child?: RenderScope;
 }
 export interface RenderScope {
@@ -47,6 +49,7 @@ export function buildRenderGraph(
       throw new Error(
         "Composition surfaces exceed the 256 MiB frame budget. Reduce preview resolution.",
       );
+    const transforms = layerTransforms(p, time);
     const index = projectIndex(p),
       active = index.all
         .range(time, time + Number.EPSILON * Math.max(1, time) * 2)
@@ -61,7 +64,11 @@ export function buildRenderGraph(
       )
         continue;
       for (const c of active.filter((c) => c.trackId === track.id)) {
-        const layer: RenderLayer = { clip: c, resourceId: `${path}/${c.id}` };
+        const layer: RenderLayer = {
+          clip: c,
+          resourceId: `${path}/${c.id}`,
+          matrix: transforms.world(c.id),
+        };
         if (c.kind === "composition") {
           const comp = project.compositions.find(
             (x) => x.id === c.compositionId,

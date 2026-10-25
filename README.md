@@ -22,7 +22,7 @@ npm run launch        # launch a previously built desktop binary
 npm run doctor        # report native tool availability
 ```
 
-The current Windows development executable is `bin/supp-edit-foundation.exe`; the earlier executable is retained alongside it. It embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** to launch the current build with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. This is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
+The current Windows development executable is `bin/supp-edit-compositor.exe`; the earlier executable is retained alongside it. It embeds the frontend and does not need a Vite server. Double-click **Start supp.edit.cmd** to launch the current build with the configured media tools, or use `npm run launch`. WebView2 and Node must be installed for this launcher. This is an unsigned development build. The source ZIP excludes generated executables and downloaded tools; build it and run media setup after extracting the source elsewhere.
 
 ## Working features
 
@@ -32,8 +32,9 @@ The current Windows development executable is `bin/supp-edit-foundation.exe`; th
 - WebGL2 texture compositing with CPU fallback, full/half/quarter playback resolution, bounded frame/texture/derived-media caches, source prefetch, and dropped-frame diagnostics. Windows GPU/RAM inventory and real H.264 hardware codec probes report capabilities separately from the active decoder/exporter.
 - Reversible structural patch history, up to 500 editing commands, without copying media buffers.
 - Text and shape layers; nondestructive translation, scale, rotation, opacity; 17 animated transform/crop/effect channels with Hold, Linear, Ease In/Out, Bezier, Auto and Continuous Bezier; rectangular and elliptical masks; blur, brightness, contrast, saturation; clip audio gain.
-- Composite value/speed graph editor: multi-property curves, Shift-select, key/tangent drag, numeric edits, copy/paste/duplicate/delete, previous/next keys, zoom, pan, snapping, fit all/selection. Every edit uses structural undo and v1/v2→v3 migration.
+- Composite value/speed graph editor: multi-property curves, Shift-select, key/tangent drag, numeric edits, copy/paste/duplicate/delete, previous/next keys, zoom, pan, snapping, fit all/selection. Every edit uses structural undo and v1/v2/v3→v4 migration.
 - Nested composition sources, transparent backgrounds, instance/precompose commands, scoped layer and animation editing, mixed-rate rendering and recursive source audio.
+- Parent/Null controllers with affine transforms and keep-appearance reparenting; Composite layer timeline with timing, drag/trim, ordering, keys and vertical virtualization.
 - AI Studio imports supplied SRT into timestamped transcripts and actual caption text clips; the shared job queue reports cue/frame progress. No inference or external execution is installed.
 - Space and J/K/L playback, frame stepping, loop, safe margins, full-screen monitor, source preview, searchable command palette, resizable persisted panels, and dark/light themes.
 - Actual MP4/H.264/AAC encoding through FFmpeg, from the same composited frames shown in preview, with trimmed/delayed/gained source audio. Progress is based on submitted frames. Cancellation removes the temporary output. PNG frame export also works in the browser.

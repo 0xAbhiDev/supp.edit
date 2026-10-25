@@ -1,4 +1,6 @@
 import { GraphEditor } from "./components/GraphEditor";
+import { LayerTimeline } from "./components/LayerTimeline";
+import { useState } from "react";
 import { CompositionsPanel } from "./components/CompositionsPanel";
 import { AIStudio } from "./components/AIStudio";
 import type React from "react";
@@ -38,6 +40,9 @@ import { Modal, NewProject } from "./components/Dialogs";
 import { EngineDiagnostics } from "./components/EngineDiagnostics";
 
 export function App() {
+  const [compositeView, setCompositeView] = useState<"layers" | "graph">(
+    "graph",
+  );
   const renderer = usePlayback((s) => s.renderer);
   const {
     project,
@@ -246,7 +251,35 @@ export function App() {
         onPointerDown={(e) => resize(e, "height")}
         title="Resize timeline"
       />
-      {workspace === "Composite" ? <GraphEditor /> : <Timeline />}
+      {workspace === "Composite" ? (
+        <div className="composite-bottom">
+          <div
+            className="composite-view-tabs"
+            role="group"
+            aria-label="Composition editor view"
+          >
+            <button
+              aria-pressed={compositeView === "layers"}
+              onClick={() => setCompositeView("layers")}
+            >
+              Layers
+            </button>
+            <button
+              aria-pressed={compositeView === "graph"}
+              onClick={() => setCompositeView("graph")}
+            >
+              Graph
+            </button>
+          </div>
+          {compositeView === "layers" ? (
+            <LayerTimeline onGraph={() => setCompositeView("graph")} />
+          ) : (
+            <GraphEditor />
+          )}
+        </div>
+      ) : (
+        <Timeline />
+      )}
       <footer className="statusbar">
         <span>
           <span className="status-dot" />

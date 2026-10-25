@@ -119,6 +119,11 @@ pub struct Clip {
     pub asset_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+    /// Canvas affine coefficients [a, b, c, d, e, f], including shear.
+    #[serde(default = "identity_affine")]
+    pub parent_offset: [f64; 6],
     pub kind: String,
     pub name: String,
     pub start: u32,
@@ -153,6 +158,9 @@ pub struct Transform {
 }
 fn one() -> f64 {
     1.
+}
+fn identity_affine() -> [f64; 6] {
+    [1., 0., 0., 1., 0., 0.]
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -298,11 +306,69 @@ fn composition_depth<'a>(
     depths.insert(id, depth);
     Ok(depth)
 }
+
+// Depth counts parent links: an unparented clip has depth zero. Bound the
+// active path as well as memoized depths so malformed graphs cannot exhaust
+// the stack, and validate every clip regardless of its order or visibility.
+fn parent_depth<'a>(
+    id: &'a str,
+    clips: &HashMap<&'a str, &'a Clip>,
+    visiting: &mut HashSet<&'a str>,
+    depths: &mut HashMap<&'a str, usize>,
+) -> Result<usize, Error> {
+    if let Some(depth) = depths.get(id) {
+        return Ok(*depth);
+    }
+    ensure(visiting.insert(id), "Clip parenting cycle")?;
+    ensure(visiting.len() <= 65, "Clip parenting exceeds 64 parents")?;
+    let clip = clips
+        .get(id)
+        .ok_or_else(|| Error::Invalid("Clip references missing parent in this scope".into()))?;
+    let depth = match clip.parent_id.as_deref() {
+        Some(parent) => 1 + parent_depth(parent, clips, visiting, depths)?,
+        None => 0,
+    };
+    ensure(depth <= 64, "Clip parenting exceeds 64 parents")?;
+    visiting.remove(id);
+    depths.insert(id, depth);
+    Ok(depth)
+}
+
+fn validate_parenting(clips: &[Clip], tracks: &HashMap<&str, &Track>) -> Result<(), Error> {
+    let by_id: HashMap<_, _> = clips.iter().map(|c| (c.id.as_str(), c)).collect();
+    for clip in clips {
+        ensure(
+            clip.parent_offset.iter().all(|v| range(*v, -1e9, 1e9)),
+            "Invalid parent offset",
+        )?;
+        if let Some(id) = clip.parent_id.as_deref() {
+            ensure(id != clip.id, "A clip cannot parent itself")?;
+            let parent = by_id.get(id).ok_or_else(|| {
+                Error::Invalid("Clip references missing parent in this scope".into())
+            })?;
+            ensure(
+                [clip, *parent].iter().all(|c| {
+                    tracks
+                        .get(c.track_id.as_str())
+                        .is_some_and(|t| t.kind == "video")
+                }),
+                "Parenting requires visual clips on video tracks",
+            )?;
+        }
+    }
+    let mut visiting = HashSet::new();
+    let mut depths = HashMap::new();
+    for clip in clips {
+        parent_depth(&clip.id, &by_id, &mut visiting, &mut depths)?;
+    }
+    Ok(())
+}
+
 impl Project {
     pub fn validate(&self) -> Result<(), Error> {
         ensure(
-            [1, 2, 3].contains(&self.schema_version),
-            "Unsupported schema version (expected 1, 2 or 3)",
+            (1..=4).contains(&self.schema_version),
+            "Unsupported schema version (expected 1, 2, 3 or 4)",
         )?;
         ensure(
             !self.name.is_empty() && self.name.len() <= 1024,
@@ -591,6 +657,7 @@ impl Project {
                     "Invalid typography or shape style",
                 )?;
             }
+            validate_parenting(scene_clips, &tracks)?;
         }
         let mut visiting = HashSet::new();
         let mut depths = HashMap::new();
@@ -614,7 +681,7 @@ pub fn read(path: &Path) -> Result<Project, Error> {
     )?;
     let mut p: Project = serde_json::from_reader(fs::File::open(path)?)?;
     p.validate()?;
-    p.schema_version = 3;
+    p.schema_version = 4;
     Ok(p)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
@@ -640,6 +707,300 @@ pub fn save(path: &Path, project: &Project) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parenting_project() -> Project {
+        serde_json::from_str(include_str!("../tests/fixtures/parenting-v4.supp")).unwrap()
+    }
+
+    fn scope_clips(project: &mut Project, nested: bool) -> &mut Vec<Clip> {
+        if nested {
+            &mut project.compositions[0].layers
+        } else {
+            &mut project.clips
+        }
+    }
+
+    fn assert_invalid_parenting(project: &Project, message: &str) {
+        let error = project.validate().unwrap_err().to_string();
+        assert!(error.contains(message), "{error}");
+        // Exercise the file reader too: invalid serialized graphs must fail
+        // before migration rather than being silently repaired or accepted.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invalid.supp");
+        fs::write(&path, serde_json::to_vec(project).unwrap()).unwrap();
+        let error = read(&path).unwrap_err().to_string();
+        assert!(error.contains(message), "{error}");
+    }
+
+    #[test]
+    fn parenting_v4_serde_and_file_roundtrip_preserve_affine_offsets() {
+        let project = parenting_project();
+        project.validate().unwrap();
+        assert_eq!(
+            project.clips[0].parent_id.as_deref(),
+            Some("root-controller")
+        );
+        assert_eq!(
+            project.clips[0].parent_offset,
+            [1.2, 0.35, -0.2, 0.8, 42., -17.]
+        );
+        assert_eq!(project.clips[1].kind, "null");
+        assert_eq!(project.clips[1].parent_id, None);
+        assert_eq!(project.clips[1].parent_offset, identity_affine());
+        assert_eq!(project.compositions[0].layers[1].kind, "null");
+        assert_eq!(
+            project.compositions[0].layers[0].parent_offset,
+            [0.9, -0.15, 0.4, 1.1, -8., 12.]
+        );
+
+        let value = serde_json::to_value(&project).unwrap();
+        assert!(value["clips"][1].get("parentId").is_none());
+        assert!(value["compositions"][0]["layers"][1]
+            .get("parentId")
+            .is_none());
+        assert_eq!(
+            value["clips"][1]["parentOffset"],
+            serde_json::json!([1., 0., 0., 1., 0., 0.])
+        );
+        let decoded: Project =
+            serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("parenting.supp");
+        fs::write(&path, include_str!("../tests/fixtures/parenting-v4.supp")).unwrap();
+        let reopened = read(&path).unwrap();
+        assert_eq!(reopened.schema_version, 4);
+        assert_eq!(serde_json::to_value(&reopened).unwrap(), value);
+        save(&path, &reopened).unwrap();
+        assert_eq!(serde_json::to_value(read(&path).unwrap()).unwrap(), value);
+    }
+
+    #[test]
+    fn versions_one_through_four_migrate_with_parenting_and_legacy_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        for version in 1..=4 {
+            let source = match version {
+                1 | 2 => include_str!("../../../../tests/fixtures/animation.supp"),
+                3 => include_str!("../tests/fixtures/compositor-v3.supp"),
+                _ => include_str!("../tests/fixtures/parenting-v4.supp"),
+            };
+            let mut value: serde_json::Value = serde_json::from_str(source).unwrap();
+            value["schemaVersion"] = version.into();
+            fn remove_optional_fields(clips: &mut serde_json::Value) {
+                for clip in clips.as_array_mut().unwrap() {
+                    let fields = clip.as_object_mut().unwrap();
+                    fields.remove("parentId");
+                    fields.remove("parentOffset");
+                    fields.remove("crop");
+                    let transform = fields["transform"].as_object_mut().unwrap();
+                    for key in ["scaleX", "scaleY", "anchorX", "anchorY"] {
+                        transform.remove(key);
+                    }
+                }
+            }
+            remove_optional_fields(&mut value["clips"]);
+            if let Some(compositions) = value
+                .get_mut("compositions")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for composition in compositions {
+                    remove_optional_fields(&mut composition["layers"]);
+                }
+            }
+            let original = serde_json::to_vec(&value).unwrap();
+            let path = dir.path().join(format!("v{version}.supp"));
+            fs::write(&path, &original).unwrap();
+            let reopened = read(&path).unwrap();
+            assert_eq!(reopened.schema_version, 4);
+            assert_eq!(fs::read(&path).unwrap(), original);
+            for clip in reopened
+                .clips
+                .iter()
+                .chain(reopened.compositions.iter().flat_map(|c| &c.layers))
+            {
+                assert_eq!(clip.parent_id, None);
+                assert_eq!(clip.parent_offset, identity_affine());
+                assert_eq!((clip.transform.scale_x, clip.transform.scale_y), (1., 1.));
+                assert_eq!((clip.transform.anchor_x, clip.transform.anchor_y), (0., 0.));
+                assert_eq!(
+                    [
+                        clip.crop.crop_left,
+                        clip.crop.crop_top,
+                        clip.crop.crop_right,
+                        clip.crop.crop_bottom
+                    ],
+                    [0.; 4]
+                );
+            }
+            if version < 3 {
+                assert!(reopened.compositions.is_empty());
+                assert!(reopened.transcripts.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn parenting_rejects_missing_self_and_cross_scope_references() {
+        for nested in [false, true] {
+            for invalid_parent in ["missing", "", "audio-asset", "nested-source", "root-video"] {
+                let mut project = parenting_project();
+                scope_clips(&mut project, nested)[0].parent_id = Some(invalid_parent.into());
+                assert_invalid_parenting(&project, "missing parent in this scope");
+            }
+            let mut project = parenting_project();
+            let clips = scope_clips(&mut project, nested);
+            clips[0].parent_id = Some(clips[0].id.clone());
+            assert_invalid_parenting(&project, "cannot parent itself");
+
+            let mut project = parenting_project();
+            scope_clips(&mut project, nested)[0].parent_id = Some(
+                if nested {
+                    "root-controller"
+                } else {
+                    "nested-controller"
+                }
+                .into(),
+            );
+            assert_invalid_parenting(&project, "missing parent in this scope");
+        }
+        let mut project = parenting_project();
+        let mut sibling = project.compositions[0].clone();
+        sibling.id = "sibling-source".into();
+        sibling.tracks[0].id = "sibling-video".into();
+        sibling.layers.truncate(1);
+        sibling.layers[0].id = "sibling-child".into();
+        sibling.layers[0].track_id = "sibling-video".into();
+        // This ID exists in another composition, but not the sibling's scope.
+        project.compositions.push(sibling);
+        assert_invalid_parenting(&project, "missing parent in this scope");
+    }
+
+    #[test]
+    fn parenting_rejects_cycles_including_unused_compositions() {
+        for nested in [false, true] {
+            for length in [2, 3] {
+                let mut project = parenting_project();
+                if nested {
+                    project.clips.clear();
+                }
+                let clips = scope_clips(&mut project, nested);
+                if length == 2 {
+                    clips[1].parent_id = Some(clips[0].id.clone());
+                } else {
+                    let mut third = clips[1].clone();
+                    third.id = "third-controller".into();
+                    third.parent_id = Some(clips[0].id.clone());
+                    clips[1].parent_id = Some(third.id.clone());
+                    clips.push(third);
+                }
+                assert_invalid_parenting(&project, "parenting cycle");
+            }
+        }
+    }
+
+    #[test]
+    fn parenting_requires_visual_parent_and_child_in_each_scope() {
+        for nested in [false, true] {
+            let mut base = parenting_project();
+            if nested {
+                let mut track = base.tracks[1].clone();
+                track.id = "nested-audio-track".into();
+                let mut audio = base.clips[2].clone();
+                audio.id = "nested-audio-clip".into();
+                audio.track_id = track.id.clone();
+                base.compositions[0].tracks.push(track);
+                base.compositions[0].layers.push(audio);
+            }
+            base.validate().unwrap();
+            for audio_is_parent in [false, true] {
+                let mut project = base.clone();
+                let clips = scope_clips(&mut project, nested);
+                if audio_is_parent {
+                    clips[0].parent_id = Some(clips[2].id.clone());
+                } else {
+                    clips[2].parent_id = Some(clips[1].id.clone());
+                }
+                assert_invalid_parenting(&project, "requires visual clips");
+            }
+        }
+    }
+
+    #[test]
+    fn parenting_depth_allows_64_parents_and_rejects_65_in_any_order() {
+        for nested in [false, true] {
+            for reverse in [false, true] {
+                let mut project = parenting_project();
+                let template = scope_clips(&mut project, nested)[1].clone();
+                let clips = scope_clips(&mut project, nested);
+                *clips = (0..=64)
+                    .map(|index| {
+                        let mut clip = template.clone();
+                        clip.id = format!("chain-{index}");
+                        clip.parent_id = (index > 0).then(|| format!("chain-{}", index - 1));
+                        clip
+                    })
+                    .collect();
+                if reverse {
+                    clips.reverse();
+                }
+                project.validate().unwrap();
+                let mut extra = template;
+                extra.id = "chain-65".into();
+                extra.parent_id = Some("chain-64".into());
+                let clips = scope_clips(&mut project, nested);
+                if reverse {
+                    clips.insert(0, extra);
+                } else {
+                    clips.push(extra);
+                }
+                assert_invalid_parenting(&project, "exceeds 64 parents");
+            }
+        }
+    }
+
+    #[test]
+    fn parent_offsets_require_six_finite_bounded_coefficients() {
+        for nested in [false, true] {
+            for index in 0..6 {
+                for valid in [-1e9, 0., 1e9] {
+                    let mut project = parenting_project();
+                    scope_clips(&mut project, nested)[0].parent_offset[index] = valid;
+                    project.validate().unwrap();
+                }
+                for invalid in [-1e9 - 1., 1e9 + 1.] {
+                    let mut project = parenting_project();
+                    scope_clips(&mut project, nested)[0].parent_offset[index] = invalid;
+                    assert_invalid_parenting(&project, "Invalid parent offset");
+                }
+                for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                    let mut project = parenting_project();
+                    scope_clips(&mut project, nested)[0].parent_offset[index] = invalid;
+                    assert!(project
+                        .validate()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("Invalid parent offset"));
+                }
+            }
+            // Unparented clips still carry and validate their offset.
+            let mut project = parenting_project();
+            scope_clips(&mut project, nested)[1].parent_offset[4] = 1e9 + 1.;
+            assert_invalid_parenting(&project, "Invalid parent offset");
+        }
+        for invalid in [
+            serde_json::json!([1, 0, 0, 1, 0]),
+            serde_json::json!([1, 0, 0, 1, 0, 0, 0]),
+            serde_json::json!([1, 0, 0, 1, 0, null]),
+            serde_json::json!([1, 0, 0, 1, 0, "1"]),
+            serde_json::Value::Null,
+        ] {
+            let mut value = serde_json::to_value(parenting_project()).unwrap();
+            value["clips"][0]["parentOffset"] = invalid;
+            assert!(serde_json::from_str::<Project>(&value.to_string()).is_err());
+        }
+    }
+
     #[test]
     fn compositions_transcripts_roundtrip_and_cycles() {
         let mut p: Project =
@@ -662,6 +1023,7 @@ mod tests {
         let path = dir.path().join("nested.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
+        p.schema_version = 4;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -687,7 +1049,7 @@ mod tests {
         let path = dir.path().join("animation.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 3);
+        assert_eq!(reopened.schema_version, 4);
         assert_eq!(reopened.clips[0].transform.scale_x, 1.);
         assert_eq!(
             reopened.clips[0].keyframes.extra["scaleX"][0]
@@ -697,7 +1059,7 @@ mod tests {
                 .x,
             0.6
         );
-        p.schema_version = 3;
+        p.schema_version = 4;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -714,7 +1076,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/project.supp"),
         )
         .unwrap();
-        assert_eq!(read(&old).unwrap().schema_version, 3);
+        assert_eq!(read(&old).unwrap().schema_version, 4);
         assert!(fs::read_to_string(old)
             .unwrap()
             .contains("\"schemaVersion\":1"));

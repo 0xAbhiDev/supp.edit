@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 4,
+  "id": "parenting-project",
+  "name": "Parenting native contract",
+  "createdAt": "2026-10-25T00:00:00.000Z",
+  "modifiedAt": "2026-10-25T00:00:00.000Z",
+  "settings": {
+    "width": 320,
+    "height": 180,
+    "fps": { "num": 30, "den": 1 },
+    "colorSpace": "srgb"
+  },
+  "assets": [
+    {
+      "id": "audio-asset",
+      "name": "Audio",
+      "kind": "audio",
+      "path": "audio.wav",
+      "size": 0,
+      "duration": 10,
+      "width": 0,
+      "height": 0,
+      "fps": 0,
+      "codec": "pcm_s16le",
+      "hasAudio": true,
+      "fingerprint": "parenting-audio"
+    }
+  ],
+  "tracks": [
+    {
+      "id": "root-video",
+      "name": "Video",
+      "kind": "video",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    },
+    {
+      "id": "root-audio",
+      "name": "Audio",
+      "kind": "audio",
+      "locked": false,
+      "hidden": false,
+      "muted": false,
+      "solo": false
+    }
+  ],
+  "clips": [
+    {
+      "id": "root-child",
+      "trackId": "root-video",
+      "compositionId": "nested-source",
+      "parentId": "root-controller",
+      "parentOffset": [1.2, 0.35, -0.2, 0.8, 42, -17],
+      "kind": "composition",
+      "name": "Parented composition",
+      "start": 0,
+      "duration": 90,
+      "sourceIn": 0,
+      "gain": 0,
+      "transform": { "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1 },
+      "effects": { "blur": 0, "brightness": 1, "contrast": 1, "saturation": 1 },
+      "keyframes": { "x": [], "y": [], "scale": [], "opacity": [] },
+      "mask": null,
+      "text": { "content": "", "size": 24, "color": "#ffffff", "font": "sans-serif", "weight": "normal", "align": "center" },
+      "shape": { "type": "rectangle", "color": "#ffffff", "width": 100, "height": 100 }
+    },
+    {
+      "id": "root-controller",
+      "trackId": "root-video",
+      "kind": "null",
+      "name": "Root controller",
+      "start": 0,
+      "duration": 90,
+      "sourceIn": 0,
+      "gain": 0,
+      "transform": { "x": 20, "y": -10, "scale": 1, "rotation": 15, "opacity": 1 },
+      "effects": { "blur": 0, "brightness": 1, "contrast": 1, "saturation": 1 },
+      "keyframes": { "x": [], "y": [], "scale": [], "opacity": [] },
+      "mask": null,
+      "text": { "content": "", "size": 24, "color": "#ffffff", "font": "sans-serif", "weight": "normal", "align": "center" },
+      "shape": { "type": "rectangle", "color": "#ffffff", "width": 100, "height": 100 }
+    },
+    {
+      "id": "audio-clip",
+      "trackId": "root-audio",
+      "assetId": "audio-asset",
+      "kind": "media",
+      "name": "Unparented audio",
+      "start": 0,
+      "duration": 90,
+      "sourceIn": 0,
+      "gain": 0,
+      "transform": { "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1 },
+      "effects": { "blur": 0, "brightness": 1, "contrast": 1, "saturation": 1 },
+      "keyframes": { "x": [], "y": [], "scale": [], "opacity": [] },
+      "mask": null,
+      "text": { "content": "", "size": 24, "color": "#ffffff", "font": "sans-serif", "weight": "normal", "align": "center" },
+      "shape": { "type": "rectangle", "color": "#ffffff", "width": 100, "height": 100 }
+    }
+  ],
+  "markers": [],
+  "compositions": [
+    {
+      "id": "nested-source",
+      "name": "Nested parenting scope",
+      "settings": {
+        "width": 320,
+        "height": 180,
+        "fps": { "num": 24, "den": 1 },
+        "colorSpace": "srgb"
+      },
+      "duration": 72,
+      "background": "transparent",
+      "tracks": [
+        {
+          "id": "nested-video",
+          "name": "Video",
+          "kind": "video",
+          "locked": false,
+          "hidden": false,
+          "muted": false,
+          "solo": false
+        }
+      ],
+      "layers": [
+        {
+          "id": "nested-child",
+          "trackId": "nested-video",
+          "parentId": "nested-controller",
+          "parentOffset": [0.9, -0.15, 0.4, 1.1, -8, 12],
+          "kind": "shape",
+          "name": "Parented shape",
+          "start": 0,
+          "duration": 72,
+          "sourceIn": 0,
+          "gain": 0,
+          "transform": { "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1 },
+          "effects": { "blur": 0, "brightness": 1, "contrast": 1, "saturation": 1 },
+          "keyframes": { "x": [], "y": [], "scale": [], "opacity": [] },
+          "mask": null,
+          "text": { "content": "", "size": 24, "color": "#ffffff", "font": "sans-serif", "weight": "normal", "align": "center" },
+          "shape": { "type": "rectangle", "color": "#aabbcc", "width": 100, "height": 100 }
+        },
+        {
+          "id": "nested-controller",
+          "trackId": "nested-video",
+          "kind": "null",
+          "name": "Nested controller",
+          "start": 0,
+          "duration": 72,
+          "sourceIn": 0,
+          "gain": 0,
+          "transform": { "x": 0, "y": 0, "scale": 1, "rotation": 0, "opacity": 1 },
+          "effects": { "blur": 0, "brightness": 1, "contrast": 1, "saturation": 1 },
+          "keyframes": { "x": [], "y": [], "scale": [], "opacity": [] },
+          "mask": null,
+          "text": { "content": "", "size": 24, "color": "#ffffff", "font": "sans-serif", "weight": "normal", "align": "center" },
+          "shape": { "type": "rectangle", "color": "#ffffff", "width": 100, "height": 100 }
+        }
+      ]
+    }
+  ]
+}
