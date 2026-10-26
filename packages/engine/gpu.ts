@@ -25,6 +25,8 @@ void main(){
 const fragment = `#version 300 es
 precision highp float;
 uniform sampler2D u_image;
+uniform sampler2D u_bezierMask;
+uniform bool u_hasBezierMask;
 uniform int u_pass;
 uniform vec2 u_output;
 uniform vec2 u_direction;
@@ -58,7 +60,8 @@ void main(){
   {
     vec2 local=(u_inverse*vec3(v_uv*u_project,1.0)).xy;
     vec2 uv=local/u_project+0.5;
-    mask=float(all(greaterThanEqual(uv,u_crop.xy))&&all(lessThanEqual(uv,vec2(1)-u_crop.zw)));
+    if(u_hasBezierMask) mask*=float(all(greaterThanEqual(uv,vec2(0)))&&all(lessThanEqual(uv,vec2(1))))*texture(u_bezierMask,clamp(uv,0.0,1.0)).a;
+    mask*=float(all(greaterThanEqual(uv,u_crop.xy))&&all(lessThanEqual(uv,vec2(1)-u_crop.zw)));
     if(u_maskType>0){
     vec2 normalized=(local-u_mask.xy)/u_mask.zw;
     if(u_maskType==1) mask*=float(all(greaterThanEqual(normalized,vec2(0)))&&all(lessThanEqual(normalized,vec2(1))));
@@ -94,6 +97,7 @@ export class GpuRenderer {
   private buffer: WebGLBuffer;
   private fbo: WebGLFramebuffer;
   private targets: Texture[] = [];
+  private maskTexture?: Texture;
   private textures: LruCache<string, Texture>;
   private generators = new LruCache<string, Generated>(32 * 1024 * 1024, 24);
   private width = 0;
@@ -192,6 +196,9 @@ export class GpuRenderer {
   get bytes() {
     return (
       this.textures.bytes +
+      (this.maskTexture
+        ? this.maskTexture.width * this.maskTexture.height * 4
+        : 0) +
       this.targets.reduce((n, t) => n + t.width * t.height * 4, 0)
     );
   }
@@ -323,6 +330,7 @@ export class GpuRenderer {
     frame: number,
     source?: CanvasImageSource,
     world?: Affine,
+    coverage?: HTMLCanvasElement,
   ) {
     const matrix = canvasMatrix(p, world ?? localMatrix(c, frame));
     c = resolveClip(c, frame);
@@ -472,11 +480,39 @@ export class GpuRenderer {
         c.mask.width * p.settings.width,
         c.mask.height * p.settings.height,
       );
+    gl.uniform1i(this.uniform("u_hasBezierMask"), coverage ? 1 : 0);
+    gl.uniform1i(this.uniform("u_bezierMask"), 1);
+    if (coverage) {
+      gl.activeTexture(gl.TEXTURE1);
+      if (
+        this.maskTexture &&
+        (this.maskTexture.width !== coverage.width ||
+          this.maskTexture.height !== coverage.height)
+      ) {
+        gl.deleteTexture(this.maskTexture.texture);
+        this.maskTexture = undefined;
+      }
+      this.maskTexture ??= this.texture(coverage.width, coverage.height);
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTexture.texture);
+      if (this.maskTexture.input !== coverage) {
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          coverage,
+        );
+        this.maskTexture.input = coverage;
+      }
+      gl.activeTexture(gl.TEXTURE0);
+    }
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     const error = gl.getError();
     if (error !== gl.NO_ERROR) throw new Error(`GPU rendering error ${error}`);
   }
   dispose() {
+    if (this.maskTexture) this.gl.deleteTexture(this.maskTexture.texture);
     this.textures.clear();
     this.generators.clear();
     this.targets.forEach((t) => this.gl.deleteTexture(t.texture));

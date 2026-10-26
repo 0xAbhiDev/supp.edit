@@ -6,10 +6,18 @@ import { GpuRenderer } from "./gpu";
 import { projectIndex } from "./project-index";
 import { buildRenderGraph, type RenderScope } from "./render-graph";
 import type { RendererMode } from "./diagnostics";
+import { MaskRasterizer } from "./masks";
 export class Compositor {
   readonly pool: ResourcePool;
   private gpu: GpuRenderer | null = null;
   private cancelled = false;
+  private masks = new MaskRasterizer();
+  private maskedLayer = document.createElement("canvas");
+  get maskSurfaceBytes() {
+    return (
+      this.masks.bytes + this.maskedLayer.width * this.maskedLayer.height * 4
+    );
+  }
   cancel() {
     this.cancelled = true;
     this.pool.pauseInactive(new Set());
@@ -149,6 +157,14 @@ export class Compositor {
             l.clip.kind !== "null" &&
             scene.tracks.find((t) => t.id === l.clip.trackId)?.kind === "video",
         );
+        const coverage = (clip: Clip) =>
+          this.masks.raster(
+            clip,
+            scope.frame,
+            scene.settings.width,
+            scene.settings.height,
+            scale,
+          );
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalAlpha = 1;
         ctx.filter = "none";
@@ -165,6 +181,7 @@ export class Compositor {
                 scope.frame,
                 prepared.get(l.resourceId),
                 l.matrix,
+                coverage(l.clip),
               );
             ctx.drawImage(this.gpu.canvas, 0, 0);
             gpuRendered = true;
@@ -179,7 +196,39 @@ export class Compositor {
             ctx.fillRect(0, 0, width, height);
           }
           ctx.scale(scale, scale);
-          for (const l of layers)
+          for (const l of layers) {
+            const mask = coverage(l.clip);
+            if (mask) {
+              const surface = this.maskedLayer;
+              surface.width = width;
+              surface.height = height;
+              const layer = surface.getContext("2d")!;
+              layer.scale(scale, scale);
+              this.draw(
+                layer,
+                scene,
+                l.clip,
+                scope.frame,
+                prepared.get(l.resourceId),
+                scale,
+                l.matrix,
+              );
+              layer.setTransform(scale, 0, 0, scale, 0, 0);
+              layer.transform(...canvasMatrix(scene, l.matrix));
+              layer.globalCompositeOperation = "destination-in";
+              layer.drawImage(
+                mask,
+                -scene.settings.width / 2,
+                -scene.settings.height / 2,
+                scene.settings.width,
+                scene.settings.height,
+              );
+              ctx.save();
+              ctx.resetTransform();
+              ctx.drawImage(surface, 0, 0);
+              ctx.restore();
+              continue;
+            }
             this.draw(
               ctx,
               scene,
@@ -189,6 +238,7 @@ export class Compositor {
               scale,
               l.matrix,
             );
+          }
         }
       };
       drawScope(graph, this.canvas);
@@ -306,6 +356,8 @@ export class Compositor {
     ctx.restore();
   }
   dispose() {
+    this.masks.dispose();
+    this.maskedLayer.width = this.maskedLayer.height = 0;
     for (const surface of this.surfaces.values())
       surface.width = surface.height = 0;
     this.surfaces.clear();

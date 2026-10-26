@@ -31,8 +31,8 @@ The current Windows development executable is `bin/supp-edit-compositor.exe`; th
 - Source In/Out and track-targeted insert/overwrite; program monitor and previous/next edit navigation. Multitrack video/image/audio editing, split, bounded trim, ripple trim, roll, slip, slide, drag move, horizontal timeline indexing, snapping, markers, track locks, visibility, mute, solo, and track-local ripple delete.
 - WebGL2 texture compositing with CPU fallback, full/half/quarter playback resolution, bounded frame/texture/derived-media caches, source prefetch, and dropped-frame diagnostics. Windows GPU/RAM inventory and real H.264 hardware codec probes report capabilities separately from the active decoder/exporter.
 - Reversible structural patch history, up to 500 editing commands, without copying media buffers.
-- Text and shape layers; nondestructive translation, scale, rotation, opacity; 17 animated transform/crop/effect channels with Hold, Linear, Ease In/Out, Bezier, Auto and Continuous Bezier; rectangular and elliptical masks; blur, brightness, contrast, saturation; clip audio gain.
-- Composite value/speed graph editor: multi-property curves, Shift-select, key/tangent drag, numeric edits, copy/paste/duplicate/delete, previous/next keys, zoom, pan, snapping, fit all/selection. Every edit uses structural undo and v1/v2/v3→v4 migration.
+- Text and shape layers; nondestructive translation, scale, rotation, opacity; 17 animated transform/crop/effect channels with Hold, Linear, Ease In/Out, Bezier, Auto and Continuous Bezier; ordered animated Bezier masks with pen/point/tangent editing, feather/expansion/inversion and combinations; blur, brightness, contrast, saturation; clip audio gain.
+- Composite value/speed graph editor: multi-property curves, Shift-select, key/tangent drag, numeric edits, copy/paste/duplicate/delete, previous/next keys, zoom, pan, snapping, fit all/selection. Every edit uses structural undo and v1/v2/v3/v4→v5 migration.
 - Nested composition sources, transparent backgrounds, instance/precompose commands, scoped layer and animation editing, mixed-rate rendering and recursive source audio.
 - Parent/Null controllers with affine transforms and keep-appearance reparenting; Composite layer timeline with timing, drag/trim, ordering, keys and vertical virtualization.
 - AI Studio imports supplied SRT into timestamped transcripts and actual caption text clips; the shared job queue reports cue/frame progress. No inference or external execution is installed.
@@ -58,7 +58,7 @@ This release is **8-bit sRGB, WebGL2 with Canvas2D fallback, system-webview deco
 
 The system webview must support the imported codec for preview and frame export; FFprobe's ability to inspect a file does not imply the webview can decode it. Transcode incompatible media to H.264/AAC MP4, WAV, or PNG. Reverse shuttle is silent. Browser FPS metadata is unavailable and is reported as such. Playback can drop visual frames under load; offline export seeks and renders every requested frame. It is not a sample-accurate professional audio transport. Export is one job at a time, at most 128 audible segments including nested instances, a session queue with cancellation but no export pause/retry, and 8-bit H.264 only.
 
-Panel resizing is implemented; arbitrary docking, detachable panels, and multi-monitor layouts are not. Timeline clipping is culled horizontally; large-project vertical virtualization and performance certification remain future work. Image thumbnails are regenerated/cached independently of project data. Edits never rewrite original sources.
+Panel resizing is implemented; arbitrary docking, detachable panels, and multi-monitor layouts are not. Timeline clipping is culled horizontally; the Composite layer list is also virtualized vertically; sustained performance certification remains future work. Image thumbnails are regenerated/cached independently of project data. Edits never rewrite original sources.
 
 ## Validation
 

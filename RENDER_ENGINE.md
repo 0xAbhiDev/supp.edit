@@ -1,8 +1,8 @@
-# Render engine — composition foundation
+# Render engine — compositions, parenting and masks
 
 ## Implemented slice
 
-Schema v4 adds Composition objects with ID, name, dimensions/rational rate/sRGB settings, duration, background, ordered tracks and layers. Composition clips reference those sources. Existing media (video/image), text and shape clips are reused. Null clips render no pixels and now drive child transforms through affine parenting; selection outlines are editor-only. Main-sequence representation is retained for compatibility.
+The current v5 graph includes Composition objects with ID, name, dimensions/rational rate/sRGB settings, duration, background, ordered tracks and layers. Composition clips reference those sources. Existing media (video/image), text and shape clips are reused. Null clips render no pixels and now drive child transforms through affine parenting; selection outlines are editor-only. Main-sequence representation is retained for compatibility.
 
 Composition commands create sources, add instances, precompose, scope ordinary edits, and prevent deletion of referenced sources. Precompose requires an unlocked contiguous visual stack and all overlapping clips on affected tracks. It preserves local key times and source offsets. Scoped commands validate the canonical graph before History commits. Cycles, missing references, duplicate IDs, duration overruns and excessive depth fail atomically.
 
@@ -20,11 +20,11 @@ Native audio traversal converts frames to seconds, clips against ancestor interv
 
 ## Current and target processing order
 
-Current executable behavior preserves the earlier renderer: source timing/nested source → animated transform → Gaussian blur → brightness/contrast/saturation → crop/basic mask → opacity → normal source-over. CPU Canvas clipping/filter edges can differ; render tests use tolerances.
+Current executable behavior preserves the earlier renderer: source timing/nested source → animated transform → Gaussian blur → brightness/contrast/saturation → crop/basic mask + Bezier coverage → opacity → normal source-over. CPU Canvas clipping/filter edges can differ; render tests use tolerances.
 
 The target advanced pipeline remains source → timing → transform → masks → ordered effects → matte → opacity → blend → composition. Implement explicit nodes and update both backends together. Do not introduce workspace-specific rendering or CSS substitutes.
 
-NOT STARTED: canvas scale/rotation/anchor handles, Bezier paths and animated mask properties, alpha/luma mattes, 17 blend modes, ordered effect descriptors/stacks/presets/search, expanded effects, RGB curves and adjustment layers. Photo documents/tools follow compositor completion. Layer timeline core is implemented; multi-selection drag and inline property expansion are still partial.
+NOT STARTED: canvas scale/rotation/anchor handles, alpha/luma mattes, 17 blend modes, ordered effect descriptors/stacks/presets/search, expanded effects, RGB curves and adjustment layers. Photo documents/tools follow compositor completion. Layer timeline core is implemented; multi-selection drag and inline property expansion are still partial.
 
 ## Resource bounds
 
@@ -34,8 +34,14 @@ Unused composition surfaces are released on the next frame and all on disposal. 
 
 ## Verification boundary
 
-Tests exercise scoped commands/history, migration, cycle prevention, mixed-rate timing, native composition/transcript roundtrips, nested audio timing/gain/mute, child animation UI, transparent GPU/Canvas parity, all 60 identical PNGs after reopen, and native encoding. The slice fixture is COMPOSITION_FOUNDATION_TEST.supp. It does not stand in for the full requested COMPOSITOR_STRESS_TEST.supp, which requires unfinished masks/mattes/blends/adjustments. Current measurements are recorded in CURRENT_STATE and docs/VALIDATION.
+Tests exercise scoped commands/history, migration, cycle prevention, mixed-rate timing, native composition/transcript roundtrips, nested audio timing/gain/mute, child animation UI, transparent GPU/Canvas parity, all 60 identical PNGs after reopen, and native encoding. The slice fixture is COMPOSITION_FOUNDATION_TEST.supp. It does not stand in for the full requested COMPOSITOR_STRESS_TEST.supp, which requires unfinished mattes/blends/adjustments. Current measurements are recorded in CURRENT_STATE and docs/VALIDATION.
 
 ## Parenting
 
 Each clip has optional parentId and parentOffset [a,b,c,d,e,f]. World = parentWorld × parentOffset × localTransform, then translate the composition center for canvas coordinates. Reparenting can preserve world appearance at the current frame by solving the affine offset; animation at other times remains responsive to the new parent. No decomposition loses shear. Parents evaluate at composition time regardless of visibility and do not pass opacity/effects to children. Both GPU geometry and inverse-space masks use the same matrices as Canvas2D. Parent references stay within a scope, are acyclic and have at most 64 links.
+
+## Bezier coverage
+
+packages/masks owns the closed path model, scalar/path evaluation and exact cubic subdivision. Masks apply in layer-local composition coordinates, before the final world-space coverage sample. The rasterizer evaluates local frame = scope frame − clip start and builds a padded white path, applies expansion/erosion via round strokes, feathers with Canvas blur, optionally inverts, then combines alpha in listed order. First add/difference starts transparent; first subtract/intersect starts opaque. Disabled masks are skipped. Inversion precedes opacity. Legacy crop/basic mask multiply this coverage.
+
+Both renderers share the rasterized alpha. WebGL samples an uploaded coverage texture using the inverse affine matrix. Canvas uses an isolated layer surface and destination-in composition. No CPU pixel readback occurs. Caches are keyed by evaluated geometry/parameters/resolution, bounded to 64 MiB/eight entries; working surfaces are checked against 128 MiB before allocation. These limits are separate from other engine budgets. Preview resolution scales coverage; strict export uses full resolution. Feathering is Gaussian Canvas blur and expansion is stroke-based morphology, not a signed-distance renderer or per-vertex feather.

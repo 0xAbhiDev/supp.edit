@@ -27,6 +27,7 @@ import {
 } from "../../../packages/project-schema";
 import { useClock } from "../../../packages/engine/clock";
 import { Section, NumberField, IconButton } from "./Controls";
+import { MaskEditor } from "./MaskEditor";
 export function Inspector() {
   const [preserveWorld, setPreserveWorld] = useState(true);
   const project = useEditor(editorProject),
@@ -153,6 +154,9 @@ export function Inspector() {
           {timecode(clip.start + clip.duration, fps(project))}
         </div>
         <fieldset disabled={!!locked}>
+          {clip.kind !== "null" &&
+            project.tracks.find((t) => t.id === clip.trackId)?.kind ===
+              "video" && <MaskEditor key={clip.id} clip={clip} />}
           {project.tracks.find((t) => t.id === clip.trackId)?.kind ===
             "video" && (
             <Section title="Parent & controller">

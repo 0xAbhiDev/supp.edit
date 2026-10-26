@@ -4,27 +4,9 @@ import { transcriptSchema } from "../ai/transcript";
 const finite = z.number().finite();
 const frame = finite.int().min(0).max(2_000_000_000);
 const id = z.string().min(1).max(128);
-export const interpolationModes = [
-  "linear",
-  "hold",
-  "ease-in",
-  "ease-out",
-  "ease-in-out",
-  "bezier",
-  "auto-bezier",
-  "continuous-bezier",
-] as const;
-const handle = z.object({
-  x: finite.min(0).max(1),
-  y: finite.min(-100000).max(100000),
-});
-export const keyframeSchema = z.object({
-  frame: finite.int().min(-2_000_000_000).max(2_000_000_000),
-  value: finite.min(-100000).max(100000),
-  easing: z.enum(interpolationModes),
-  inHandle: handle.optional(),
-  outHandle: handle.optional(),
-});
+export { interpolationModes, keyframeSchema } from "../animation/schema";
+import { keyframeSchema } from "../animation/schema";
+import { masksSchema } from "../masks/model";
 export const transformSchema = z.object({
   x: finite.min(-32768).max(32768),
   y: finite.min(-32768).max(32768),
@@ -107,6 +89,7 @@ export const clipSchema = z.object({
     cropRight: channel(),
     cropBottom: channel(),
   }),
+  masks: masksSchema.default([]),
   mask: z
     .object({
       type: z.enum(["rectangle", "ellipse"]),
@@ -165,7 +148,7 @@ export const compositionSchema = z.object({
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(4),
+  schemaVersion: z.literal(5),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -237,6 +220,11 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
         });
       const track = scope.tracks.find((t) => t.id === c.trackId),
         asset = p.assets.find((a) => a.id === c.assetId);
+      if (c.masks.length && (c.kind === "null" || track?.kind !== "video"))
+        ctx.addIssue({
+          code: "custom",
+          message: "Masks require a visual layer",
+        });
       if (c.kind === "composition") {
         const comp = p.compositions.find((x) => x.id === c.compositionId);
         if (
@@ -383,7 +371,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     id: uid(),
     name,
     createdAt: now,
@@ -441,6 +429,7 @@ export function newClip(
       scale: [],
       opacity: [],
     }),
+    masks: [],
     mask: null,
     text: {
       content: "Your title",
@@ -460,12 +449,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (![1, 2, 3, 4].includes(input.schemaVersion as number))
+  if (![1, 2, 3, 4, 5].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–4. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–5. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 4 });
+  return projectSchema.parse({ ...input, schemaVersion: 5 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

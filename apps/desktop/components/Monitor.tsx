@@ -24,6 +24,7 @@ import {
   editPoints,
 } from "../../../packages/commands";
 import { IconButton } from "./Controls";
+import { MaskOverlay } from "./MaskEditor";
 import { usePlayback } from "../../../packages/engine/diagnostics";
 import {
   canvasMatrix,
@@ -266,6 +267,7 @@ export function Monitor({
         >
           <canvas ref={canvas} aria-label="Program monitor" />
           <ControllerOverlay />
+          <MaskOverlay />
           {safe && <div className="safe-guides" />}
           {!project.clips.length && (
             <div className="monitor-empty">

@@ -108,6 +108,7 @@ export function duplicateClip(id: string): Edit {
 }
 export { evaluate, animated } from "../animation";
 import { propertyValue } from "../animation";
+import { offsetMaskKeys } from "../masks/timing";
 import { setProperty } from "./animation";
 export * from "./animation";
 export function splitClip(id: string, at: number): Edit {
@@ -127,6 +128,7 @@ export function splitClip(id: string, at: number): Edit {
         frame: k.frame - offset,
       }));
     }
+    offsetMaskKeys(right, offset);
     c.duration = offset;
     p.clips.push(right);
   };
@@ -162,6 +164,7 @@ export function trimClip(id: string, edge: "in" | "out", target: number): Edit {
         frame: k.frame - delta,
       }));
     }
+    offsetMaskKeys(c, delta);
     c.start += delta;
     c.sourceIn += delta;
     c.duration -= delta;
