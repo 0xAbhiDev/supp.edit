@@ -1,0 +1,13 @@
+# Autonomous AI Editor implementation contract
+
+The 29 October user brief extends the existing continuous product scope. Keep building compositor/effects/Photo while progressively enabling autonomous editing through the SAME command/history/render model. No second editing engine, generated executable code, invented detections, fake progress or unsupported action buttons.
+
+Flow: intent → project/media context → structured brief → capability-checked plan → validation → preview → confirmation/apply → editable project → revisions/undo → ordinary export. QUICK EDIT infers sensible supported defaults; DIRECTOR MODE exposes duration, format, pacing, tone, music/caption/color preferences. Every claimed operation must survive save/reopen and render/export.
+
+Planned modules: AIEditorAgent, IntentInterpreter, ProjectContextBuilder, MediaAnalyzer, EditPlanner, ToolRegistry, ExecutionEngine, ValidationEngine and RevisionEngine. Tool parameters are typed and validated; no model has direct project mutation access. Large plans apply as one atomic history change with stale-revision protection. Revisions target the existing sequence. New rough cuts normally create new composition/sequence content while retaining imported originals.
+
+Capability roadmap: persistent fingerprinted analysis of scenes/quality/motion/audio/beats/speech/transcripts and optional licensed local inference; shot ranking/story/pacing; rough cuts and beat synchronization; time remapping/transitions/reframing; word captions/text edits; audio cleanup/mixing; color/shot matching; tracking/stabilization/segmentation; semantic search/B-roll from imported assets; short candidates; reference pacing profiles; inspectable project creative preferences. Each depends on its real engine/backend. Never label metadata-only selection as semantic understanding or claim strongest lifts without detections.
+
+Existing foundations: provider/model/operation contracts, LOCAL/CLOUD privacy, shared job queue, local SRT caption generation, typed context, real effects/masks/keyframes/compositions/history/export. No installed speech/vision model or cloud transport. Future model setup is explicit with licensing/device/size/version, no automatic multi-GB downloads; external credentials belong in OS secure storage. All external media disclosure requires clear consent.
+
+Acceptance target: import several videos, speech and music; request a 20-second vertical highlight edit with silence removal, captions and beat cuts; inspect plan, apply, preview/edit/revise/undo, save/reopen and export. Until corresponding analyzers/runtimes exist this full scenario must remain explicitly incomplete. Test actual capabilities incrementally with deterministic media fixtures and real rendering.

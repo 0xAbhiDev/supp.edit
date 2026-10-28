@@ -16,6 +16,15 @@ export function compositionView(project: Project, id: string | null): Project {
   if (!id) return project;
   const comp = project.compositions.find((c) => c.id === id);
   if (!comp) return project;
+  if (!Object.isFrozen(project.compositions))
+    return {
+      ...project,
+      name: comp.name,
+      settings: comp.settings,
+      tracks: comp.tracks,
+      clips: comp.layers,
+      markers: [],
+    };
   let cache = views.get(project);
   if (!cache) views.set(project, (cache = new Map()));
   let view = cache.get(id);
@@ -100,8 +109,14 @@ export function precompose(
   return (p) => {
     const selected = p.clips.filter((c) => ids.includes(c.id));
     if (!selected.length) throw new Error("Select at least one layer");
-    if(p.clips.some(c=>c.matte && ids.includes(c.id)!==ids.includes(c.matte.layerId)))
-      throw new Error("Select both the matte source and its consumers before precomposing");
+    if (
+      p.clips.some(
+        (c) => c.matte && ids.includes(c.id) !== ids.includes(c.matte.layerId),
+      )
+    )
+      throw new Error(
+        "Select both the matte source and its consumers before precomposing",
+      );
     if (
       p.clips.some(
         (c) => c.parentId && ids.includes(c.id) !== ids.includes(c.parentId),

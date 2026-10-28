@@ -13,12 +13,18 @@ import type { RendererMode } from "./diagnostics";
 import { MaskRasterizer } from "./masks";
 import { MatteCoverage } from "./matte-coverage";
 import { canvasBlend, type BlendMode } from "../compositing/model";
+import { resolvedEffects } from "../effects/evaluate";
+import { colorEffect } from "./effects-cpu";
 export class Compositor {
   readonly pool: ResourcePool;
   private gpu: GpuRenderer | null = null;
   private cancelled = false;
   private masks = new MaskRasterizer();
   private maskedLayer = document.createElement("canvas");
+  private effectSurface = document.createElement("canvas");
+  get effectSurfaceBytes() {
+    return this.effectSurface.width * this.effectSurface.height * 4;
+  }
   private matteSurfaces = new Map<string, HTMLCanvasElement>();
   private matteCoverage = new MatteCoverage();
   private emptyMatte = document.createElement("canvas");
@@ -221,10 +227,13 @@ export class Compositor {
           mode: BlendMode = l.clip.blendMode,
         ) => {
           const mask = coverage(l.clip);
+          const stack = resolvedEffects(l.clip, scope.frame);
           target.save();
           target.globalCompositeOperation = canvasBlend(mode);
-          if (mask || l.clip.matte || mode !== "normal") {
-            const surface = this.maskedLayer;
+          if (mask || l.clip.matte || mode !== "normal" || stack.length) {
+            if (stack.length && width * height * 8 > 128 * 1024 * 1024)
+              throw new Error("Effect working surfaces exceed 128 MiB budget");
+            let surface = this.maskedLayer;
             surface.width = width;
             surface.height = height;
             const layer = surface.getContext("2d")!;
@@ -237,6 +246,7 @@ export class Compositor {
               prepared.get(l.resourceId),
               scale,
               l.matrix,
+              stack.length > 0,
             );
             if (mask) {
               layer.setTransform(scale, 0, 0, scale, 0, 0);
@@ -250,6 +260,20 @@ export class Compositor {
                 scene.settings.height,
               );
             }
+            for (const effect of stack) {
+              const next =
+                surface === this.maskedLayer
+                  ? this.effectSurface
+                  : this.maskedLayer;
+              next.width = width;
+              next.height = height;
+              const fx = next.getContext("2d")!;
+              if (effect.type === "blur") {
+                fx.filter = `blur(${effect.value * scale}px)`;
+                fx.drawImage(surface, 0, 0);
+              } else colorEffect(surface, fx, effect.type, effect.value);
+              surface = next;
+            }
             if (l.clip.matte) {
               const alpha = this.matteCoverage.raster(
                 matte ?? this.emptyMatte,
@@ -257,10 +281,17 @@ export class Compositor {
                 width,
                 height,
               );
-              layer.resetTransform();
-              layer.globalCompositeOperation = "destination-in";
-              layer.drawImage(alpha, 0, 0, width, height);
+              const final = surface.getContext("2d")!;
+              final.resetTransform();
+              final.filter = "none";
+              final.globalCompositeOperation = "destination-in";
+              final.drawImage(alpha, 0, 0, width, height);
             }
+            if (stack.length)
+              target.globalAlpha = resolveClip(
+                l.clip,
+                scope.frame,
+              ).transform.opacity;
             target.drawImage(surface, 0, 0);
           } else {
             target.scale(scale, scale);
@@ -383,6 +414,7 @@ export class Compositor {
     source?: CanvasImageSource,
     resolution = 1,
     matrix?: Affine,
+    deferOpacity = false,
   ) {
     c = resolveClip(c, frame);
     const t = c.transform,
@@ -399,7 +431,7 @@ export class Compositor {
       Math.max(0, 1 - crop.cropTop - crop.cropBottom) * height,
     );
     ctx.clip();
-    ctx.globalAlpha = t.opacity;
+    ctx.globalAlpha = deferOpacity ? 1 : t.opacity;
     ctx.filter = `blur(${c.effects.blur * resolution}px) brightness(${c.effects.brightness}) contrast(${c.effects.contrast}) saturate(${c.effects.saturation})`;
     if (c.mask) {
       const m = c.mask,
@@ -476,6 +508,7 @@ export class Compositor {
     this.emptyMatte.width = this.emptyMatte.height = 0;
     this.masks.dispose();
     this.maskedLayer.width = this.maskedLayer.height = 0;
+    this.effectSurface.width = this.effectSurface.height = 0;
     for (const surface of this.surfaces.values())
       surface.width = surface.height = 0;
     this.surfaces.clear();

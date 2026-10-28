@@ -29,6 +29,7 @@ import { useClock } from "../../../packages/engine/clock";
 import { Section, NumberField, IconButton } from "./Controls";
 import { MaskEditor } from "./MaskEditor";
 import { CompositingControls } from "./CompositingControls";
+import { EffectStack } from "./EffectStack";
 export function Inspector() {
   const [preserveWorld, setPreserveWorld] = useState(true);
   const project = useEditor(editorProject),
@@ -161,6 +162,7 @@ export function Inspector() {
               <>
                 <CompositingControls clip={clip} />
                 <MaskEditor key={clip.id} clip={clip} />
+                <EffectStack clip={clip} />
               </>
             )}
           {project.tracks.find((t) => t.id === clip.trackId)?.kind ===
@@ -369,7 +371,7 @@ export function Inspector() {
                   at the playhead.
                 </p>
               </Section>
-              <Section title="Color & effects">
+              <Section title="Source correction">
                 {number("Gaussian blur", "blur", 0, 100, 0.5)}
                 {number("Brightness", "brightness", 0, 3, 0.05)}
                 {number("Contrast", "contrast", 0, 3, 0.05)}

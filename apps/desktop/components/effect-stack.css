@@ -1,0 +1,45 @@
+.effect-add {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+.effect-add select {
+  min-width: 0;
+  flex: 1;
+}
+.effect-stack {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.effect-stack li {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px;
+}
+.effect-stack header {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 5px;
+}
+.effect-stack header label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.effect-stack header button {
+  padding: 3px 6px;
+}
+.effect-animation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 10px;
+  align-items: center;
+}
+.effect-stack .number-field > span {
+  max-width: 110px;
+}

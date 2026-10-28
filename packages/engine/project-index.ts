@@ -33,7 +33,7 @@ const clipIndices = new WeakMap<
 >();
 const indices = new WeakMap<Project, ReturnType<typeof createIndex>>();
 function createIndex(p: Project) {
-  let clips = clipIndices.get(p.clips);
+  let clips = Object.isFrozen(p.clips) ? clipIndices.get(p.clips) : undefined;
   if (!clips) {
     const groups = new Map<string, Clip[]>();
     for (const c of p.clips) {
@@ -44,7 +44,7 @@ function createIndex(p: Project) {
       all: new ClipIndex(p.clips),
       tracks: new Map([...groups].map(([k, v]) => [k, new ClipIndex(v)])),
     };
-    clipIndices.set(p.clips, clips);
+    if (Object.isFrozen(p.clips)) clipIndices.set(p.clips, clips);
   }
   return {
     ...clips,
@@ -54,6 +54,12 @@ function createIndex(p: Project) {
   };
 }
 export function projectIndex(p: Project) {
+  if (
+    !Object.isFrozen(p.clips) ||
+    !Object.isFrozen(p.tracks) ||
+    !Object.isFrozen(p.assets)
+  )
+    return createIndex(p);
   let index = indices.get(p);
   if (!index) {
     index = createIndex(p);

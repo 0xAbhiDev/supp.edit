@@ -8,6 +8,7 @@ use std::{
 };
 use thiserror::Error;
 pub mod compositing;
+pub mod effect_stack;
 pub mod masks;
 
 #[derive(Debug, Error)]
@@ -136,6 +137,8 @@ pub struct Clip {
     #[serde(default)]
     pub crop: Crop,
     pub effects: Effects,
+    #[serde(default)]
+    pub effect_stack: Vec<effect_stack::Effect>,
     pub keyframes: Keyframes,
     pub mask: Option<Mask>,
     #[serde(default)]
@@ -375,8 +378,8 @@ fn validate_parenting(clips: &[Clip], tracks: &HashMap<&str, &Track>) -> Result<
 impl Project {
     pub fn validate(&self) -> Result<(), Error> {
         ensure(
-            (1..=6).contains(&self.schema_version),
-            "Unsupported schema version (expected versions 1–6)",
+            (1..=7).contains(&self.schema_version),
+            "Unsupported schema version (expected versions 1–7)",
         )?;
         ensure(
             !self.name.is_empty() && self.name.len() <= 1024,
@@ -639,6 +642,7 @@ impl Project {
                     )?;
                 }
                 masks::validate(&c.masks, track.kind == "video" && c.kind != "null")?;
+                effect_stack::validate(&c.effect_stack, track.kind == "video" && c.kind != "null")?;
                 if let Some(m) = &c.mask {
                     ensure(
                         ["rectangle", "ellipse"].contains(&m.kind.as_str())
@@ -691,7 +695,7 @@ pub fn read(path: &Path) -> Result<Project, Error> {
     )?;
     let mut p: Project = serde_json::from_reader(fs::File::open(path)?)?;
     p.validate()?;
-    p.schema_version = 6;
+    p.schema_version = 7;
     Ok(p)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
@@ -776,13 +780,13 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         let mut value = value;
-        value["schemaVersion"] = 6.into();
+        value["schemaVersion"] = 7.into();
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("parenting.supp");
         fs::write(&path, include_str!("../tests/fixtures/parenting-v4.supp")).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 6);
+        assert_eq!(reopened.schema_version, 7);
         assert_eq!(serde_json::to_value(&reopened).unwrap(), value);
         save(&path, &reopened).unwrap();
         assert_eq!(serde_json::to_value(read(&path).unwrap()).unwrap(), value);
@@ -824,7 +828,7 @@ mod tests {
             let path = dir.path().join(format!("v{version}.supp"));
             fs::write(&path, &original).unwrap();
             let reopened = read(&path).unwrap();
-            assert_eq!(reopened.schema_version, 6);
+            assert_eq!(reopened.schema_version, 7);
             assert_eq!(fs::read(&path).unwrap(), original);
             for clip in reopened
                 .clips
@@ -1035,7 +1039,7 @@ mod tests {
         let path = dir.path().join("nested.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        p.schema_version = 6;
+        p.schema_version = 7;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1061,7 +1065,7 @@ mod tests {
         let path = dir.path().join("animation.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 6);
+        assert_eq!(reopened.schema_version, 7);
         assert_eq!(reopened.clips[0].transform.scale_x, 1.);
         assert_eq!(
             reopened.clips[0].keyframes.extra["scaleX"][0]
@@ -1071,7 +1075,7 @@ mod tests {
                 .x,
             0.6
         );
-        p.schema_version = 6;
+        p.schema_version = 7;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1088,7 +1092,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/project.supp"),
         )
         .unwrap();
-        assert_eq!(read(&old).unwrap().schema_version, 6);
+        assert_eq!(read(&old).unwrap().schema_version, 7);
         assert!(fs::read_to_string(old)
             .unwrap()
             .contains("\"schemaVersion\":1"));

@@ -56,6 +56,16 @@ export interface AIProjectContext {
     layerId: string;
     parameters: Clip["effects"];
   }>[];
+  readonly effectStacks: readonly Readonly<{
+    layerId: string;
+    entries: readonly Readonly<{
+      id: string;
+      type: Clip["effectStack"][number]["type"];
+      enabled: boolean;
+      value: number;
+      keyCount: number;
+    }>[];
+  }>[];
   readonly bezierMasks: readonly Readonly<{
     layerId: string;
     maskId: string;
@@ -190,6 +200,16 @@ export function snapshotContext(
       layerId: c.id,
       blendMode: c.blendMode,
       matte: c.matte ? { layerId: c.matte.layerId, mode: c.matte.mode } : null,
+    })),
+    effectStacks: selected.map((c) => ({
+      layerId: c.id,
+      entries: c.effectStack.map((e) => ({
+        id: e.id,
+        type: e.type,
+        enabled: e.enabled,
+        value: e.value,
+        keyCount: e.keys.length,
+      })),
     })),
   });
 }

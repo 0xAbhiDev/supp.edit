@@ -8,6 +8,7 @@ const id = z.string().min(1).max(128);
 export { interpolationModes, keyframeSchema } from "../animation/schema";
 import { keyframeSchema } from "../animation/schema";
 import { masksSchema } from "../masks/model";
+import { effectStackSchema } from "../effects/model";
 export const transformSchema = z.object({
   x: finite.min(-32768).max(32768),
   y: finite.min(-32768).max(32768),
@@ -93,6 +94,7 @@ export const clipSchema = z.object({
     cropBottom: channel(),
   }),
   masks: masksSchema.default([]),
+  effectStack: effectStackSchema.default([]),
   mask: z
     .object({
       type: z.enum(["rectangle", "ellipse"]),
@@ -151,7 +153,7 @@ export const compositionSchema = z.object({
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(6),
+  schemaVersion: z.literal(7),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -224,6 +226,14 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
         });
       const track = scope.tracks.find((t) => t.id === c.trackId),
         asset = p.assets.find((a) => a.id === c.assetId);
+      if (
+        c.effectStack.length &&
+        (c.kind === "null" || track?.kind !== "video")
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "Effects require a visual layer",
+        });
       if (c.masks.length && (c.kind === "null" || track?.kind !== "video"))
         ctx.addIssue({
           code: "custom",
@@ -375,7 +385,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     id: uid(),
     name,
     createdAt: now,
@@ -428,6 +438,7 @@ export function newClip(
     }),
     crop: cropSchema.parse({}),
     effects: { blur: 0, brightness: 1, contrast: 1, saturation: 1 },
+    effectStack: [],
     keyframes: clipSchema.shape.keyframes.parse({
       x: [],
       y: [],
@@ -454,12 +465,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (![1, 2, 3, 4, 5, 6].includes(input.schemaVersion as number))
+  if (![1, 2, 3, 4, 5, 6, 7].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–6. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–7. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 6 });
+  return projectSchema.parse({ ...input, schemaVersion: 7 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

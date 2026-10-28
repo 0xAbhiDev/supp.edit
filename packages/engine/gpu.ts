@@ -12,6 +12,7 @@ import {
 import { LruCache } from "./lru";
 import { blendModes, matteModes } from "../compositing/model";
 import { blendShader } from "./blend-shader";
+import { resolvedEffects } from "../effects/evaluate";
 
 const vertex = `#version 300 es
 in vec2 a_position;
@@ -63,8 +64,9 @@ void main(){
   rgb=(rgb-0.5)*u_color.y+0.5;
   float luminance=dot(rgb,vec3(0.2126,0.7152,0.0722));
   rgb=mix(vec3(luminance),rgb,u_color.z);
+  if(u_pass==3){result=vec4(clamp(rgb,0.0,1.0)*pixel.a,pixel.a);return;}
   float mask=1.0;
-  {
+  if(u_pass!=4){
     vec2 local=(u_inverse*vec3(v_uv*u_project,1.0)).xy;
     vec2 uv=local/u_project+0.5;
     if(u_hasBezierMask) mask*=float(all(greaterThanEqual(uv,vec2(0)))&&all(lessThanEqual(uv,vec2(1))))*texture(u_bezierMask,clamp(uv,0.0,1.0)).a;
@@ -354,6 +356,7 @@ export class GpuRenderer {
     matteSource?: HTMLCanvasElement,
   ) {
     const matrix = canvasMatrix(p, world ?? localMatrix(c, frame));
+    const stack = resolvedEffects(c, frame);
     c = resolveClip(c, frame);
     const gl = this.gl,
       t = c.transform,
@@ -527,6 +530,59 @@ export class GpuRenderer {
         this.maskTexture.input = coverage;
       }
       gl.activeTexture(gl.TEXTURE0);
+    }
+    if (stack.length) {
+      // First preserve legacy source corrections and apply layer masks, with no final opacity/matte.
+      gl.disable(gl.BLEND);
+      gl.uniform1f(this.uniform("u_opacity"), 1);
+      gl.uniform1i(this.uniform("u_matteMode"), 0);
+      gl.uniform1i(this.uniform("u_blendMode"), 0);
+      this.target(this.targets[1]);
+      gl.bindTexture(gl.TEXTURE_2D, this.targets[0].texture);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      let current = 1;
+      for (const effect of stack) {
+        if (effect.type === "blur") {
+          if (effect.value === 0) continue;
+          gl.uniform1i(this.uniform("u_pass"), 1);
+          gl.uniform1f(this.uniform("u_sigma"), effect.value * scale);
+          for (const direction of [
+            [1 / this.width, 0],
+            [0, 1 / this.height],
+          ]) {
+            const next = 1 - current;
+            this.target(this.targets[next]);
+            gl.bindTexture(gl.TEXTURE_2D, this.targets[current].texture);
+            gl.uniform2f(
+              this.uniform("u_direction"),
+              direction[0],
+              direction[1],
+            );
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            current = next;
+          }
+        } else {
+          const next = 1 - current;
+          this.target(this.targets[next]);
+          gl.bindTexture(gl.TEXTURE_2D, this.targets[current].texture);
+          gl.uniform1i(this.uniform("u_pass"), 3);
+          gl.uniform4f(
+            this.uniform("u_color"),
+            effect.type === "brightness" ? effect.value : 1,
+            effect.type === "contrast" ? effect.value : 1,
+            effect.type === "saturation" ? effect.value : 1,
+            0,
+          );
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          current = next;
+        }
+      }
+      this.target(null);
+      gl.bindTexture(gl.TEXTURE_2D, this.targets[current].texture);
+      gl.uniform1i(this.uniform("u_pass"), 4);
+      gl.uniform4f(this.uniform("u_color"), 1, 1, 1, 0);
+      gl.uniform1f(this.uniform("u_opacity"), t.opacity);
+      gl.enable(gl.BLEND);
     }
     gl.uniform1i(
       this.uniform("u_matteMode"),

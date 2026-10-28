@@ -1,6 +1,6 @@
-# Project format v6
+# Project format v7
 
-`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 6`. Both readers accept v1, v2, v3, v4 and v5 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Migration also fills empty compositions and transcripts. Shared fixtures cover legacy versions and the current version.
+`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 7`. Both readers accept v1, v2, v3, v4 and v5 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Migration also fills empty compositions and transcripts. Shared fixtures cover legacy versions and the current version.
 
 Root fields: `id`, `name`, `createdAt`, `modifiedAt` (UTC ISO timestamps), `settings`, `assets`, `tracks`, `clips`, `markers`, `compositions`, `transcripts`. Settings store width/height, `{num, den}` FPS, and `colorSpace: "srgb"`.
 
@@ -31,3 +31,5 @@ Parenting: optional parentId names a visual clip in the same scope. parentOffset
 Bezier masks (v5): masks defaults to []. Each mask stores id/name/enabled/mode/inverted/closed, 3–128 vertices, opacity 0–1, feather 0–256 px and expansion −512–512 px. Vertices have stable IDs, x/y coordinates −4…5, and relative in/out tangents −8…8. Up to 32 masks per visual layer; Null/audio layers cannot have masks. Each mask owns opacity/feather/expansion scalar channels (up to 1,000 keys each) and up to 128 path keys with linear/hold interpolation. Frames are relative to clip start and can be negative for trim/split preservation. Every path key must retain the base vertex IDs/order/count. Duplicate mask IDs within a clip, duplicate vertex IDs and duplicate key times fail validation.
 
 Version 6: blendMode defaults to normal. Optional matte stores {layerId, mode}, where mode is alpha, alpha-inverted, luma or luma-inverted. References must resolve to visual, non-Null layers in the same scope; cycles and chains beyond 32 links are invalid. Legacy files receive normal blending with no matte.
+
+Version 7: effectStack defaults to []. Each ordered entry has id, type (blur/brightness/contrast/saturation), enabled, value and keys. Up to 32 entries, unique IDs per layer, at most 1000 unique-time scalar keys per entry. Values are 0–100 for blur and 0–3 otherwise. Keys use existing interpolation modes and are relative to layer start. Only visual non-Null layers accept stacks. Legacy effects and keyframes retain their original source-correction semantics.

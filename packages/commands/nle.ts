@@ -9,6 +9,7 @@ import {
 } from "../project-schema";
 import { editable, type Edit } from "./index";
 import { offsetMaskKeys } from "../masks/timing";
+import { offsetEffectKeys } from "../effects/evaluate";
 function sourceLimit(p: Project, c: Clip) {
   const a = p.assets.find((a) => a.id === c.assetId);
   return a && a.kind !== "image"
@@ -20,6 +21,7 @@ function timed(p: Project, c: Clip) {
 }
 function offsetKeys(c: Clip, delta: number) {
   offsetMaskKeys(c, delta);
+  offsetEffectKeys(c, delta);
   for (const key of Object.keys(c.keyframes) as AnimatedProperty[])
     c.keyframes[key] = c.keyframes[key].map((k) => ({
       ...k,

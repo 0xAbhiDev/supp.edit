@@ -4,6 +4,7 @@ import { ClipIndex, projectIndex } from "../packages/engine/project-index";
 import { newProject, newClip } from "../packages/project-schema";
 import { History, moveClip } from "../packages/commands";
 import { useEditor } from "../packages/editor-state";
+import { freeze } from "immer";
 describe("bounded media storage", () => {
   it("evicts the least recently used surface and releases every allocation exactly once", () => {
     const released: string[] = [],
@@ -40,7 +41,15 @@ describe("timeline index and history identity", () => {
     expect(index.range(15, 16)).toEqual([a]);
     expect(index.range(100, 200)).toEqual([]);
     expect(index.range(209, 210)).toEqual([c]);
+    freeze(p,true);
     expect(projectIndex(p)).toBe(projectIndex(p));
+  });
+  it("does not retain stale indices for mutable project builders",()=>{
+    const p=newProject(),a=newClip(p.tracks[0].id,0,30,"shape");p.clips=[a];
+    expect(projectIndex(p).all.range(0,1)).toHaveLength(1);
+    p.clips.push(newClip(p.tracks[0].id,0,30,"shape"));
+    expect(projectIndex(p).all.range(0,1)).toHaveLength(2);
+    a.start=50;expect(projectIndex(p).all.range(0,1)).toHaveLength(1);
   });
   it("handles 100,000 clips without a whole-array viewport scan", () => {
     const p = newProject();

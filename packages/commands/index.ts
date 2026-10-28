@@ -17,6 +17,7 @@ import {
 } from "../project-schema";
 enablePatches();
 import { assertMattes } from "../compositing/model";
+import { assertEffectStacks } from "../effects/model";
 export {
   rippleTrim,
   rollEdit,
@@ -53,6 +54,7 @@ export class History {
     if (!forward.length) return project;
     assertParenting(next);
     assertMattes(next);
+    assertEffectStacks(next);
     const modifiedAt = new Date().toISOString();
     forward.push({ op: "replace", path: ["modifiedAt"], value: modifiedAt });
     inverse.unshift({
@@ -111,6 +113,7 @@ export function duplicateClip(id: string): Edit {
 export { evaluate, animated } from "../animation";
 import { propertyValue } from "../animation";
 import { offsetMaskKeys } from "../masks/timing";
+import { offsetEffectKeys } from "../effects/evaluate";
 import { setProperty } from "./animation";
 export * from "./animation";
 export function splitClip(id: string, at: number): Edit {
@@ -131,6 +134,7 @@ export function splitClip(id: string, at: number): Edit {
       }));
     }
     offsetMaskKeys(right, offset);
+    offsetEffectKeys(right, offset);
     c.duration = offset;
     p.clips.push(right);
   };
@@ -167,6 +171,7 @@ export function trimClip(id: string, edge: "in" | "out", target: number): Edit {
       }));
     }
     offsetMaskKeys(c, delta);
+    offsetEffectKeys(c, delta);
     c.start += delta;
     c.sourceIn += delta;
     c.duration -= delta;
