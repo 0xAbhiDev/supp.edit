@@ -1,6 +1,6 @@
-# Implementation status — 26 October 2026
+# Implementation status — 29 October 2026
 
-The existing repository, main sequence and animation tools are retained. Schema v5 retains nested sources/transcripts/parenting and adds animated Bezier masks. COMPLETE below means the stated slice has command/history, persistence, rendering and tests where applicable; the broader suite is unfinished.
+The existing repository, main sequence and animation tools are retained. Schema v6 retains nested sources/transcripts/parenting and adds animated Bezier masks. COMPLETE below means the stated slice has command/history, persistence, rendering and tests where applicable; the broader suite is unfinished.
 
 | Subsystem              | Status and delivered scope                                                                                              | Remaining                                                                                                                           |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -8,7 +8,7 @@ The existing repository, main sequence and animation tools are retained. Schema 
 | NLE                    | PARTIAL: move/trim/split/ripple/roll/slip/slide/insert/overwrite, source In/Out, locks                                  | Linked editing, sync lock, speed/remap, full trim and range tools                                                                   |
 | Animation              | COMPLETE numeric slice: 17 channels, eight interpolation modes, editable value/speed graphs, shared render/export       | Path/spatial animation, marquee selection, large-curve performance                                                                  |
 | Compositions           | COMPLETE nesting slice: definitions, instances/precompose, mixed-rate DAG, scoped edits, save/reopen/render/export      | Parenting/Null controllers and layer timeline core delivered; canvas handles, multi-layer gestures and inline property lanes remain |
-| Masks/mattes/blends    | PARTIAL: animated Bezier masks, feather/expansion/inversion/combinations and normal source-over                                                                 | Alpha/luma mattes, 17 blends, graph lanes for mask scalar channels                                                               |
+| Masks/mattes/blends    | PARTIAL: animated Bezier masks, feather/expansion/inversion/combinations and alpha/luma mattes with 17 blend modes                                                                 | Graph lanes for mask scalar channels, advanced roto                                                               |
 | Effects/adjustments    | PARTIAL: animated blur/brightness/contrast/saturation                                                                   | Ordered stacks, expanded effects, curves, presets/search and adjustment layers                                                      |
 | Photo/color            | NOT STARTED independent engine; basic shared color controls exist                                                       | Raster documents, groups, selections, brushes, fills, layer masks, adjustments and color management                                 |
 | Audio/transitions      | PARTIAL: source gain/mute/solo and recursive trimmed/delayed native mix                                                 | Sample-accurate transport, envelopes, buses, meters/effects and transition engine                                                   |
@@ -17,6 +17,6 @@ The existing repository, main sequence and animation tools are retained. Schema 
 | Proxies/RAW/3D/plugins | NOT STARTED runtime; some design documents exist                                                                        | Derived proxy pipeline, LibRaw, cameras/lights, safe extension host                                                                 |
 | UX/release             | PARTIAL: resizable panels, themes, shortcuts, unsigned Windows embedded build                                           | Docking, accessibility/scale audit, installers/signing, macOS/Linux and long/VFR/4K/corrupt-media matrix                            |
 
-Animated Bezier masks are delivered. Active subsystem: alpha/luma mattes and blend modes. Continue masks/mattes/blends and ordered effects before Photo. Large AI features remain deferred.
+Animated Bezier masks are delivered. Mattes and blend modes are delivered. Active subsystem: ordered effects, then adjustments and Photo. Large AI features remain deferred.
 
-Verification: 65 TypeScript tests, 19 Rust tests, existing browser regressions plus parent/layer coverage, nested real-footage parity/reopen/native encoding. See VALIDATION.md and ../CURRENT_STATE.md for measurements and limits.
+Verification: 71 TypeScript tests, 21 Rust tests, existing browser regressions plus parent/layer coverage, nested real-footage parity/reopen/native encoding. See VALIDATION.md and ../CURRENT_STATE.md for measurements and limits.

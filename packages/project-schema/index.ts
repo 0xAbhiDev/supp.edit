@@ -1,3 +1,4 @@
+import { blendModes, matteSchema, assertMattes } from "../compositing/model";
 import { z } from "zod";
 import { transcriptSchema } from "../ai/transcript";
 
@@ -47,6 +48,8 @@ export const clipSchema = z.object({
   kind: z.enum(["media", "text", "shape", "composition", "null"]),
   compositionId: id.optional(),
   parentId: id.optional(),
+  matte: matteSchema.optional(),
+  blendMode: z.enum(blendModes).default("normal"),
   parentOffset: z
     .tuple([
       finite.min(-1e9).max(1e9),
@@ -148,7 +151,7 @@ export const compositionSchema = z.object({
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(5),
+  schemaVersion: z.literal(6),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -184,6 +187,7 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
   const allLayers = scopes.flatMap((s) => s.layers);
   try {
     assertParenting(p);
+    assertMattes(p);
   } catch (error) {
     ctx.addIssue({
       code: "custom",
@@ -371,7 +375,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     id: uid(),
     name,
     createdAt: now,
@@ -411,6 +415,7 @@ export function newClip(
     sourceIn: 0,
     kind,
     parentOffset: [1, 0, 0, 1, 0, 0],
+    blendMode: "normal",
     assetId: asset?.id,
     name: asset?.name ?? (kind === "text" ? "Your title" : "Shape"),
     gain: 0,
@@ -449,12 +454,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (![1, 2, 3, 4, 5].includes(input.schemaVersion as number))
+  if (![1, 2, 3, 4, 5, 6].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–5. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–6. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 5 });
+  return projectSchema.parse({ ...input, schemaVersion: 6 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

@@ -1,6 +1,6 @@
-# Project format v5
+# Project format v6
 
-`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 5`. Both readers accept v1, v2, v3, v4 and v5 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Migration also fills empty compositions and transcripts. Shared fixtures cover legacy versions and the current version.
+`.supp` and `.suppedit` contain UTF-8 JSON. New saves use `schemaVersion: 6`. Both readers accept v1, v2, v3, v4 and v5 and reject newer versions. Migration copies the input, fills identity axis scales/zero anchors/zero crop and empty new channels, and advances the in-memory version. Reading never rewrites the source file. Migration also fills empty compositions and transcripts. Shared fixtures cover legacy versions and the current version.
 
 Root fields: `id`, `name`, `createdAt`, `modifiedAt` (UTC ISO timestamps), `settings`, `assets`, `tracks`, `clips`, `markers`, `compositions`, `transcripts`. Settings store width/height, `{num, den}` FPS, and `colorSpace: "srgb"`.
 
@@ -29,3 +29,5 @@ Transcripts contain id, name, source (srt or transcription), optional language/a
 Parenting: optional parentId names a visual clip in the same scope. parentOffset defaults to [1,0,0,1,0,0] and is a finite affine matrix with each component bounded to ±1e9. The matrix preserves shear when reparenting/unparenting. Maximum 64 parent links, with cycles/self/missing/cross-scope/audio parents rejected. Parent opacity/visibility/effects are independent of children.
 
 Bezier masks (v5): masks defaults to []. Each mask stores id/name/enabled/mode/inverted/closed, 3–128 vertices, opacity 0–1, feather 0–256 px and expansion −512–512 px. Vertices have stable IDs, x/y coordinates −4…5, and relative in/out tangents −8…8. Up to 32 masks per visual layer; Null/audio layers cannot have masks. Each mask owns opacity/feather/expansion scalar channels (up to 1,000 keys each) and up to 128 path keys with linear/hold interpolation. Frames are relative to clip start and can be negative for trim/split preservation. Every path key must retain the base vertex IDs/order/count. Duplicate mask IDs within a clip, duplicate vertex IDs and duplicate key times fail validation.
+
+Version 6: blendMode defaults to normal. Optional matte stores {layerId, mode}, where mode is alpha, alpha-inverted, luma or luma-inverted. References must resolve to visual, non-Null layers in the same scope; cycles and chains beyond 32 links are invalid. Legacy files receive normal blending with no matte.

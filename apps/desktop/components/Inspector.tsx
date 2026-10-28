@@ -28,6 +28,7 @@ import {
 import { useClock } from "../../../packages/engine/clock";
 import { Section, NumberField, IconButton } from "./Controls";
 import { MaskEditor } from "./MaskEditor";
+import { CompositingControls } from "./CompositingControls";
 export function Inspector() {
   const [preserveWorld, setPreserveWorld] = useState(true);
   const project = useEditor(editorProject),
@@ -156,7 +157,12 @@ export function Inspector() {
         <fieldset disabled={!!locked}>
           {clip.kind !== "null" &&
             project.tracks.find((t) => t.id === clip.trackId)?.kind ===
-              "video" && <MaskEditor key={clip.id} clip={clip} />}
+              "video" && (
+              <>
+                <CompositingControls clip={clip} />
+                <MaskEditor key={clip.id} clip={clip} />
+              </>
+            )}
           {project.tracks.find((t) => t.id === clip.trackId)?.kind ===
             "video" && (
             <Section title="Parent & controller">

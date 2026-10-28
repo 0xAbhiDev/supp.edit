@@ -100,6 +100,8 @@ export function precompose(
   return (p) => {
     const selected = p.clips.filter((c) => ids.includes(c.id));
     if (!selected.length) throw new Error("Select at least one layer");
+    if(p.clips.some(c=>c.matte && ids.includes(c.id)!==ids.includes(c.matte.layerId)))
+      throw new Error("Select both the matte source and its consumers before precomposing");
     if (
       p.clips.some(
         (c) => c.parentId && ids.includes(c.id) !== ids.includes(c.parentId),

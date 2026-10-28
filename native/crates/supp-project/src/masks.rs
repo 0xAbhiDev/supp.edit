@@ -182,7 +182,7 @@ mod tests {
         let path = dir.path().join("masks.supp");
         save(&path, &project).unwrap();
         let result = read(&path).unwrap();
-        assert_eq!(result.schema_version, 5);
+        assert_eq!(result.schema_version, 6);
         assert_eq!(
             serde_json::to_value(&result.clips[0].masks).unwrap(),
             serde_json::to_value(&project.clips[0].masks).unwrap()

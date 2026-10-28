@@ -56,6 +56,23 @@ export interface AIProjectContext {
     layerId: string;
     parameters: Clip["effects"];
   }>[];
+  readonly bezierMasks: readonly Readonly<{
+    layerId: string;
+    maskId: string;
+    mode: Clip["masks"][number]["mode"];
+    enabled: boolean;
+    inverted: boolean;
+    vertexCount: number;
+    pathKeyCount: number;
+    opacity: number;
+    feather: number;
+    expansion: number;
+  }>[];
+  readonly compositing: readonly Readonly<{
+    layerId: string;
+    blendMode: Clip["blendMode"];
+    matte: Readonly<NonNullable<Clip["matte"]>> | null;
+  }>[];
 }
 export function freezeSnapshot<T>(value: T): T {
   if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
@@ -154,6 +171,25 @@ export function snapshotContext(
         contrast: c.effects.contrast,
         saturation: c.effects.saturation,
       },
+    })),
+    bezierMasks: selected.flatMap((c) =>
+      c.masks.map((m) => ({
+        layerId: c.id,
+        maskId: m.id,
+        mode: m.mode,
+        enabled: m.enabled,
+        inverted: m.inverted,
+        vertexCount: m.vertices.length,
+        pathKeyCount: m.pathKeys.length,
+        opacity: m.opacity,
+        feather: m.feather,
+        expansion: m.expansion,
+      })),
+    ),
+    compositing: selected.map((c) => ({
+      layerId: c.id,
+      blendMode: c.blendMode,
+      matte: c.matte ? { layerId: c.matte.layerId, mode: c.matte.mode } : null,
     })),
   });
 }

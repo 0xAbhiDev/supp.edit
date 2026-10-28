@@ -1,0 +1,11 @@
+.compositing-controls label {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.compositing-controls select {
+  min-width: 0;
+  width: 100%;
+}

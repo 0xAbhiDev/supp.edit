@@ -53,3 +53,5 @@ NativeCredentialStore is an opaque-handle interface only. Implement setup/access
 ## Future runtime
 
 Inference belongs in bounded native workers off the UI thread. Explicit model installation must disclose size/license/source, verify a trusted manifest and digest, support cancellation and atomically publish installation state. Distinguish advertised acceleration from a successful runtime probe. Providers must declare supported tasks/memory, validate result artifacts and preserve provenance. Build compositor masks/layers/effect commands before enabling AI tasks that require them. There is no automatic installation path.
+
+Context now projects selected Bezier mask IDs, modes, enabled/inverted flags, vertex/key counts and scalar properties, plus matte references and blend modes. This allowlist is frozen independently of project objects; it excludes full paths/vertices and never initiates transport.

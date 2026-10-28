@@ -10,6 +10,8 @@ import {
   type Affine,
 } from "../animation/affine";
 import { LruCache } from "./lru";
+import { blendModes, matteModes } from "../compositing/model";
+import { blendShader } from "./blend-shader";
 
 const vertex = `#version 300 es
 in vec2 a_position;
@@ -27,6 +29,10 @@ precision highp float;
 uniform sampler2D u_image;
 uniform sampler2D u_bezierMask;
 uniform bool u_hasBezierMask;
+uniform sampler2D u_matte;
+uniform sampler2D u_backdrop;
+uniform int u_matteMode;
+uniform int u_blendMode;
 uniform int u_pass;
 uniform vec2 u_output;
 uniform vec2 u_direction;
@@ -40,6 +46,7 @@ uniform float u_opacity;
 uniform vec2 u_project;
 in vec2 v_uv;
 out vec4 result;
+${blendShader}
 vec4 sampleFrame(vec2 uv){if(any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1))))return vec4(0);return texture(u_image,vec2(uv.x,1.0-uv.y));}
 void main(){
   if(u_pass==0){result=texture(u_image,v_uv);return;}
@@ -68,8 +75,15 @@ void main(){
     else {float d=length(normalized*2.0-1.0);float edge=max(fwidth(d),0.0001);mask*=1.0-smoothstep(1.0-edge,1.0+edge,d);}
   }
   }
+  if(u_matteMode>0){
+    vec4 m=texture(u_matte,v_uv);
+    float coverage=u_matteMode<=2?m.a:dot(m.rgb,vec3(.2126,.7152,.0722));
+    if(u_matteMode==2||u_matteMode==4)coverage=1.0-coverage;
+    mask*=coverage;
+  }
   float alpha=pixel.a*u_opacity*mask;
   result=vec4(clamp(rgb,0.0,1.0)*alpha,alpha);
+  if(u_blendMode>0)result=blendPixel(texture(u_backdrop,vec2(v_uv.x,1.0-v_uv.y)),result,u_blendMode);
 }`;
 type Texture = {
   texture: WebGLTexture;
@@ -98,6 +112,8 @@ export class GpuRenderer {
   private fbo: WebGLFramebuffer;
   private targets: Texture[] = [];
   private maskTexture?: Texture;
+  private matteTexture?: Texture;
+  private backdrop?: Texture;
   private textures: LruCache<string, Texture>;
   private generators = new LruCache<string, Generated>(32 * 1024 * 1024, 24);
   private width = 0;
@@ -196,6 +212,10 @@ export class GpuRenderer {
   get bytes() {
     return (
       this.textures.bytes +
+      (this.matteTexture
+        ? this.matteTexture.width * this.matteTexture.height * 4
+        : 0) +
+      (this.backdrop ? this.backdrop.width * this.backdrop.height * 4 : 0) +
       (this.maskTexture
         ? this.maskTexture.width * this.maskTexture.height * 4
         : 0) +
@@ -331,6 +351,7 @@ export class GpuRenderer {
     source?: CanvasImageSource,
     world?: Affine,
     coverage?: HTMLCanvasElement,
+    matteSource?: HTMLCanvasElement,
   ) {
     const matrix = canvasMatrix(p, world ?? localMatrix(c, frame));
     c = resolveClip(c, frame);
@@ -507,12 +528,69 @@ export class GpuRenderer {
       }
       gl.activeTexture(gl.TEXTURE0);
     }
+    gl.uniform1i(
+      this.uniform("u_matteMode"),
+      c.matte ? matteModes.indexOf(c.matte.mode) + 1 : 0,
+    );
+    gl.uniform1i(this.uniform("u_matte"), 2);
+    if (c.matte && matteSource) {
+      gl.activeTexture(gl.TEXTURE2);
+      if (
+        this.matteTexture &&
+        (this.matteTexture.width !== matteSource.width ||
+          this.matteTexture.height !== matteSource.height)
+      ) {
+        gl.deleteTexture(this.matteTexture.texture);
+        this.matteTexture = undefined;
+      }
+      this.matteTexture ??= this.texture(matteSource.width, matteSource.height);
+      gl.bindTexture(gl.TEXTURE_2D, this.matteTexture.texture);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        matteSource,
+      );
+      gl.activeTexture(gl.TEXTURE0);
+    }
+    const blend = blendModes.indexOf(c.blendMode);
+    gl.uniform1i(this.uniform("u_blendMode"), blend);
+    gl.uniform1i(this.uniform("u_backdrop"), 3);
+    if (blend > 0) {
+      gl.activeTexture(gl.TEXTURE3);
+      if (
+        this.backdrop &&
+        (this.backdrop.width !== this.width ||
+          this.backdrop.height !== this.height)
+      ) {
+        gl.deleteTexture(this.backdrop.texture);
+        this.backdrop = undefined;
+      }
+      this.backdrop ??= this.texture(this.width, this.height);
+      gl.bindTexture(gl.TEXTURE_2D, this.backdrop.texture);
+      gl.copyTexSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        0,
+        0,
+        0,
+        0,
+        this.width,
+        this.height,
+      );
+      gl.activeTexture(gl.TEXTURE0);
+      gl.disable(gl.BLEND);
+    }
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     const error = gl.getError();
     if (error !== gl.NO_ERROR) throw new Error(`GPU rendering error ${error}`);
   }
   dispose() {
     if (this.maskTexture) this.gl.deleteTexture(this.maskTexture.texture);
+    if (this.matteTexture) this.gl.deleteTexture(this.matteTexture.texture);
+    if (this.backdrop) this.gl.deleteTexture(this.backdrop.texture);
     this.textures.clear();
     this.generators.clear();
     this.targets.forEach((t) => this.gl.deleteTexture(t.texture));

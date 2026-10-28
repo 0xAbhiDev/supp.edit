@@ -16,6 +16,7 @@ import {
   assertParenting,
 } from "../project-schema";
 enablePatches();
+import { assertMattes } from "../compositing/model";
 export {
   rippleTrim,
   rollEdit,
@@ -51,6 +52,7 @@ export class History {
     const [next, forward, inverse] = produceWithPatches(project, edit);
     if (!forward.length) return project;
     assertParenting(next);
+    assertMattes(next);
     const modifiedAt = new Date().toISOString();
     forward.push({ op: "replace", path: ["modifiedAt"], value: modifiedAt });
     inverse.unshift({
@@ -189,6 +191,8 @@ export function deleteClip(id: string, ripple = false): Edit {
     if (!c) return;
     if (p.clips.some((child) => child.parentId === id))
       throw new Error("Unparent child layers before deleting their controller");
+    if (p.clips.some((child) => child.matte?.layerId === id))
+      throw new Error("Remove matte references before deleting their source");
     if (ripple)
       for (const other of p.clips)
         if (other.trackId === c.trackId && other.start >= c.start + c.duration)
