@@ -9,3 +9,7 @@
 - The existing 1080p ten-layer SwiftShader profile exceeded its 120-second timeout. This remains a performance gap, not a successful profile. Physical GPU, 4K, sustained-load and cross-platform certification are open.
 
 Evidence: ../verification/effects. Earlier histories and validation reports are retained.
+
+## Safe AI command slice
+
+82 TypeScript tests pass after adding the typed agent registry and preview/apply boundary. The browser agent case passes: a prompt creates a real effect plan; Preview leaves the original project untouched; Create edit adds the effect; a revision updates the same effect; Undo/Redo, stale-preview rejection, save/reopen and PNG export work. Unsupported creative analysis produces a Failed job and no project changes. The existing SRT-caption browser regression also passes. No creative rough-cut, speech/vision, beat-sync or full autonomous-edit acceptance claim is made.

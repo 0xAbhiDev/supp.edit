@@ -7,6 +7,7 @@ import {
 } from "../../../packages/ai/captions";
 import { MAX_SRT_BYTES } from "../../../packages/ai/srt";
 import "./ai-studio.css";
+import { AIEditBox } from "./AIEditBox";
 
 export function AIStudio() {
   const project = useEditor((s) => s.project),
@@ -80,6 +81,7 @@ export function AIStudio() {
         </div>
         <span className="ai-local">LOCAL · No media upload</span>
       </header>
+      <AIEditBox />
       <div className="ai-columns">
         <div className="ai-input">
           <label>

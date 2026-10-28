@@ -2,6 +2,7 @@ import type { Project, Clip } from "../project-schema";
 import type { Transcript } from "./transcript";
 
 export interface ContextSelection {
+  frame?: number;
   selectedClipIds?: readonly string[];
   selectedLayerId?: string | null;
   activeCompositionId?: string | null;
@@ -18,6 +19,15 @@ export interface CompositionContextAdapter {
   snapshot(project: Project, compositionId: string): CompositionContext | null;
 }
 export interface AIProjectContext {
+  readonly frame: number;
+  readonly layers: readonly Readonly<{
+    id: string;
+    name: string;
+    kind: Clip["kind"];
+    start: number;
+    duration: number;
+    sourceIn: number;
+  }>[];
   readonly snapshotId: string;
   readonly projectId: string;
   readonly projectName: string;
@@ -99,6 +109,9 @@ export function snapshotContext(
 ): AIProjectContext {
   if (!Number.isSafeInteger(revision) || revision < 0)
     throw new Error("Invalid project revision");
+  const frame = selection.frame ?? 0;
+  if (!Number.isSafeInteger(frame) || frame < 0 || frame > 2_000_000_000)
+    throw new Error("Invalid context frame");
   const selectedClipIds = [...new Set(selection.selectedClipIds ?? [])].filter(
     (id) => project.clips.some((c) => c.id === id),
   );
@@ -112,6 +125,15 @@ export function snapshotContext(
     throw new Error("Return to the main sequence before using AI Studio");
   // Explicit field projection is the privacy boundary; no object spread from project/media.
   return freezeSnapshot({
+    frame,
+    layers: selected.map((c) => ({
+      id: c.id,
+      name: c.name,
+      kind: c.kind,
+      start: c.start,
+      duration: c.duration,
+      sourceIn: c.sourceIn,
+    })),
     snapshotId: crypto.randomUUID(),
     projectId: project.id,
     projectName: project.name,

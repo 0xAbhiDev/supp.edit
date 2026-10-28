@@ -17,13 +17,17 @@ function layer(p: Project, id: string) {
     throw new Error("Select an unlocked visual layer to edit effects");
   return c;
 }
-export function addEffect(id: string, type: EffectType): Edit {
+export function addEffect(
+  id: string,
+  type: EffectType,
+  effectId: string = uid(),
+): Edit {
   return (p) => {
     const c = layer(p, id);
     c.effectStack = effectStackSchema.parse([
       ...c.effectStack,
       {
-        id: uid(),
+        id: effectId,
         type,
         enabled: true,
         value: effectInfo[type].initial,
