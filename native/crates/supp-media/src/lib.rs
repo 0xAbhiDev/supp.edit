@@ -1,6 +1,8 @@
 //! Media tools are invoked with argument arrays, never shell command strings.
+pub mod analysis;
 pub mod cache;
 pub mod hardware;
+pub mod models;
 mod process;
 use serde::Serialize;
 use serde_json::Value;

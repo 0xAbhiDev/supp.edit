@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod analysis;
 mod media;
 mod project;
 mod render;
@@ -32,6 +33,7 @@ impl Session {
 fn main() {
     tauri::Builder::default()
         .manage(Session::default())
+        .manage(analysis::AnalysisJobs::default())
         .setup(|app| {
             std::fs::create_dir_all(app.path().app_data_dir()?)?;
             Ok(())
@@ -47,6 +49,11 @@ fn main() {
             media::get_thumbnail,
             media::get_waveform,
             media::probe_capabilities,
+            analysis::prepare_analysis_job,
+            analysis::cancel_analysis_job,
+            analysis::speech_model_status,
+            analysis::install_speech_model,
+            analysis::analyze_media,
             render::begin_export,
             render::write_frame,
             render::finish_export,

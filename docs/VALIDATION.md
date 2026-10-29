@@ -13,3 +13,7 @@ Evidence: ../verification/effects. Earlier histories and validation reports are 
 ## Safe AI command slice
 
 82 TypeScript tests pass after adding the typed agent registry and preview/apply boundary. The browser agent case passes: a prompt creates a real effect plan; Preview leaves the original project untouched; Create edit adds the effect; a revision updates the same effect; Undo/Redo, stale-preview rejection, save/reopen and PNG export work. Unsupported creative analysis produces a Failed job and no project changes. The existing SRT-caption browser regression also passes. No creative rough-cut, speech/vision, beat-sync or full autonomous-edit acceptance claim is made.
+
+## Local media-understanding slice
+
+87 TypeScript tests and 24 Rust tests pass, including real-signal silence/onset and quality checks. Workspace Clippy passes. The actual Rust installer, Whisper inference and FFmpeg audio/video analysis ran successfully. The new browser transcript case passed with actual native inference data: seek/search, preview/import, ripple edit/undo, captions, save/reopen. See docs/MEDIA_UNDERSTANDING.md for evidence and precise limits. Creative/gym acceptance and speed ramps are still open.

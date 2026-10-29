@@ -89,7 +89,7 @@ mod tests {
         let file = dir.path().join("effects.supp");
         save(&file, &p).unwrap();
         let q = read(&file).unwrap();
-        assert_eq!(q.schema_version, 7);
+        assert_eq!(q.schema_version, 8);
         assert_eq!(q.clips[0].effect_stack[1].keys[0].value, 0.2);
         p.clips[0].effect_stack[1].id = "contrast".into();
         assert!(p.validate().is_err());

@@ -13,10 +13,38 @@ import {
 import { addEffect, setEffectValue, editEffect } from "../../commands/effects";
 import { effectTypes, effectInfo } from "../../effects/model";
 import { properties, propertyNames } from "../../animation";
+import { transcriptSchema } from "../transcript";
+import { importTranscript, captionsForClip } from "../../commands/transcripts";
+import { rippleDeleteRanges } from "../../commands/nle";
 const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  z
+    .object({
+      tool: z.literal("transcript.import"),
+      transcript: transcriptSchema,
+    })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("transcript.captions"),
+      transcriptId: id,
+      clipId: id,
+      trackId: id,
+      prefix: id,
+    })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("timeline.rippleDelete"),
+      ranges: z
+        .array(z.object({ startFrame: frame, endFrame: frame }).strict())
+        .min(1)
+        .max(512),
+      prefix: id,
+    })
+    .strict(),
   z
     .object({ tool: z.literal("clip.move"), clipId: id, startFrame: frame })
     .strict(),
@@ -64,6 +92,19 @@ export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
   {
+    name: "transcript.import",
+    description: "Save source-bound timestamped speech in the project",
+  },
+  {
+    name: "transcript.captions",
+    description: "Create editable text layers from source speech timing",
+  },
+  {
+    name: "timeline.rippleDelete",
+    description:
+      "Ripple-delete measured ranges across all unlocked sequence tracks",
+  },
+  {
     name: "clip.move",
     description: "Move an unlocked clip within its existing track",
   },
@@ -104,8 +145,24 @@ function range(v: number, min: number, max: number) {
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
   return (p) => {
+    if (call.tool === "transcript.import") {
+      importTranscript(call.transcript)(p);
+      return;
+    }
+    if (call.tool === "timeline.rippleDelete") {
+      rippleDeleteRanges(call.ranges, call.prefix)(p);
+      return;
+    }
     const c = requireLayer(p, call.clipId);
     switch (call.tool) {
+      case "transcript.captions":
+        captionsForClip(
+          call.transcriptId,
+          call.clipId,
+          call.trackId,
+          call.prefix,
+        )(p);
+        break;
       case "clip.move":
         moveClip(c.id, call.startFrame)(p);
         break;

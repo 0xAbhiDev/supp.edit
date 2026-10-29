@@ -57,7 +57,7 @@ export function AIEditBox() {
         selectedLayerId: selected,
         selectedClipIds: selected ? [selected] : [],
         activeCompositionId: scope,
-          frame: clock.get().frame,
+        frame: clock.get().frame,
       });
       setJobId(handle.id);
       const outcome = await handle.finished;
@@ -92,8 +92,9 @@ export function AIEditBox() {
       <p>
         LOCAL command planner · Select a main-sequence layer. Available now:
         “Set contrast to 1.2”, “Move selected clip to frame 60”, or “Trim
-        selected clip end to frame 90”. Speech/vision analysis and creative
-        rough cuts are not installed.
+        selected clip end to frame 90”. Local speech, scene and audio analysis
+        are available in Media understanding below; vision requires a future
+        provider.
       </p>
       <button disabled={busy || !request.trim()} onClick={() => void plan()}>
         Preview edit plan
@@ -124,7 +125,8 @@ export function AIEditBox() {
             <ol>
               {preview.plan.commands.map((c, i) => (
                 <li key={i}>
-                  {c.tool} · {c.clipId}
+                  {c.tool}
+                  {"clipId" in c ? ` · ${c.clipId}` : ""}
                 </li>
               ))}
             </ol>

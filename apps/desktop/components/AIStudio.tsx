@@ -8,6 +8,7 @@ import {
 import { MAX_SRT_BYTES } from "../../../packages/ai/srt";
 import "./ai-studio.css";
 import { AIEditBox } from "./AIEditBox";
+import { MediaAnalysisPanel } from "./MediaAnalysisPanel";
 
 export function AIStudio() {
   const project = useEditor((s) => s.project),
@@ -82,6 +83,7 @@ export function AIStudio() {
         <span className="ai-local">LOCAL · No media upload</span>
       </header>
       <AIEditBox />
+      <MediaAnalysisPanel />
       <div className="ai-columns">
         <div className="ai-input">
           <label>
@@ -165,8 +167,8 @@ export function AIStudio() {
               </p>
             ))}
             <p>
-              Inference runtimes, remote providers and credential setup are not
-              installed.
+              Install local speech processing in Media understanding above.
+              Remote providers and credential setup are not installed.
             </p>
           </details>
         </div>

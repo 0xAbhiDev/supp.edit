@@ -166,7 +166,7 @@ describe("affine parenting", () => {
     for (const c of old.clips) delete c.parentOffset;
     const saved = JSON.stringify(old),
       next = parseProject(old);
-    expect(next.schemaVersion).toBe(7);
+    expect(next.schemaVersion).toBe(8);
     expect(JSON.stringify(old)).toBe(saved);
   });
 });

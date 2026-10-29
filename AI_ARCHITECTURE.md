@@ -1,6 +1,6 @@
 # AI Studio foundation
 
-Status: FOUNDATION IMPLEMENTED. Inference, transcription, segmentation, tracking and cloud execution are NOT STARTED. The installed executor converts an existing SRT transcript into actual text clips. It is labeled deterministic processing, not speech recognition or a generative model.
+Status: local media analysis is implemented: real CPU transcription, measured silence/scenes/music, source transcripts, preview/apply/undo and an explicit verified model installer. See [MEDIA_UNDERSTANDING.md](docs/MEDIA_UNDERSTANDING.md) for current processing, limits and evidence. Creative rough cuts, semantic vision, segmentation, tracking and cloud execution are still being built.
 
 ## Providers and models
 
@@ -12,8 +12,8 @@ AIModelManager tracks ID, name, task, provider ID, size (null means unknown), in
 
 | Operation                         | Result contract                            | Executor / apply adapter                                    |
 | --------------------------------- | ------------------------------------------ | ----------------------------------------------------------- |
-| Transcribe                        | Timestamped transcript                     | Unavailable                                                 |
-| DetectSilence                     | Half-open timeline frame ranges            | Unavailable                                                 |
+| Transcribe                        | Timestamped transcript                     | Local whisper.cpp CPU; source-bound words/segments          |
+| DetectSilence                     | Source pauses mapped to timeline ranges    | Local PCM/RMS analysis; shared ripple commands               |
 | GenerateCaptions                  | Transcript and timed caption cues          | Local SRT backend; real text clips                          |
 | SegmentSubject / RemoveBackground | Clip/frame mask proposals                  | Unavailable; current model only has rectangle/ellipse masks |
 | TrackObject                       | Existing animation channels and keyframes  | Unavailable                                                 |
@@ -22,7 +22,7 @@ AIModelManager tracks ID, name, task, provider ID, size (null means unknown), in
 
 These are extension contracts, not claims that unsupported processing has run. Arbitrary path/raster segmentation needs the future compositor mask model and a validating command adapter. No provider result is interpreted as chat text saying an edit was completed.
 
-`transcript.ts` defines a standalone Zod persistence contract mirrored in Rust. Project schema v3 stores transcripts. SRT import validates 2 MiB / 10,000-cue bounds, timestamps, text and nonoverlapping order. Imported timestamps are sequence-relative milliseconds. Caption boundaries round to nearest sequence frames; overlapping or sub-frame cues fail.
+`transcript.ts` defines a standalone Zod persistence contract mirrored in Rust. Project schema v8 stores source-bound transcripts and words; v3 introduced SRT transcript storage. SRT import validates 2 MiB / 10,000-cue bounds, timestamps, text and nonoverlapping order. Imported timestamps are sequence-relative milliseconds. Caption boundaries round to nearest sequence frames; overlapping or sub-frame cues fail.
 
 ## Context, planning and history
 
@@ -63,3 +63,5 @@ Context now projects selected Bezier mask IDs, modes, enabled/inverted flags, ve
 The initial LOCAL interpreter handles precise effect/move/trim requests. “Set contrast to 1.5” revises a unique existing contrast effect or adds one if absent; multiple matches require an explicit manual choice. This is a deterministic command resolver, not a language model or creative media analyzer. Unsupported creative/highlight/beat requests show an error and make no edits. Job progress reports actual validated commands. The interpreter contract leaves room for future providers behind the existing privacy boundary; no transport or credentials have been added.
 
 Context now also includes selected layer timing and the requested frame. AI Studio displays the plan, a rendered preview, Create edit, normal Undo and actual job state. The original SRT caption workflow remains functional. The full autonomous-editor acceptance scenario in docs/AUTONOMOUS_AI_EDITOR.md remains open.
+
+The native MediaAnalysisService now executes real speech/audio/video analysis; the model registry receives actual installation and download events from the native host. The original generic provider/credential contracts remain available for future runtimes. No cloud transport exists.

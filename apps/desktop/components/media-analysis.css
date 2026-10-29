@@ -1,0 +1,96 @@
+.media-analysis {
+  border: 1px solid var(--border, #34383c);
+  border-radius: 8px;
+  padding: 18px;
+  margin: 18px 0;
+  background: #15191c;
+}
+.media-analysis header,
+.analysis-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.media-analysis header {
+  justify-content: space-between;
+}
+.media-analysis h2 {
+  margin: 0;
+}
+.media-analysis p {
+  color: #b5c0c8;
+  line-height: 1.5;
+}
+.analysis-columns {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(300px, 1.4fr);
+  gap: 18px;
+  margin-top: 14px;
+}
+.media-analysis label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+.media-analysis input[type="number"] {
+  width: 80px;
+}
+.media-analysis video {
+  width: 100%;
+  max-height: 260px;
+  background: #080a0b;
+}
+.analysis-transcript,
+.analysis-scroll {
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  background: #101315;
+  border-radius: 5px;
+  margin: 8px 0;
+}
+.analysis-scroll button {
+  margin: 3px;
+  text-align: left;
+}
+.analysis-transcript p {
+  margin: 8px 0;
+}
+.analysis-transcript .word {
+  background: transparent;
+  border: 0;
+  padding: 3px 2px;
+  color: #dce5eb;
+  line-height: 1.6;
+}
+.analysis-transcript .word:hover,
+.analysis-transcript .word.selected {
+  background: #275266;
+  border-radius: 3px;
+}
+.sentence-time {
+  color: #83bddd;
+  margin-right: 8px;
+}
+.analysis-plan {
+  border-top: 1px solid #34383c;
+  margin-top: 16px;
+  padding-top: 12px;
+}
+.analysis-plan canvas {
+  display: block;
+  max-width: 480px;
+  max-height: 300px;
+  margin: 8px 0;
+}
+.analysis-plan button {
+  margin-right: 8px;
+}
+.media-analysis progress {
+  margin: 8px;
+}
+.media-analysis details {
+  margin-top: 12px;
+}

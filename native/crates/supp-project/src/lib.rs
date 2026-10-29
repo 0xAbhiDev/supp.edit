@@ -48,6 +48,16 @@ pub struct Transcript {
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing_quality: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translated: Option<bool>,
     pub segments: Vec<TranscriptSegment>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +67,21 @@ pub struct TranscriptSegment {
     pub start_ms: u32,
     pub end_ms: u32,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub words: Option<Vec<TranscriptWord>>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TranscriptWord {
+    pub text: String,
+    pub start_ms: u32,
+    pub end_ms: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -378,8 +403,8 @@ fn validate_parenting(clips: &[Clip], tracks: &HashMap<&str, &Track>) -> Result<
 impl Project {
     pub fn validate(&self) -> Result<(), Error> {
         ensure(
-            (1..=7).contains(&self.schema_version),
-            "Unsupported schema version (expected versions 1–7)",
+            (1..=8).contains(&self.schema_version),
+            "Unsupported schema version (expected versions 1–8)",
         )?;
         ensure(
             !self.name.is_empty() && self.name.len() <= 1024,
@@ -432,6 +457,28 @@ impl Project {
                         .is_none_or(|id| assets.contains_key(id.as_str()))
                     && !transcript.segments.is_empty()
                     && transcript.segments.len() <= 10000
+                    && transcript
+                        .model_id
+                        .as_ref()
+                        .is_none_or(|s| !s.is_empty() && s.len() <= 128)
+                    && transcript
+                        .model_version
+                        .as_ref()
+                        .is_none_or(|s| !s.is_empty() && s.len() <= 128)
+                    && transcript
+                        .source_fingerprint
+                        .as_ref()
+                        .is_none_or(|s| !s.is_empty() && s.chars().count() <= 8192)
+                    && transcript
+                        .timing_quality
+                        .as_ref()
+                        .is_none_or(|s| ["imported", "approximate"].contains(&s.as_str()))
+                    && transcript
+                        .segments
+                        .iter()
+                        .map(|s| s.words.as_ref().map_or(0, Vec::len))
+                        .sum::<usize>()
+                        <= 100000
                     && unique(transcript.segments.iter().map(|s| s.id.as_str())),
                 "Invalid transcript metadata",
             )?;
@@ -446,6 +493,35 @@ impl Project {
                     "Invalid transcript segment",
                 )?;
                 previous = segment.start_ms;
+                ensure(
+                    segment
+                        .speaker_id
+                        .as_ref()
+                        .is_none_or(|s| !s.is_empty() && s.len() <= 128),
+                    "Invalid speaker ID",
+                )?;
+                let mut previous_word = segment.start_ms;
+                if let Some(words) = &segment.words {
+                    ensure(words.len() <= 10000, "Too many words in segment")?;
+                    for word in words {
+                        ensure(
+                            word.start_ms >= previous_word
+                                && word.end_ms >= word.start_ms
+                                && word.end_ms <= segment.end_ms
+                                && !word.text.is_empty()
+                                && word.text.chars().count() <= 1000
+                                && word
+                                    .confidence
+                                    .is_none_or(|c| c.is_finite() && (0. ..=1.).contains(&c))
+                                && word
+                                    .speaker_id
+                                    .as_ref()
+                                    .is_none_or(|s| !s.is_empty() && s.len() <= 128),
+                            "Invalid transcript word",
+                        )?;
+                        previous_word = word.start_ms;
+                    }
+                }
             }
         }
         let compositions: HashMap<_, _> = self
@@ -695,7 +771,7 @@ pub fn read(path: &Path) -> Result<Project, Error> {
     )?;
     let mut p: Project = serde_json::from_reader(fs::File::open(path)?)?;
     p.validate()?;
-    p.schema_version = 7;
+    p.schema_version = 8;
     Ok(p)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
@@ -780,13 +856,13 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         let mut value = value;
-        value["schemaVersion"] = 7.into();
+        value["schemaVersion"] = 8.into();
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("parenting.supp");
         fs::write(&path, include_str!("../tests/fixtures/parenting-v4.supp")).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 7);
+        assert_eq!(reopened.schema_version, 8);
         assert_eq!(serde_json::to_value(&reopened).unwrap(), value);
         save(&path, &reopened).unwrap();
         assert_eq!(serde_json::to_value(read(&path).unwrap()).unwrap(), value);
@@ -828,7 +904,7 @@ mod tests {
             let path = dir.path().join(format!("v{version}.supp"));
             fs::write(&path, &original).unwrap();
             let reopened = read(&path).unwrap();
-            assert_eq!(reopened.schema_version, 7);
+            assert_eq!(reopened.schema_version, 8);
             assert_eq!(fs::read(&path).unwrap(), original);
             for clip in reopened
                 .clips
@@ -1027,11 +1103,18 @@ mod tests {
             source: "srt".into(),
             language: None,
             asset_id: None,
+            source_fingerprint: None,
+            model_id: None,
+            model_version: None,
+            timing_quality: None,
+            translated: None,
             segments: vec![TranscriptSegment {
                 id: "cue".into(),
                 start_ms: 0,
                 end_ms: 1000,
                 text: "Actual caption".into(),
+                speaker_id: None,
+                words: None,
             }],
         });
         p.validate().unwrap();
@@ -1039,7 +1122,7 @@ mod tests {
         let path = dir.path().join("nested.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        p.schema_version = 7;
+        p.schema_version = 8;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1065,7 +1148,7 @@ mod tests {
         let path = dir.path().join("animation.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 7);
+        assert_eq!(reopened.schema_version, 8);
         assert_eq!(reopened.clips[0].transform.scale_x, 1.);
         assert_eq!(
             reopened.clips[0].keyframes.extra["scaleX"][0]
@@ -1075,7 +1158,7 @@ mod tests {
                 .x,
             0.6
         );
-        p.schema_version = 7;
+        p.schema_version = 8;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1092,7 +1175,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/project.supp"),
         )
         .unwrap();
-        assert_eq!(read(&old).unwrap().schema_version, 7);
+        assert_eq!(read(&old).unwrap().schema_version, 8);
         assert!(fs::read_to_string(old)
             .unwrap()
             .contains("\"schemaVersion\":1"));

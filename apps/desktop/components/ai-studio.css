@@ -3,7 +3,7 @@
   overflow: auto;
   padding: 20px;
 }
-.ai-studio header {
+.ai-studio > header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -11,7 +11,7 @@
   border-bottom: 1px solid var(--border);
   padding-bottom: 14px;
 }
-.ai-studio header strong {
+.ai-studio > header strong {
   font-size: 20px;
 }
 .ai-studio p {
@@ -96,7 +96,7 @@
 .ai-studio [role="alert"] {
   color: #ffb8a1;
 }
-.ai-studio header {
+.ai-studio > header {
   position: sticky;
   top: -20px;
   z-index: 2;

@@ -153,7 +153,7 @@ export const compositionSchema = z.object({
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(7),
+  schemaVersion: z.literal(8),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -385,7 +385,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     id: uid(),
     name,
     createdAt: now,
@@ -465,12 +465,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (![1, 2, 3, 4, 5, 6, 7].includes(input.schemaVersion as number))
+  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–7. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–8. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 7 });
+  return projectSchema.parse({ ...input, schemaVersion: 8 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

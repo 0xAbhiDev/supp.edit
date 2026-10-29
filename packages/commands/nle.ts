@@ -250,3 +250,78 @@ export function editPoints(p: Project) {
     ...new Set([0, ...p.clips.flatMap((c) => [c.start, c.start + c.duration])]),
   ].sort((a, b) => a - b);
 }
+
+/** Ripple time out of the whole sequence, splitting source/animation data with
+ * the same piece() routine used by manual insert/overwrite. IDs are stable for
+ * dry-run previews and Apply. Locked or dependent layers reject atomically. */
+export function rippleDeleteRanges(
+  ranges: readonly { startFrame: number; endFrame: number }[],
+  splitIdPrefix: string = uid(),
+): Edit {
+  const sorted = ranges
+    .map((r) => ({ ...r }))
+    .sort((a, b) => a.startFrame - b.startFrame);
+  const merged: { startFrame: number; endFrame: number }[] = [];
+  for (const r of sorted) {
+    if (
+      !Number.isSafeInteger(r.startFrame) ||
+      !Number.isSafeInteger(r.endFrame) ||
+      r.startFrame < 0 ||
+      r.endFrame <= r.startFrame ||
+      r.endFrame > 2_000_000_000
+    )
+      throw new Error("Invalid ripple-delete range");
+    const last = merged.at(-1);
+    if (last && r.startFrame <= last.endFrame)
+      last.endFrame = Math.max(last.endFrame, r.endFrame);
+    else merged.push(r);
+  }
+  const shift = (time: number) =>
+    merged.reduce(
+      (n, r) => n + Math.max(0, Math.min(time, r.endFrame) - r.startFrame),
+      0,
+    );
+  return (p) => {
+    let serial = 0;
+    const next: Clip[] = [];
+    for (const c of p.clips) {
+      const end = c.start + c.duration,
+        affected = merged.some((r) => r.startFrame < end);
+      if (!affected) {
+        next.push(c);
+        continue;
+      }
+      if (p.tracks.find((t) => t.id === c.trackId)?.locked)
+        throw new Error("Unlock affected tracks before ripple deletion");
+      if (
+        c.parentId ||
+        c.matte ||
+        p.clips.some((o) => o.parentId === c.id || o.matte?.layerId === c.id)
+      )
+        throw new Error(
+          "Ripple deletion of parented or matte-dependent layers is not supported yet",
+        );
+      let cursor = c.start;
+      const kept: [number, number][] = [];
+      for (const r of merged) {
+        if (r.endFrame <= cursor || r.startFrame >= end) continue;
+        if (r.startFrame > cursor) kept.push([cursor, r.startFrame]);
+        cursor = Math.max(cursor, Math.min(end, r.endFrame));
+      }
+      if (cursor < end) kept.push([cursor, end]);
+      for (let i = 0; i < kept.length; i++) {
+        const [start, finish] = kept[i],
+          fragment = piece(
+            c,
+            start,
+            finish,
+            i === 0 ? c.id : `${splitIdPrefix}-${serial++}`,
+          );
+        fragment.start -= shift(start);
+        next.push(fragment);
+      }
+    }
+    p.clips = next;
+    for (const marker of p.markers) marker.frame -= shift(marker.frame);
+  };
+}

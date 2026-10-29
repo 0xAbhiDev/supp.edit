@@ -57,7 +57,10 @@ export function previewEditPlan(
   const preview = freezeSnapshot({
     frame: (() => {
       const call = plan.commands[0],
-        clip = after.clips.find((c) => c.id === call.clipId);
+        clip =
+          "clipId" in call
+            ? after.clips.find((c) => c.id === call.clipId)
+            : undefined;
       return clip
         ? Math.max(
             clip.start,
