@@ -8,6 +8,7 @@ import {
 } from "../../../packages/ai/editor-agent/execution";
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock } from "../../../packages/engine/clock";
+import { compositionView } from "../../../packages/commands/compositions";
 import "./ai-edit-box.css";
 export function AIEditBox() {
   const project = useEditor((s) => s.project),
@@ -38,7 +39,7 @@ export function AIEditBox() {
     if (!preview || !canvas.current) return;
     let disposed = false;
     const r = new Compositor(canvas.current, true, { scale: 0.5 });
-    const pending = r.render(preview.project, preview.frame).catch((e) => {
+    const pending = r.render(compositionView(preview.project, preview.plan.resultCompositionId ?? preview.plan.compositionId), preview.frame).catch((e) => {
       if (!disposed) setError(String(e));
     });
     return () => {

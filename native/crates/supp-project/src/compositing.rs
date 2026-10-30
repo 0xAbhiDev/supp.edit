@@ -94,7 +94,7 @@ mod tests {
         let path = dir.path().join("matte.supp");
         save(&path, &p).unwrap();
         let read = read(&path).unwrap();
-        assert_eq!(read.schema_version, 8);
+        assert_eq!(read.schema_version, 9);
         assert_eq!(read.clips[0].blend_mode, "soft-light");
         assert_eq!(read.clips[0].matte.as_ref().unwrap().mode, "luma-inverted");
         for mode in BLEND_MODES {

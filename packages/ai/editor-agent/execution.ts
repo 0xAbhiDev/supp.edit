@@ -11,6 +11,7 @@ export const editPlanSchema = z
     projectId: z.string().min(1).max(128),
     revision: z.number().int().nonnegative(),
     compositionId: z.string().min(1).max(128).nullable(),
+    resultCompositionId: z.string().min(1).max(128).optional(),
     summary: z.string().min(1).max(2000),
     processing: z.literal("LOCAL"),
     commands: z.array(toolCallSchema).min(1).max(512),
@@ -52,8 +53,10 @@ export function previewEditPlan(
   projectSchema.parse(result);
   if (result === project)
     throw new Error("The plan produces no project changes");
-  const before = compositionView(project, plan.compositionId),
-    after = compositionView(result, plan.compositionId);
+  const resultScope=plan.resultCompositionId ?? plan.compositionId;
+  if(resultScope && !result.compositions.some(c=>c.id===resultScope))throw new Error("The planned preview sequence does not exist");
+  const before = resultScope && !project.compositions.some(c=>c.id===resultScope) ? {clips:[]} : compositionView(project, resultScope),
+    after = compositionView(result, resultScope);
   const preview = freezeSnapshot({
     frame: (() => {
       const call = plan.commands[0],

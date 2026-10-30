@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Download, CheckCircle2, X, Image } from "lucide-react";
 import { useEditor } from "../../../packages/editor-state";
 import {
@@ -15,15 +15,19 @@ import { Compositor } from "../../../packages/engine/compositor";
 import { clock } from "../../../packages/engine/clock";
 import { usePlayback } from "../../../packages/engine/diagnostics";
 import { backgroundJobs } from "../../../packages/jobs";
+import { sequenceExportSnapshot } from "../../../packages/commands/sequences";
+import { SequencePicker } from "./SequencePicker";
 export function ExportPanel({
   capabilities,
 }: {
   capabilities: Capabilities | null;
 }) {
-  const project = useEditor((s) => s.project),
+  const sourceProject = useEditor((s) => s.project),
+    activeSequence = useEditor(s=>s.activeComposition),
     [progress, setProgress] = useState<RenderProgress | null>(null),
     [busy, setBusy] = useState(false),
     jobId = useRef<string | null>(null);
+  const project=useMemo(()=>sequenceExportSnapshot(sourceProject,activeSequence),[sourceProject,activeSequence]);
   async function render() {
     clock.pause();
     setBusy(true);
@@ -90,6 +94,7 @@ export function ExportPanel({
         <Download size={15} />
       </div>
       <div className="export-body">
+        <SequencePicker />
         <span className="eyebrow">RENDER YOUR SEQUENCE</span>
         <h2>
           Ready for the

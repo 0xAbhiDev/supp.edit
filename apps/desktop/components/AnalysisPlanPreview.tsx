@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useEditor } from "../../../packages/editor-state";
 import { Compositor } from "../../../packages/engine/compositor";
+import { compositionView } from "../../../packages/commands/compositions";
 import {
   applyEditPreview,
   isEditPreviewCurrent,
@@ -23,7 +24,7 @@ export function AnalysisPlanPreview({ preview }: { preview: EditPreview }) {
       scale: Math.min(0.5, 480 / preview.project.settings.width),
     });
     const pending = renderer
-      .render(preview.project, preview.frame)
+      .render(compositionView(preview.project,preview.plan.resultCompositionId ?? preview.plan.compositionId), preview.frame)
       .catch((e) => {
         if (!disposed) setError(String(e));
       });

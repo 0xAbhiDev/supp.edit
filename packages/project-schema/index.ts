@@ -1,6 +1,7 @@
 import { blendModes, matteSchema, assertMattes } from "../compositing/model";
 import { z } from "zod";
 import { transcriptSchema } from "../ai/transcript";
+import { aiEditMetadataSchema } from "../ai/rough-cut/model";
 
 const finite = z.number().finite();
 const frame = finite.int().min(0).max(2_000_000_000);
@@ -150,10 +151,12 @@ export const compositionSchema = z.object({
   background: z.string().regex(/^(transparent|#[0-9a-fA-F]{6})$/),
   tracks: z.array(trackSchema).min(1).max(1000),
   layers: z.array(clipSchema).max(100000),
+  markers: z.array(z.object({ id, frame, name:z.string().max(256) })).max(10000).optional(),
+  ai: aiEditMetadataSchema.optional(),
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(8),
+  schemaVersion: z.literal(9),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -205,6 +208,7 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
       ...scopes.flatMap((s) => s.tracks),
       ...allLayers,
       ...p.markers,
+      ...p.compositions.flatMap(c=>c.markers??[]),
       ...p.compositions,
       ...p.transcripts,
     ],
@@ -385,7 +389,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     id: uid(),
     name,
     createdAt: now,
@@ -465,12 +469,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(input.schemaVersion as number))
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–8. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–9. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 8 });
+  return projectSchema.parse({ ...input, schemaVersion: 9 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

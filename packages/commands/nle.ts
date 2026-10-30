@@ -187,6 +187,7 @@ export function sourceEdit(
   mode: "insert" | "overwrite",
   sourceIn = 0,
   length?: number,
+  clipId: string = uid(),
 ): Edit {
   return (p) => {
     const asset = p.assets.find((a) => a.id === assetId),
@@ -240,6 +241,7 @@ export function sourceEdit(
       }
     }
     const added = newClip(trackId, start, duration, "media", asset);
+    added.id = clipId;
     added.sourceIn = sourceIn;
     next.push(added);
     p.clips = next;

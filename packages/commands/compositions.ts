@@ -23,7 +23,7 @@ export function compositionView(project: Project, id: string | null): Project {
       settings: comp.settings,
       tracks: comp.tracks,
       clips: comp.layers,
-      markers: [],
+      markers: comp.markers ?? [],
     };
   let cache = views.get(project);
   if (!cache) views.set(project, (cache = new Map()));
@@ -35,7 +35,7 @@ export function compositionView(project: Project, id: string | null): Project {
       settings: comp.settings,
       tracks: comp.tracks,
       clips: comp.layers,
-      markers: [],
+      markers: comp.markers ?? [],
     };
     cache.set(id, view);
   }
@@ -56,13 +56,14 @@ export function inComposition(id: string | null, edit: Edit): Edit {
       settings: c.settings,
       tracks: c.tracks,
       clips: c.layers,
-      markers: [],
+      markers: c.markers ?? [],
     };
     edit(view);
     c.name = view.name;
     c.settings = view.settings;
     c.tracks = view.tracks;
     c.layers = view.clips;
+    if(c.markers || view.markers.length) c.markers = view.markers;
     // Structure is small: validate here, never while rendering a frame.
     projectSchema.parse(p);
   };

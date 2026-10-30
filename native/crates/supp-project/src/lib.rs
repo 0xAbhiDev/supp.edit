@@ -1,4 +1,5 @@
 //! Versioned project graph and crash-safe local persistence. No media buffers.
+pub mod creative;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -93,6 +94,10 @@ pub struct Composition {
     pub background: String,
     pub tracks: Vec<Track>,
     pub layers: Vec<Clip>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<creative::AiEditMetadata>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -403,8 +408,8 @@ fn validate_parenting(clips: &[Clip], tracks: &HashMap<&str, &Track>) -> Result<
 impl Project {
     pub fn validate(&self) -> Result<(), Error> {
         ensure(
-            (1..=8).contains(&self.schema_version),
-            "Unsupported schema version (expected versions 1–8)",
+            (1..=9).contains(&self.schema_version),
+            "Unsupported schema version (expected versions 1–9)",
         )?;
         ensure(
             !self.name.is_empty() && self.name.len() <= 1024,
@@ -437,6 +442,7 @@ impl Project {
                         std::iter::once(c.id.as_str())
                             .chain(c.tracks.iter().map(|t| t.id.as_str()))
                             .chain(c.layers.iter().map(|l| l.id.as_str()))
+                            .chain(c.markers.iter().map(|m| m.id.as_str()))
                     })),
             ),
             "Duplicate or invalid graph IDs",
@@ -538,6 +544,16 @@ impl Project {
                     && (c.background == "transparent" || color(&c.background)),
                 "Invalid composition metadata",
             )?;
+            ensure(
+                c.markers.len() <= 10000
+                    && c.markers
+                        .iter()
+                        .all(|m| m.frame <= 2_000_000_000 && m.name.chars().count() <= 256),
+                "Invalid composition markers",
+            )?;
+            if let Some(ai) = &c.ai {
+                ai.validate()?;
+            }
         }
         for a in &self.assets {
             ensure(
@@ -771,7 +787,7 @@ pub fn read(path: &Path) -> Result<Project, Error> {
     )?;
     let mut p: Project = serde_json::from_reader(fs::File::open(path)?)?;
     p.validate()?;
-    p.schema_version = 8;
+    p.schema_version = 9;
     Ok(p)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
@@ -856,13 +872,13 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         let mut value = value;
-        value["schemaVersion"] = 8.into();
+        value["schemaVersion"] = 9.into();
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("parenting.supp");
         fs::write(&path, include_str!("../tests/fixtures/parenting-v4.supp")).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 8);
+        assert_eq!(reopened.schema_version, 9);
         assert_eq!(serde_json::to_value(&reopened).unwrap(), value);
         save(&path, &reopened).unwrap();
         assert_eq!(serde_json::to_value(read(&path).unwrap()).unwrap(), value);
@@ -904,7 +920,7 @@ mod tests {
             let path = dir.path().join(format!("v{version}.supp"));
             fs::write(&path, &original).unwrap();
             let reopened = read(&path).unwrap();
-            assert_eq!(reopened.schema_version, 8);
+            assert_eq!(reopened.schema_version, 9);
             assert_eq!(fs::read(&path).unwrap(), original);
             for clip in reopened
                 .clips
@@ -1122,7 +1138,7 @@ mod tests {
         let path = dir.path().join("nested.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        p.schema_version = 8;
+        p.schema_version = 9;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1148,7 +1164,7 @@ mod tests {
         let path = dir.path().join("animation.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 8);
+        assert_eq!(reopened.schema_version, 9);
         assert_eq!(reopened.clips[0].transform.scale_x, 1.);
         assert_eq!(
             reopened.clips[0].keyframes.extra["scaleX"][0]
@@ -1158,7 +1174,7 @@ mod tests {
                 .x,
             0.6
         );
-        p.schema_version = 8;
+        p.schema_version = 9;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1175,7 +1191,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/project.supp"),
         )
         .unwrap();
-        assert_eq!(read(&old).unwrap().schema_version, 8);
+        assert_eq!(read(&old).unwrap().schema_version, 9);
         assert!(fs::read_to_string(old)
             .unwrap()
             .contains("\"schemaVersion\":1"));

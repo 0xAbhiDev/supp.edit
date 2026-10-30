@@ -130,7 +130,6 @@ export const useEditor = create<State>((set, get) => ({
   setWorkspace: (workspace) =>
     set({
       workspace,
-      ...(workspace !== "Composite" ? { activeComposition: null } : {}),
     }),
   report: (e) =>
     set({ error: e instanceof Error ? e.message : String(e), notice: null }),

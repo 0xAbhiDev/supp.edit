@@ -13,12 +13,25 @@ pub async fn begin_export(app: AppHandle, project: Project) -> Result<Option<Str
         if slot.is_some() {
             return Err("A render is already running".into());
         }
+        let mut scopes = vec![project.clips.as_slice()];
+        let mut visited = std::collections::HashSet::new();
+        let mut media = std::collections::HashSet::new();
+        while let Some(layers) = scopes.pop() {
+            for layer in layers {
+                if let Some(id) = &layer.asset_id {
+                    media.insert(id.as_str());
+                }
+                if let Some(id) = &layer.composition_id {
+                    if visited.insert(id.as_str()) {
+                        if let Some(comp) = project.compositions.iter().find(|c| &c.id == id) {
+                            scopes.push(comp.layers.as_slice());
+                        }
+                    }
+                }
+            }
+        }
         for a in &project.assets {
-            if project
-                .clips
-                .iter()
-                .any(|c| c.asset_id.as_ref() == Some(&a.id))
-            {
+            if media.contains(a.id.as_str()) {
                 state.require(std::path::Path::new(&a.path))?;
             }
         }

@@ -18,7 +18,8 @@ import {
   Flag,
   Minus,
 } from "lucide-react";
-import { useEditor } from "../../../packages/editor-state";
+import { useEditor, editorProject } from "../../../packages/editor-state";
+import { SequencePicker } from "./SequencePicker";
 import {
   fps,
   duration,
@@ -48,9 +49,9 @@ import {
 import { IconButton } from "./Controls";
 export function Timeline() {
   useDerivedRevision();
-  const project = useEditor((s) => s.project),
+  const project = useEditor(editorProject),
     selected = useEditor((s) => s.selected),
-    execute = useEditor((s) => s.execute),
+    execute = useEditor((s) => s.executeScoped),
     select = useEditor((s) => s.select);
   const [zoom, setZoom] = useState(45),
     [snap, setSnap] = useState(true),
@@ -318,6 +319,7 @@ export function Timeline() {
         </IconButton>
       </div>
       <div className="timeline-tools">
+        <SequencePicker />
         <span className="active-tool">
           <MousePointer2 size={15} />
         </span>
@@ -583,7 +585,7 @@ export function Timeline() {
                       "Insert media",
                       insertAsset(id, track.id, frameAt(e.clientX)),
                     );
-                    const added = useEditor.getState().project.clips.at(-1);
+                    const added = editorProject(useEditor.getState()).clips.at(-1);
                     if (added?.assetId === id) select(added.id);
                   }
                 }}

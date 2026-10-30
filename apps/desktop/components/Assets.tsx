@@ -11,7 +11,7 @@ import {
   Link2,
   ArrowDownToLine,
 } from "lucide-react";
-import { useEditor } from "../../../packages/editor-state";
+import { useEditor, editorProject } from "../../../packages/editor-state";
 import {
   thumbnails,
   desktop,
@@ -33,10 +33,10 @@ export function Assets({
   busy: boolean;
 }) {
   useDerivedRevision();
-  const project = useEditor((s) => s.project),
+  const project = useEditor(editorProject),
     source = useEditor((s) => s.source),
     setSource = useEditor((s) => s.setSource),
-    execute = useEditor((s) => s.execute);
+    execute = useEditor((s) => s.executeScoped);
   const [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all"),
     [view, setView] = useState<"grid" | "list">("grid");
@@ -78,7 +78,7 @@ export function Assets({
       });
     }
     execute("Insert media", insertAsset(id, track.id, clock.get().frame));
-    const c = useEditor.getState().project.clips.at(-1);
+    const c = editorProject(useEditor.getState()).clips.at(-1);
     if (c) useEditor.getState().select(c.id);
   }
   return (

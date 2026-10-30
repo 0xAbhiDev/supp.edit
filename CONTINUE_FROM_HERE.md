@@ -1,6 +1,10 @@
 # Continuous work recovery
 
-Last committed checkpoint: ac178c5 (real media analysis and transcript editing), following f1732de (safe AI command plans). Preserve the current working tree. Persistence is v8 for source-bound transcripts. This document is required by the user and is not a stopping condition.
+Latest validated vision commit: 6da2973. The next checkpoint finishes the interrupted new-sequence command path: persistence v9 (AI provenance and sequence markers), stable source insert IDs, result-scope preview, sequence selection across Edit/Export, and nested export source grants. 92 TypeScript tests, 27 Rust tests and workspace Clippy pass. Preserve all current work. This document is not a stopping condition.
+
+Current brief: 126a874d-2ca2-4fda-befe-cd262c91d79e/Pasted text.txt. Immediate target is the exact gym prompt producing a real editable sequence, preview/apply/undo/save/reopen/MP4. Do not stop at architecture, ranking or beat sync. Continue broader product work afterward.
+
+Active work: packages/ai/rough-cut/planner.ts and beats.ts connect measured evidence to normal sequence commands; not yet accepted end to end. Five real gym sources and native analysis are in work/gym (bench/deadlift/incline/row from FitnessScape CC BY 3.0; existing TacoFleur squat CC BY-SA 4.0). work/gym/provenance.json records source URLs/licenses/hashes. Generated original music.wav has actual native audio analysis. UI/coordinator/acceptance remain next. No time-remapping backend yet.
 
 Latest brief: a7876131-2143-4b49-8883-14c138cd454d/Pasted text.txt. Fix/audit actual vision before it drives edits; validate boxes/semantic ranking, then CONTINUE into gym rough-cut acceptance (preview/apply/undo/save/reopen/export). This supersedes the earlier ce67f89f brief in priority, not its overall objective. Never stop at a vision checkpoint or ask for another continue.
 

@@ -57,7 +57,7 @@ describe("versioned project graph", () => {
     expect(fps(parseProject(JSON.parse(fixture)))).toBeCloseTo(29.97003);
   });
   it("rejects unknown versions without silent migration", () =>
-    expect(() => parseProject({ ...setup(), schemaVersion: 9 })).toThrow(
+    expect(() => parseProject({ ...setup(), schemaVersion: 99 })).toThrow(
       "Unsupported project version",
     ));
   it("rejects missing references", () => {

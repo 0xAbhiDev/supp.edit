@@ -3,6 +3,7 @@ import {
   type Project,
   type AnimatedProperty,
   interpolationModes,
+  settingsSchema,
 } from "../../project-schema";
 import { type Edit, moveClip, trimClip, deleteClip } from "../../commands";
 import {
@@ -16,10 +17,18 @@ import { properties, propertyNames } from "../../animation";
 import { transcriptSchema } from "../transcript";
 import { importTranscript, captionsForClip } from "../../commands/transcripts";
 import { rippleDeleteRanges } from "../../commands/nle";
+import { createSequence, insertSequenceRange, addSequenceMarker } from "../../commands/sequences";
+import { inComposition } from "../../commands/compositions";
+import { aiEditMetadataSchema } from "../rough-cut/model";
 const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  z.object({tool:z.literal("sequence.create"),id,name:z.string().min(1).max(256),settings:settingsSchema,duration:frame.min(1),videoTrackId:id,audioTrackId:id,ai:aiEditMetadataSchema}).strict(),
+  z.object({tool:z.literal("sequence.insert"),sequenceId:id,clipId:id,trackId:id,assetId:id,fingerprint:z.string().min(1).max(8192),startFrame:frame,sourceIn:frame,duration:frame.min(1),gain:value.min(-60).max(12)}).strict(),
+  z.object({tool:z.literal("sequence.marker"),sequenceId:id,id,frame,name:z.string().max(256)}).strict(),
+  z.object({tool:z.literal("sequence.keyframe"),sequenceId:id,clipId:id,property:z.enum(["x","y","scale"]),value,frame,easing:z.enum(interpolationModes)}).strict(),
+  z.object({tool:z.literal("sequence.captions"),sequenceId:id,clipId:id,transcriptId:id,trackId:id,prefix:id}).strict(),
   z
     .object({
       tool: z.literal("transcript.import"),
@@ -91,6 +100,11 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
 export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
+  {name:"sequence.create",description:"Create a new independent editable sequence with provenance"},
+  {name:"sequence.insert",description:"Insert a source-bound media range into an unlocked sequence track"},
+  {name:"sequence.marker",description:"Add a named sequence marker at a measured frame"},
+  {name:"sequence.keyframe",description:"Set real transform keys through the shared animation commands"},
+  {name:"sequence.captions",description:"Create editable timed text in a named sequence"},
   {
     name: "transcript.import",
     description: "Save source-bound timestamped speech in the project",
@@ -145,6 +159,11 @@ function range(v: number, min: number, max: number) {
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
   return (p) => {
+    if(call.tool==="sequence.create") {createSequence(call)(p);return;}
+    if(call.tool==="sequence.insert") {insertSequenceRange(call)(p);return;}
+    if(call.tool==="sequence.marker") {addSequenceMarker(call.sequenceId,{id:call.id,frame:call.frame,name:call.name})(p);return;}
+    if(call.tool==="sequence.keyframe") {inComposition(call.sequenceId,toolEdit({tool:"keyframe.set",clipId:call.clipId,property:call.property,value:call.value,frame:call.frame,easing:call.easing}))(p);return;}
+    if(call.tool==="sequence.captions") {inComposition(call.sequenceId,captionsForClip(call.transcriptId,call.clipId,call.trackId,call.prefix))(p);return;}
     if (call.tool === "transcript.import") {
       importTranscript(call.transcript)(p);
       return;

@@ -325,7 +325,7 @@ test("matte and blend UI commands undo, persist and export", async ({
     .getByLabel("Layer blend mode", { exact: true })
     .selectOption("screen");
   let saved = await save(page);
-  expect(saved.schemaVersion).toBe(8);
+  expect(saved.schemaVersion).toBe(9);
   expect(saved.clips[0].matte).toEqual({
     layerId: "matte",
     mode: "luma-inverted",

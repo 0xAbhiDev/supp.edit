@@ -48,7 +48,7 @@ describe("composition graph", () => {
     delete old.transcripts;
     const copy = JSON.stringify(old),
       p = parseProject(old);
-    expect(p.schemaVersion).toBe(8);
+    expect(p.schemaVersion).toBe(9);
     expect(p.compositions).toEqual([]);
     expect(p.transcripts).toEqual([]);
     expect(JSON.stringify(old)).toBe(copy);
