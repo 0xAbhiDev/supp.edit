@@ -1,12 +1,12 @@
 # AI Studio foundation
 
-Status: local media analysis is implemented: real CPU transcription, measured silence/scenes/music, source transcripts, preview/apply/undo and an explicit verified model installer. See [MEDIA_UNDERSTANDING.md](docs/MEDIA_UNDERSTANDING.md) for current processing, limits and evidence. Creative rough cuts, semantic vision, segmentation, tracking and cloud execution are still being built.
+Status: local media analysis includes real CPU transcription, measured silence/scenes/music, source transcripts, sampled ONNX vision and paired text embeddings. Explicit verified installers and model removal exist; results remain data until normal command preview/Apply. See [MEDIA_UNDERSTANDING.md](docs/MEDIA_UNDERSTANDING.md) and [VISION_VALIDATION.md](docs/VISION_VALIDATION.md). The fp32 image encoder replaces the failed quantized candidate; exact exercise/rep recognition is not claimed. Creative rough cuts, segmentation, tracking and cloud execution remain in progress.
 
 ## Providers and models
 
 `packages/ai/providers.ts` defines `AIProvider<K>`: descriptor, capabilities, validation, and asynchronous typed `run`. Providers receive immutable context and a JobContext, never the editor store, mutable project or filesystem access. Provider types distinguish Local, Remote API and Custom / OpenAI-compatible. Custom endpoints are conservatively CLOUD; a future trusted local-endpoint policy needs explicit treatment.
 
-AIModelManager tracks ID, name, task, provider ID, size (null means unknown), installed state, execution device, supported devices, version and download state. Devices include CPU, CUDA, DirectML, Core ML, Metal and remote. The shipped entry is a zero-byte built-in CPU caption utility. The registry does not download models, probe hardware or perform inference. Unsupported device selection fails. Runtime metadata does not grant execution capability: a matching registered executor is required.
+AIModelManager tracks ID, name, task, provider ID, size (null means unknown), installed state, execution device, supported devices, version and download state. Devices include CPU, CUDA, DirectML, Core ML, Metal and remote. The foundation registry includes a built-in caption utility; MediaAnalysisService registers installed Whisper and MobileCLIP/YOLOX runtimes. Only the explicit native installers download pinned artifacts. The metadata registry itself performs no inference. Unsupported device selection fails. Vision session setup attempts available CUDA/DirectML providers before CPU, recording actual successful setup; the installed pack currently includes CPU only. No GPU runtime is silently downloaded.
 
 ## Operations and project results
 

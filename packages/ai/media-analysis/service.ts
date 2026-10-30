@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { z } from "zod";
 import { desktop, type Capabilities } from "../../platform";
 import { readDerived, writeDerived } from "../../platform/derived";
 import { type Asset, type Project } from "../../project-schema";
@@ -18,6 +19,13 @@ import {
   type AnalysisTask,
   type MediaAnalysis,
 } from "./model";
+const queryEmbeddingSchema = z
+  .object({
+    modelVersion: z.string().max(128),
+    processing: z.literal("LOCAL"),
+    embedding: z.array(z.number().finite().min(-1).max(1)).length(512),
+  })
+  .strict();
 export const speechModel: AIModel = {
   id: "whisper-tiny-multilingual",
   name: "Whisper Tiny · multilingual",
@@ -41,6 +49,19 @@ export interface ModelStatus {
   installSupported: boolean;
   device: "CPU";
 }
+export const visionModel: AIModel = {
+  id: "mobileclip-s0-yolox-nano",
+  name: "MobileCLIP S0 + YOLOX Nano",
+  task: "SemanticSearch",
+  providerId: "onnx-local-vision",
+  sizeBytes: 94240379,
+  installedState: "not-installed",
+  executionDevice: "CPU",
+  supportedDevices: ["CPU"],
+  version: "mobileclip-757d59c9-fp32-yolox-0.1.1rc0-ort1.31.1",
+  download: { state: "not-requested" },
+  runtime: "native-inference",
+};
 export interface AnalysisBackend {
   readonly processing: "LOCAL" | "CLOUD";
   analyze(
@@ -103,6 +124,7 @@ export class MediaAnalysisService {
     readonly jobs: JobScheduler = backgroundJobs,
   ) {
     this.models.register(speechModel);
+    this.models.register(visionModel);
   }
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -127,7 +149,7 @@ export class MediaAnalysisService {
     this.listeners.forEach((fn) => fn());
   }
   async restore(asset: Asset) {
-    for (const task of ["speech", "audio", "video"] as const) {
+    for (const task of ["speech", "audio", "video", "vision"] as const) {
       const raw = await readDerived<unknown>(key(asset, task));
       const parsed = analysisResultSchema.safeParse(raw);
       if (
@@ -139,43 +161,52 @@ export class MediaAnalysisService {
     }
   }
   async capabilities() {
-    if (!desktop) return { model: null, audio: false, video: false };
-    const [model, media] = await Promise.all([
+    if (!desktop)
+      return { model: null, visionModel: null, audio: false, video: false };
+    const [model, media, vision] = await Promise.all([
       invoke<ModelStatus>("speech_model_status"),
       invoke<Capabilities>("probe_capabilities"),
+      invoke<ModelStatus>("vision_model_status"),
     ]);
     this.models.reportRuntimeState(speechModel.id, {
       installedState: model.installed ? "installed" : "not-installed",
       download: { state: "not-requested" },
     });
+    this.models.reportRuntimeState(visionModel.id, {
+      installedState: vision.installed ? "installed" : "not-installed",
+      download: { state: "not-requested" },
+    });
     return {
       model,
+      visionModel: vision,
       audio: media.ffmpeg && media.ffprobe,
       video: media.ffmpeg && media.ffprobe,
     };
   }
-  install(projectId: string) {
+  install(projectId: string, kind: "speech" | "vision" = "speech") {
+    const selected = kind === "speech" ? speechModel : visionModel,
+      bytes = kind === "speech" ? 86620353 : 177170323;
     return this.jobs.enqueue({
-      label: "Install local Whisper Tiny (83 MiB download)",
+      label: `Install ${selected.name} (${Math.ceil(bytes / 1048576)} MiB download)`,
       scope: projectId,
       run: async (job) => {
-        this.models.reportRuntimeState(speechModel.id, {
+        this.models.reportRuntimeState(selected.id, {
           installedState: "not-installed",
           download: {
             state: "downloading",
             receivedBytes: 0,
-            totalBytes: 86620353,
+            totalBytes: bytes,
           },
         });
         try {
           const model = await nativeJob<ModelStatus>(
-            "install_speech_model",
+            kind === "speech" ? "install_speech_model" : "install_vision_model",
             {},
             {
               ...job,
               report: (p) => {
                 job.report(p);
-                this.models.reportRuntimeState(speechModel.id, {
+                this.models.reportRuntimeState(selected.id, {
                   installedState: "not-installed",
                   download: {
                     state: "downloading",
@@ -186,7 +217,7 @@ export class MediaAnalysisService {
               },
             },
           );
-          this.models.reportRuntimeState(speechModel.id, {
+          this.models.reportRuntimeState(selected.id, {
             installedState: "installed",
             download: {
               state: "completed",
@@ -195,8 +226,8 @@ export class MediaAnalysisService {
           });
           return model;
         } catch (e) {
-          const d = this.models.get(speechModel.id).download;
-          this.models.reportRuntimeState(speechModel.id, {
+          const d = this.models.get(selected.id).download;
+          this.models.reportRuntimeState(selected.id, {
             installedState: "not-installed",
             download: {
               state: job.signal.aborted ? "cancelled" : "failed",
@@ -208,6 +239,72 @@ export class MediaAnalysisService {
       },
     });
   }
+  async remove(kind: "speech" | "vision") {
+    if (!desktop) throw new Error("Model management requires the desktop app");
+    const model = kind === "speech" ? speechModel : visionModel;
+    await invoke("remove_ai_model", { modelId: model.id });
+    this.models.reportRuntimeState(model.id, {
+      installedState: "not-installed",
+      download: { state: "not-requested" },
+    });
+  }
+  async embedQuery(query: string, job: JobContext) {
+    const text = z.string().trim().min(1).max(512).parse(query),
+      key = `vision-query:${visionModel.version}:${text}`;
+    const cached = queryEmbeddingSchema.safeParse(await readDerived(key));
+    if (cached.success && cached.data.modelVersion === visionModel.version) {
+      await job.checkpoint();
+      return cached.data;
+    }
+    const result = queryEmbeddingSchema.parse(
+      await nativeJob("embed_vision_query", { query: text }, job),
+    );
+    if (result.modelVersion !== visionModel.version)
+      throw new Error(
+        "Search encoder version differs from the installed image model",
+      );
+    await job.checkpoint();
+    await writeDerived(key, result, JSON.stringify(result).length * 2);
+    return result;
+  }
+  /** A batch job calls this directly so it never waits on another job in its own queue. */
+  async runTask(asset: Asset, input: AnalysisSettings, job: JobContext) {
+    const settings = analysisSettingsSchema.parse(input);
+    if (this.backend.processing !== "LOCAL")
+      throw new Error(
+        "Cloud analysis needs explicit upload consent; no media was uploaded.",
+      );
+    const cached = this.results.find(
+      (r) =>
+        r.assetId === asset.id &&
+        r.fingerprint === asset.fingerprint &&
+        JSON.stringify(r.settings) === JSON.stringify(settings),
+    );
+    if (!desktop && this.backend === nativeAnalysisBackend && cached) {
+      await job.checkpoint();
+      return cached;
+    }
+    const result = analysisResultSchema.parse(
+      await this.backend.analyze(asset, settings, job),
+    );
+    if (
+      result.assetId !== asset.id ||
+      result.fingerprint !== asset.fingerprint ||
+      JSON.stringify(result.settings) !== JSON.stringify(settings)
+    )
+      throw new Error(
+        "Analysis source or settings changed. Relink the source and retry.",
+      );
+    await job.checkpoint();
+    await writeDerived(
+      key(asset, settings.task),
+      result,
+      JSON.stringify(result).length * 2,
+    );
+    await job.checkpoint();
+    this.remember(result);
+    return result;
+  }
   submit(project: Project, assetId: string, input: AnalysisSettings) {
     const settings = analysisSettingsSchema.parse(input),
       asset = project.assets.find((a) => a.id === assetId);
@@ -217,30 +314,9 @@ export class MediaAnalysisService {
         "Cloud analysis requires an explicit upload consent flow; no upload was made.",
       );
     return this.jobs.enqueue({
-      label: `${settings.task === "speech" ? "Transcribe" : settings.task === "video" ? "Scenes and quality" : "Silence and music"} · ${asset.name}`,
+      label: `${settings.task === "speech" ? "Transcribe" : settings.task === "vision" ? "Local vision" : settings.task === "video" ? "Scenes and quality" : "Silence and music"} · ${asset.name}`,
       scope: project.id,
-      run: async (job) => {
-        const result = analysisResultSchema.parse(
-          await this.backend.analyze(asset, settings, job),
-        );
-        if (
-          result.assetId !== asset.id ||
-          result.fingerprint !== asset.fingerprint ||
-          JSON.stringify(result.settings) !== JSON.stringify(settings)
-        )
-          throw new Error(
-            "Analysis source or settings changed. Relink the source and retry.",
-          );
-        await job.checkpoint();
-        await writeDerived(
-          key(asset, settings.task),
-          result,
-          JSON.stringify(result).length * 2,
-        );
-        await job.checkpoint();
-        this.remember(result);
-        return result;
-      },
+      run: (job) => this.runTask(asset, settings, job),
     });
   }
   analyze(project: Project, assetId: string, task: AnalysisTask) {

@@ -2,6 +2,7 @@
 pub mod audio;
 pub mod speech;
 pub mod video;
+pub mod vision;
 use crate::models::Progress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,6 +13,7 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 pub const VERSION: &str = "media-analysis-1";
+const CACHE_REVISION: &str = "2";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
@@ -28,6 +30,7 @@ pub enum Task {
     Speech,
     Audio,
     Video,
+    Vision,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -81,6 +84,8 @@ pub struct AnalysisResult {
     pub audio: Option<audio::AudioAnalysis>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video: Option<video::VideoAnalysis>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vision: Option<vision::VisionAnalysis>,
 }
 pub fn check(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
@@ -121,8 +126,12 @@ pub fn run(
     let key = format!(
         "{:x}",
         Sha256::digest(format!(
-            "{VERSION}:{}:{}:{stamp}:{}:{}",
-            crate::models::VERSION,
+            "{VERSION}:{CACHE_REVISION}:{}:{}:{stamp}:{}:{}",
+            match settings.task {
+                Task::Speech => crate::models::VERSION,
+                Task::Vision => crate::vision_models::VERSION,
+                _ => "ffmpeg-classical-1",
+            },
             asset.fingerprint,
             asset_id,
             serde_json::to_string(&settings).map_err(|e| e.to_string())?
@@ -151,6 +160,7 @@ pub fn run(
         transcript: None,
         audio: None,
         video: None,
+        vision: None,
     };
     match settings.task {
         Task::Speech => {
@@ -162,6 +172,13 @@ pub fn run(
             result.audio = Some(audio::analyze(&source, &asset, &settings, cancel, &report)?)
         }
         Task::Video => result.video = Some(video::analyze(&source, &asset, cancel, &report)?),
+        Task::Vision => {
+            let video = video::analyze(&source, &asset, cancel, &report)?;
+            result.vision = Some(vision::analyze(
+                &source, &asset, model_root, &video, cancel, &report,
+            )?);
+            result.video = Some(video);
+        }
     }
     check(cancel)?;
     let after = fs::metadata(&source).map_err(|e| e.to_string())?;

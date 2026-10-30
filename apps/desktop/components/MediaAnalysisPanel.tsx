@@ -70,6 +70,7 @@ export function MediaAnalysisPanel() {
     );
   const audio = own.find((r) => r.audio)?.audio,
     video = own.find((r) => r.video)?.video,
+    vision = own.find((r) => r.vision)?.vision,
     job = jobs.find((j) => j.id === jobId);
   const busy = job?.state === "Running" || job?.state === "Queued";
   const clip = selectedClip?.assetId === asset?.id ? selectedClip : undefined;
@@ -176,8 +177,13 @@ export function MediaAnalysisPanel() {
         Transcription:{" "}
         {cap?.model?.installed ? "READY · CPU" : "MODEL NOT INSTALLED"} ·
         Scenes: {cap?.video ? "READY" : "Desktop required"} · Silence / beats:{" "}
-        {cap?.audio ? "READY" : "Desktop required"} · Vision / diarization: NOT
-        INSTALLED
+        {cap?.audio ? "READY" : "Desktop required"} · Vision:{" "}
+        {cap?.visionModel?.installed ? "READY · CPU" : "NOT INSTALLED"} ·
+        Semantic search:{" "}
+        {vision || transcript
+          ? "READY for analyzed ranges"
+          : "Analyze media first"}{" "}
+        · Segmentation / diarization: NOT INSTALLED
       </p>
       {desktop && cap?.model && !cap.model.installed && (
         <div>
@@ -207,6 +213,79 @@ export function MediaAnalysisPanel() {
           )}
         </div>
       )}
+      {desktop && cap?.visionModel && (
+        <div>
+          <p>
+            {cap.visionModel.name} · scenes, likely actions and person/object
+            positions · {Math.ceil(cap.visionModel.sizeBytes / 1048576)} MiB
+            weights · CPU · {cap.visionModel.version}
+          </p>
+          {!cap.visionModel.installed && cap.visionModel.installSupported && (
+            <>
+              <p>
+                Install downloads{" "}
+                {Math.ceil(cap.visionModel.downloadBytes / 1048576)} MiB from
+                Hugging Face and GitHub. Media stays LOCAL.{" "}
+                <a
+                  href="https://huggingface.co/Xenova/mobileclip_s0/blob/main/LICENSE"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  MobileCLIP model license
+                </a>
+                .
+              </p>
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  setError("");
+                  try {
+                    const handle = mediaAnalysis.install(project.id, "vision");
+                    setJobId(handle.id);
+                    const result = await handle.finished;
+                    if (result.state === "Failed") setError(result.error);
+                    refresh();
+                  } catch (e) {
+                    setError(String(e));
+                  }
+                }}
+              >
+                Download and install local vision
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {desktop &&
+        (
+          [
+            ["speech", cap?.model],
+            ["vision", cap?.visionModel],
+          ] as const
+        ).map(
+          ([kind, model]) =>
+            model?.installed && (
+              <div key={kind}>
+                <span>
+                  {model.name} installed · current pinned version ·{" "}
+                  {model.device}{" "}
+                </span>
+                <button
+                  disabled={busy}
+                  onClick={async () => {
+                    try {
+                      await mediaAnalysis.remove(kind);
+                      refresh();
+                    } catch (e) {
+                      setError(String(e));
+                    }
+                  }}
+                >
+                  Remove {kind} model
+                </button>
+              </div>
+            ),
+        )}
       {!desktop && (
         <p>
           Run the Windows desktop build for local inference and FFmpeg analysis.
@@ -231,6 +310,14 @@ export function MediaAnalysisPanel() {
         </select>
       </label>
       <div className="analysis-actions">
+        {cap?.visionModel?.installed && cap.video && (
+          <button
+            disabled={busy || asset?.kind !== "video"}
+            onClick={() => void run("vision")}
+          >
+            Analyze vision and subjects
+          </button>
+        )}
         {cap?.model?.installed && cap.audio && (
           <>
             <label>
@@ -323,6 +410,31 @@ export function MediaAnalysisPanel() {
         </div>
       )}
       {error && <p role="alert">{error}</p>}
+      {vision && (
+        <details open>
+          <summary>
+            Visual evidence · {vision.frames.length} frames from{" "}
+            {vision.analyzedScenes}/{vision.totalScenes} scenes ·{" "}
+            {vision.device}
+          </summary>
+          <p>
+            Candidate confidence compares the installed label vocabulary; it is
+            not a calibrated exercise probability. Sparse subject detections
+            support framing, not identity tracking.
+          </p>
+          {vision.frames.map((f, i) => (
+            <button
+              key={i}
+              onClick={() => seek(f.timeMs)}
+              title={f.description}
+            >
+              {seconds(f.timeMs)} · {f.description} ·{" "}
+              {f.detections.filter((d) => d.label === "person").length} people ·{" "}
+              {f.labels[0]?.relativeConfidence.toFixed(2)} relative confidence
+            </button>
+          ))}
+        </details>
+      )}
       <div className="analysis-columns">
         <div>
           {url && asset?.kind !== "image" && (

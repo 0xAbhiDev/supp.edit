@@ -4,6 +4,7 @@ pub mod cache;
 pub mod hardware;
 pub mod models;
 mod process;
+pub mod vision_models;
 use serde::Serialize;
 use serde_json::Value;
 use std::{

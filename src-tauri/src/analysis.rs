@@ -72,6 +72,53 @@ pub async fn speech_model_status(app: AppHandle) -> Result<ModelStatus, String> 
     Ok(supp_media::models::status(&model_root(&app)?))
 }
 #[tauri::command]
+pub async fn vision_model_status(app: AppHandle) -> Result<ModelStatus, String> {
+    Ok(supp_media::vision_models::status(&model_root(&app)?))
+}
+#[tauri::command]
+pub async fn install_vision_model(
+    app: AppHandle,
+    id: String,
+    on_progress: Channel<Progress>,
+) -> Result<ModelStatus, String> {
+    let cancel = start(&app, &id)?;
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::vision_models::install(&model_root(&worker_app)?, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+#[tauri::command]
+pub fn remove_ai_model(app: AppHandle, model_id: String) -> Result<(), String> {
+    let state = app.state::<AnalysisJobs>();
+    let jobs = state.0.lock().map_err(|e| e.to_string())?;
+    if jobs.values().any(|(_, started)| *started) {
+        return Err(
+            "Wait for native analysis and installation to finish before removing a model".into(),
+        );
+    }
+    let root = model_root(&app)?;
+    let target = match model_id.as_str() {
+        supp_media::models::MODEL_ID => supp_media::models::location(&root),
+        supp_media::vision_models::MODEL_ID => supp_media::vision_models::location(&root),
+        _ => return Err("Unknown installed model".into()),
+    };
+    if target.exists() {
+        let root = root.canonicalize().map_err(|e| e.to_string())?;
+        let target = target.canonicalize().map_err(|e| e.to_string())?;
+        if target.parent() != Some(root.as_path()) {
+            return Err("Model directory is outside the managed model root".into());
+        }
+        std::fs::remove_dir_all(target).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+#[tauri::command]
 pub async fn install_speech_model(
     app: AppHandle,
     id: String,
@@ -121,6 +168,30 @@ pub async fn analyze_media(
                 let _ = on_progress.send(progress);
             },
         )
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+#[tauri::command]
+pub async fn embed_vision_query(
+    app: AppHandle,
+    id: String,
+    query: String,
+    on_progress: Channel<Progress>,
+) -> Result<supp_media::analysis::vision::QueryEmbedding, String> {
+    let cancel = start(&app, &id)?;
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let result =
+            supp_media::analysis::vision::encode_query(&model_root(&worker_app)?, &query, &cancel)?;
+        let _ = on_progress.send(Progress {
+            completed: 1,
+            total: 1,
+            unit: "query embedded",
+        });
+        Ok(result)
     })
     .await
     .map_err(|e| e.to_string());

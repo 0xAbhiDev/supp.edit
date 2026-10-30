@@ -2,6 +2,15 @@
 use std::{path::Path, sync::atomic::AtomicBool};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.len() == 2 && args[0] == "--install-vision" {
+        let state = supp_media::vision_models::install(
+            Path::new(&args[1]),
+            &AtomicBool::new(false),
+            |_| {},
+        )?;
+        println!("{}", serde_json::to_string_pretty(&state)?);
+        return Ok(());
+    }
     if args.len() == 2 && args[0] == "--install" {
         let state =
             supp_media::models::install(Path::new(&args[1]), &AtomicBool::new(false), |_| {})?;
@@ -15,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "speech" => supp_media::analysis::Task::Speech,
         "audio" => supp_media::analysis::Task::Audio,
         "video" => supp_media::analysis::Task::Video,
+        "vision" => supp_media::analysis::Task::Vision,
         _ => return Err("Unknown analysis task".into()),
     };
     let result = supp_media::analysis::run(

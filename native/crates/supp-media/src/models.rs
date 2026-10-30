@@ -58,12 +58,16 @@ pub fn status(root: &Path) -> ModelStatus {
         device: "CPU",
     }
 }
-fn download(
-    url: &str,
+pub(crate) struct Download<'a> {
+    pub url: &'a str,
+    pub bytes: u64,
+    pub sha256: &'a str,
+}
+pub(crate) fn download(
+    spec: Download<'_>,
     path: &Path,
-    expected: u64,
-    hash: &str,
     offset: u64,
+    total: u64,
     cancel: &AtomicBool,
     report: &impl Fn(Progress),
 ) -> Result<(), String> {
@@ -73,7 +77,7 @@ fn download(
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client
-        .get(url)
+        .get(spec.url)
         .send()
         .and_then(|r| r.error_for_status())
         .map_err(|e| e.to_string())?;
@@ -90,18 +94,18 @@ fn download(
             break;
         }
         bytes += n as u64;
-        if bytes > expected {
+        if bytes > spec.bytes {
             return Err("Download exceeded the pinned size".into());
         }
         digest.update(&buffer[..n]);
         file.write_all(&buffer[..n]).map_err(|e| e.to_string())?;
         report(Progress {
             completed: offset + bytes,
-            total: MODEL_BYTES + RUNTIME_BYTES,
+            total,
             unit: "bytes",
         });
     }
-    if bytes != expected || format!("{:x}", digest.finalize()) != hash {
+    if bytes != spec.bytes || format!("{:x}", digest.finalize()) != spec.sha256 {
         return Err("Downloaded file failed checksum verification".into());
     }
     Ok(())
@@ -122,11 +126,10 @@ pub fn install(
     let temp = tempfile::tempdir_in(root).map_err(|e| e.to_string())?;
     let archive = temp.path().join("runtime.zip");
     download(
-        "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip",
+        Download { url: "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip", bytes: RUNTIME_BYTES, sha256: RUNTIME_HASH },
         &archive,
-        RUNTIME_BYTES,
-        RUNTIME_HASH,
         0,
+        MODEL_BYTES + RUNTIME_BYTES,
         cancel,
         &report,
     )?;
@@ -158,11 +161,14 @@ pub fn install(
     // Close the archive before publishing its parent directory on Windows.
     drop(zip);
     download(
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+        Download {
+            url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin",
+            bytes: MODEL_BYTES,
+            sha256: MODEL_HASH,
+        },
         &temp.path().join("ggml-tiny.bin"),
-        MODEL_BYTES,
-        MODEL_HASH,
         RUNTIME_BYTES,
+        MODEL_BYTES + RUNTIME_BYTES,
         cancel,
         &report,
     )?;

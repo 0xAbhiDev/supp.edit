@@ -8,7 +8,7 @@ export const mediaRangeSchema = z
   .refine((r) => r.endMs > r.startMs, { message: "Empty media range" });
 export const analysisSettingsSchema = z
   .object({
-    task: z.enum(["speech", "audio", "video"]),
+    task: z.enum(["speech", "audio", "video", "vision"]),
     language: z.string().regex(/^[a-zA-Z-]{1,16}$/),
     translate: z.boolean(),
     thresholdDb: z.number().finite().min(-80).max(-5),
@@ -64,6 +64,62 @@ export const sceneSchema = z
       s.representativeMs >= s.startMs &&
       s.representativeMs < s.endMs,
   );
+const detectionSchema = z
+  .object({
+    label: z.string().min(1).max(128),
+    confidence: unit,
+    bounds: z
+      .object({ x: unit, y: unit, width: unit, height: unit })
+      .strict()
+      .refine(
+        (b) =>
+          b.width > 0 &&
+          b.height > 0 &&
+          b.x + b.width <= 1.00001 &&
+          b.y + b.height <= 1.00001,
+      ),
+  })
+  .strict();
+export const visionFrameSchema = z
+  .object({
+    timeMs: ms,
+    sceneStartMs: ms,
+    sceneEndMs: ms,
+    width: z.number().int().min(1).max(960),
+    height: z.number().int().min(1).max(960),
+    orientation: z.enum(["landscape", "portrait", "square"]),
+    description: z.string().max(1000),
+    labels: z
+      .array(
+        z
+          .object({
+            label: z.string().max(128),
+            similarity: z.number().finite().min(-1.00001).max(1.00001),
+            relativeConfidence: unit,
+          })
+          .strict(),
+      )
+      .max(128),
+    detections: z.array(detectionSchema).max(64),
+    subject: detectionSchema.nullable(),
+    shotScale: z.enum(["close", "medium", "wide"]).nullable(),
+    embedding: z.array(z.number().finite().min(-1).max(1)).length(512),
+  })
+  .strict()
+  .refine((f) => f.timeMs >= f.sceneStartMs && f.timeMs < f.sceneEndMs);
+export type VisionFrame = z.infer<typeof visionFrameSchema>;
+export const visionAnalysisSchema = z
+  .object({
+    modelId: z.string().max(128),
+    modelVersion: z.string().max(128),
+    device: z.string().max(64),
+    frames: z.array(visionFrameSchema).min(1).max(96),
+    totalScenes: z.number().int().min(1).max(2000),
+    analyzedScenes: z.number().int().min(1).max(32),
+    method: z.string().max(2000),
+    limitations: z.array(z.string().max(1000)).max(32),
+  })
+  .strict();
 export const analysisResultSchema = z
   .object({
     assetId: z.string().min(1).max(128),
@@ -74,6 +130,7 @@ export const analysisResultSchema = z
     durationMs: ms,
     settings: analysisSettingsSchema,
     transcript: transcriptSchema.optional(),
+    vision: visionAnalysisSchema.optional(),
     audio: z
       .object({
         silences: z.array(mediaRangeSchema).max(18000),
@@ -111,7 +168,9 @@ export const analysisResultSchema = z
         ? r.transcript
         : r.settings.task === "audio"
           ? r.audio
-          : r.video;
+          : r.settings.task === "vision"
+            ? r.vision
+            : r.video;
     if (!expected)
       c.addIssue({
         code: "custom",
@@ -131,6 +190,7 @@ export const analysisResultSchema = z
       ...(r.audio?.removalRanges ?? []),
       ...(r.video?.scenes ?? []),
       ...(r.transcript?.segments ?? []),
+      ...(r.vision?.frames.map((f) => ({ endMs: f.sceneEndMs })) ?? []),
     ])
       if (range.endMs > r.durationMs)
         c.addIssue({

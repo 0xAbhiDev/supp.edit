@@ -10,5 +10,8 @@ tempfile.workspace = true
 sha2 = "0.10"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-27", "cuda", "directml"] }
+tokenizers = { version = "0.22.2", default-features = false, features = ["fancy-regex"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_SystemInformation"] }
