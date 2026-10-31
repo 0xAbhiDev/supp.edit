@@ -1,5 +1,13 @@
 # AI Studio foundation
 
+## Editable rough-cut execution
+
+`rough-cut/service.ts` runs bounded local analysis directly within a shared background job, with source-bound results and real monotonic progress. Models install only on explicit request. `model.ts` parses bounded edit briefs; `planner.ts` retains component evidence, diversifies non-overlapping source windows and proposes measured-onset-aligned cuts. Multiple music sources require selection or unambiguous context. `beats.ts` uses measured events only.
+
+Strict `sequence.create/insert/marker` calls pass through the normal registry and detached-history preview. `resultCompositionId` selects the actual new sequence. Apply is one normal undoable transaction with stale-snapshot checks; the original sequence remains intact. Edit/Export expose sequence selection. An export snapshot wraps the selected composition, retaining globally unique IDs; native grants cover reachable nested media. Persisted v9 provenance is descriptive data, never executable commands.
+
+`RoughCutReview` provides real source frames, scores/reasons, remove/reorder/replace, temporary playback/seek and Apply/Undo. Unsupported caption/speed requests explicitly report their limitations. See [GYM_ACCEPTANCE.md](docs/GYM_ACCEPTANCE.md) for passed first-prompt acceptance and remaining work.
+
 Status: local media analysis includes real CPU transcription, measured silence/scenes/music, source transcripts, sampled ONNX vision and paired text embeddings. Explicit verified installers and model removal exist; results remain data until normal command preview/Apply. See [MEDIA_UNDERSTANDING.md](docs/MEDIA_UNDERSTANDING.md) and [VISION_VALIDATION.md](docs/VISION_VALIDATION.md). The fp32 image encoder replaces the failed quantized candidate; exact exercise/rep recognition is not claimed. Creative rough cuts, segmentation, tracking and cloud execution remain in progress.
 
 ## Providers and models

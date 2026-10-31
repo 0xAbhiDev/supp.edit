@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { freeze } from "immer";
 import { type Project, newProject } from "../project-schema";
 import { History, type Edit } from "../commands";
 import { compositionView, inComposition } from "../commands/compositions";
@@ -104,6 +105,10 @@ export const useEditor = create<State>((set, get) => ({
     }));
   },
   load: (project, path = null, dirty = false) => {
+    // Store snapshots must be immutable even before the first command. Scoped
+    // selectors memoize by snapshot identity; an unfrozen disk load otherwise
+    // produces a fresh view on every React subscription read.
+    project = freeze(project, true);
     history = new History(project);
     set((s) => ({
       project,

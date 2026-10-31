@@ -1,5 +1,7 @@
 # Local vision validation
 
+The validated pack now feeds actual gym rough-cut selection. Five real exercise videos and a flower-video negative were analyzed through the native pipeline; broad evidence gates reject the unrelated footage. See [GYM_ACCEPTANCE.md](GYM_ACCEPTANCE.md) for scored components, sources and complete preview/apply/reopen/native-encode evidence. This remains a small regression set, not a general accuracy certification.
+
 The application now uses the **fp32 MobileCLIP-S0 image encoder**, its paired quantized text encoder and tokenizer from the same pinned conversion, and **YOLOX Nano**. Model installation is explicit. No media is uploaded. These are sampled visual signals, not exact exercise or rep-phase recognition.
 
 Checkpoint validation: production frontend build, 90 TypeScript tests, 26 Rust tests, and workspace Clippy with warnings denied all pass. The native desktop crate compiles. The refreshed desktop executable and full rough-cut acceptance remain pending.

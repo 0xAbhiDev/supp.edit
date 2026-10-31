@@ -1,5 +1,7 @@
 # Continuous work recovery
 
+1 November 2026: f1d8a4a commits the v9 sequence command foundation. Current rough-cut work passes the two gym prompts in tests/e2e/gym-edit.spec.ts, including source thumbnails/playback, Apply/Undo/Redo, normal Edit, save/close/reopen, and real flower-video rejection. Native read/save/read is identical; actual frontend frames encode to test-results/gym/render.mp4 (27.5s, 825 frames, H.264/AAC, verified nonzero audio and sampled pixel parity). docs/GYM_ACCEPTANCE.md has details. Latest production/native build passed. Sequence load must freeze the project so React scoped selectors stay stable. Next: Windows GUI smoke with the current build, revisions, reframing, speed backend and captions; do not stop. Uncommitted source must be preserved and checkpointed.
+
 Latest validated vision commit: 6da2973. The next checkpoint finishes the interrupted new-sequence command path: persistence v9 (AI provenance and sequence markers), stable source insert IDs, result-scope preview, sequence selection across Edit/Export, and nested export source grants. 92 TypeScript tests, 27 Rust tests and workspace Clippy pass. Preserve all current work. This document is not a stopping condition.
 
 Current brief: 126a874d-2ca2-4fda-befe-cd262c91d79e/Pasted text.txt. Immediate target is the exact gym prompt producing a real editable sequence, preview/apply/undo/save/reopen/MP4. Do not stop at architecture, ranking or beat sync. Continue broader product work afterward.

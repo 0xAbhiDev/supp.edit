@@ -1,6 +1,6 @@
-# Current state — validated local vision, 30 October 2026
+# Current state — editable gym rough cuts, 1 November 2026
 
-The existing compositor, nested compositions, animated masks/mattes, seventeen blend modes and ordered effects remain intact. Schema v8 adds source-bound speech transcripts with words, token confidence and model provenance; versions 1–8 are readable.
+The compositor, nested compositions, animated masks/mattes, seventeen blend modes and ordered effects remain intact. Schema v9 preserves source-bound transcripts, AI sequence provenance and sequence markers; versions 1–9 are readable. Both gym acceptance prompts now create real editable sequences. Browser preview/apply/undo/redo/save/close/reopen, negative rejection and native MP4 encoding pass with actual native analysis of five real exercise clips. See docs/GYM_ACCEPTANCE.md. Windows GUI smoke, revisions/reframe/time-remap/caption integration remain active work.
 
 AI Studio now runs real local CPU transcription, silence detection, every-frame shot-boundary scoring, sampled quality metrics and measured onset/tempo analysis. Explicit checksum-verified model installation, cancellable native jobs, source/settings/version caches and transcript editing are implemented. Preview/Apply use shared commands; Undo reverses one logical edit. See docs/MEDIA_UNDERSTANDING.md and docs/VALIDATION.md.
 

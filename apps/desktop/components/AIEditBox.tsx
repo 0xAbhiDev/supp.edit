@@ -9,6 +9,12 @@ import {
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock } from "../../../packages/engine/clock";
 import { compositionView } from "../../../packages/commands/compositions";
+import { routeRequest } from "../../../packages/ai/rough-cut/model";
+import {
+  roughCutService,
+  type RoughCutSession,
+} from "../../../packages/ai/rough-cut/service";
+import { RoughCutReview } from "./RoughCutReview";
 import "./ai-edit-box.css";
 export function AIEditBox() {
   const project = useEditor((s) => s.project),
@@ -19,7 +25,9 @@ export function AIEditBox() {
     [preview, setPreview] = useState<EditPreview | null>(null),
     [error, setError] = useState(""),
     [jobId, setJobId] = useState<string | null>(null),
-    [applied, setApplied] = useState(false);
+    [applied, setApplied] = useState(false),
+    [roughCut, setRoughCut] = useState<RoughCutSession | null>(null),
+    [musicId, setMusicId] = useState("");
   const canvas = useRef<HTMLCanvasElement>(null),
     generation = useRef(0);
   const jobs = useSyncExternalStore(
@@ -32,6 +40,8 @@ export function AIEditBox() {
   useEffect(() => {
     generation.current++;
     setPreview(null);
+    setRoughCut(null);
+    setMusicId("");
     setApplied(false);
     setError("");
   }, [project.id]);
@@ -39,9 +49,17 @@ export function AIEditBox() {
     if (!preview || !canvas.current) return;
     let disposed = false;
     const r = new Compositor(canvas.current, true, { scale: 0.5 });
-    const pending = r.render(compositionView(preview.project, preview.plan.resultCompositionId ?? preview.plan.compositionId), preview.frame).catch((e) => {
-      if (!disposed) setError(String(e));
-    });
+    const pending = r
+      .render(
+        compositionView(
+          preview.project,
+          preview.plan.resultCompositionId ?? preview.plan.compositionId,
+        ),
+        preview.frame,
+      )
+      .catch((e) => {
+        if (!disposed) setError(String(e));
+      });
     return () => {
       disposed = true;
       r.cancel();
@@ -51,9 +69,25 @@ export function AIEditBox() {
   async function plan() {
     setError("");
     setPreview(null);
+    setRoughCut(null);
     setApplied(false);
     const token = ++generation.current;
     try {
+      if (routeRequest(request) === "creative") {
+        const handle = roughCutService.plan(
+          request,
+          project,
+          revision,
+          musicId || null,
+          useEditor.getState().source,
+        );
+        setJobId(handle.id);
+        const outcome = await handle.finished;
+        if (token !== generation.current) return;
+        if (outcome.state === "Completed") setRoughCut(outcome.result);
+        else if (outcome.state === "Failed") setError(outcome.error);
+        return;
+      }
       const handle = aiEditorAgent.plan(request, project, revision, {
         selectedLayerId: selected,
         selectedClipIds: selected ? [selected] : [],
@@ -91,12 +125,31 @@ export function AIEditBox() {
         onChange={(e) => setRequest(e.target.value)}
       />
       <p>
-        LOCAL command planner · Select a main-sequence layer. Available now:
-        “Set contrast to 1.2”, “Move selected clip to frame 60”, or “Trim
-        selected clip end to frame 90”. Local speech, scene and audio analysis
-        are available in Media understanding below; vision requires a future
-        provider.
+        LOCAL · Try “Pick my best gym lifts and sync cuts to the music.”
+        Imported videos are analyzed on this device using the installed vision
+        model. Review the selected moments before applying a new editable
+        sequence. Precise layer commands such as “Set contrast to 1.2” also
+        work.
       </p>
+      {project.assets.some((a) => a.kind === "audio") && (
+        <label>
+          Music{" "}
+          <select
+            aria-label="Music for AI edit"
+            value={musicId}
+            onChange={(e) => setMusicId(e.target.value)}
+          >
+            <option value="">Use selected audio or the only audio asset</option>
+            {project.assets
+              .filter((a) => a.kind === "audio")
+              .map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+          </select>
+        </label>
+      )}
       <button disabled={busy || !request.trim()} onClick={() => void plan()}>
         Preview edit plan
       </button>
@@ -114,6 +167,7 @@ export function AIEditBox() {
         </span>
       )}
       {error && <p role="alert">{error}</p>}
+      {roughCut && <RoughCutReview session={roughCut} onChange={setRoughCut} />}
       {preview && (
         <div className="ai-edit-plan">
           <div>

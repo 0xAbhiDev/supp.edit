@@ -15,6 +15,7 @@ import {
   type EditorPlan,
 } from "../packages/ai/editor-agent/execution";
 import { parseEditBrief } from "../packages/ai/rough-cut/model";
+import { useEditor, editorProject } from "../packages/editor-state";
 function setup() {
   const p = newProject();
   const asset: Asset = {
@@ -84,6 +85,17 @@ function setup() {
   return { p, plan };
 }
 describe("Editable AI sequences", () => {
+  it("keeps scoped selector identity stable immediately after loading a saved sequence", () => {
+    const { p, plan } = setup(),
+      saved = JSON.parse(JSON.stringify(previewEditPlan(plan, p, 0).project));
+    useEditor.getState().load(parseProject(saved));
+    useEditor.getState().setComposition("sequence");
+    const a = editorProject(useEditor.getState()),
+      b = editorProject(useEditor.getState());
+    expect(a).toBe(b);
+    useEditor.getState().setWorkspace("Edit");
+    expect(editorProject(useEditor.getState())).toBe(a);
+  });
   it("previews the new scope, applies atomically, undoes exactly and redoes stable ranges", () => {
     const { p, plan } = setup(),
       preview = previewEditPlan(plan, p, 0),
