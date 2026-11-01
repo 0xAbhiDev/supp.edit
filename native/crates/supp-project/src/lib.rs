@@ -98,6 +98,8 @@ pub struct Composition {
     pub markers: Vec<Marker>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai: Option<creative::AiEditMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub revisions: Vec<creative::RevisionRecord>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -295,10 +297,14 @@ fn color(value: &str) -> bool {
         && value.starts_with('#')
         && value.as_bytes()[1..].iter().all(u8::is_ascii_hexdigit)
 }
+/// Opaque project identity. Match JavaScript string length, not UTF-8 byte length.
+/// IDs are compared verbatim and never interpreted as paths.
+pub fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.encode_utf16().count() <= 128
+}
 fn unique<'a>(ids: impl Iterator<Item = &'a str>) -> bool {
     let mut set = HashSet::new();
-    ids.into_iter()
-        .all(|id| !id.is_empty() && id.len() <= 128 && set.insert(id))
+    ids.into_iter().all(|id| valid_id(id) && set.insert(id))
 }
 fn validate_settings(settings: &Settings) -> Result<(), Error> {
     ensure(
@@ -553,6 +559,10 @@ impl Project {
             )?;
             if let Some(ai) = &c.ai {
                 ai.validate()?;
+            }
+            ensure(c.revisions.len() <= 100, "Too many sequence revisions")?;
+            for revision in &c.revisions {
+                revision.validate()?;
             }
         }
         for a in &self.assets {
@@ -812,6 +822,23 @@ pub fn save(path: &Path, project: &Project) -> Result<(), Error> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn identity_contract_accepts_opaque_unicode_ids_and_rejects_invalid_lengths() {
+        for id in [
+            "legacy-asset",
+            "a/b",
+            "素材",
+            "123",
+            "f5fcbef6-d7c1-420b-8d16-b82c57baf170",
+        ] {
+            assert!(super::valid_id(id));
+        }
+        assert!(super::valid_id(&"素".repeat(128)));
+        assert!(super::valid_id(&"🖼".repeat(64)));
+        assert!(!super::valid_id(""));
+        assert!(!super::valid_id(&"x".repeat(129)));
+        assert!(!super::valid_id(&"🖼".repeat(65)));
+    }
     use super::*;
 
     fn parenting_project() -> Project {

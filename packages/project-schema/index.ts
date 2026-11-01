@@ -2,10 +2,12 @@ import { blendModes, matteSchema, assertMattes } from "../compositing/model";
 import { z } from "zod";
 import { transcriptSchema } from "../ai/transcript";
 import { aiEditMetadataSchema } from "../ai/rough-cut/model";
+import { revisionRecordSchema } from "../ai/revisions/model";
+import { identitySchema } from "./identity";
 
 const finite = z.number().finite();
 const frame = finite.int().min(0).max(2_000_000_000);
-const id = z.string().min(1).max(128);
+const id = identitySchema;
 export { interpolationModes, keyframeSchema } from "../animation/schema";
 import { keyframeSchema } from "../animation/schema";
 import { masksSchema } from "../masks/model";
@@ -153,6 +155,7 @@ export const compositionSchema = z.object({
   layers: z.array(clipSchema).max(100000),
   markers: z.array(z.object({ id, frame, name:z.string().max(256) })).max(10000).optional(),
   ai: aiEditMetadataSchema.optional(),
+  revisions: z.array(revisionRecordSchema).max(100).optional(),
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({

@@ -145,7 +145,11 @@ pub async fn analyze_media(
     settings: Settings,
     on_progress: Channel<Progress>,
 ) -> Result<AnalysisResult, String> {
-    uuid::Uuid::parse_str(&asset_id).map_err(|_| "Invalid asset ID")?;
+    // Project IDs are bounded opaque strings, including legacy/imported IDs.
+    // They are hashed into cache keys, never interpreted as filesystem paths.
+    if !supp_project::valid_id(&asset_id) {
+        return Err("Invalid asset ID".into());
+    }
     let source = app
         .state::<Session>()
         .require(std::path::Path::new(&path))?;

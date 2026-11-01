@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { visualRevision, musicRevision, removeRequest } from "../revisions/requests";
 export const pacingSchema = z.enum([
   "cinematic",
   "balanced",
@@ -48,8 +49,9 @@ export function routeRequest(input: string): RequestRoute {
   )
     return "transcript";
   if (/^(which|analy[sz]e|detect)\b/i.test(input)) return "analysis";
+  if(visualRevision(input)||musicRevision(input)||removeRequest.test(input))return "revision";
   if (
-    /(?:third (?:shot|clip)|intro faster|first \d+ seconds faster|remove captions|sync the ending|make (?:this|it) \d+|use more)/i.test(
+    /(?:third (?:shot|clip)|3rd (?:shot|clip)|intro faster|faster opening|opening faster|first \d+ seconds faster|remove captions|sync (?:the )?ending|make (?:this|it) (?:\d+|shorter)|shorten (?:it|this) to|use more|less bench|use (?:an?other|different) clip first|remove (?:the )?(?:last|final) (?:clip|shot)|tighten (?:the )?cuts|undo (?:that|the) revision)/i.test(
       input,
     )
   )

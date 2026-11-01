@@ -131,6 +131,9 @@ pub fn validate_path(path: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 pub fn inspect(path: &Path, id: String) -> Result<Asset, String> {
+    if !supp_project::valid_id(&id) {
+        return Err("Invalid asset ID".into());
+    }
     let path = validate_path(path)?;
     let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
     let output = process::capture(
@@ -246,6 +249,19 @@ pub fn thumbnail(path: &Path, out: &Path) -> Result<(), String> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invalid_asset_id_is_rejected_before_media_io() {
+        for id in [String::new(), "x".repeat(129)] {
+            assert_eq!(
+                super::inspect(std::path::Path::new("missing.mp4"), id).unwrap_err(),
+                "Invalid asset ID"
+            );
+        }
+        assert_ne!(
+            super::inspect(std::path::Path::new("missing.mp4"), "legacy-video".into()).unwrap_err(),
+            "Invalid asset ID"
+        );
+    }
     use super::*;
     #[test]
     fn rejects_arbitrary_file_types() {

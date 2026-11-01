@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEditor, editorProject } from "../../../packages/editor-state";
-import { fps } from "../../../packages/project-schema";
+import { fps, duration } from "../../../packages/project-schema";
 import { clock } from "../../../packages/engine/clock";
 import { splitClip, deleteClip } from "../../../packages/commands";
 import * as platform from "../../../packages/platform";
@@ -47,6 +47,12 @@ export function useWorkspaceSession() {
   const onCanvas = useCallback((c: HTMLCanvasElement | null) => {
     programCanvas.current = c;
   }, []);
+  useEffect(() => useEditor.subscribe((s, old) => {
+    if(s.project===old.project&&s.activeComposition===old.activeComposition)return;
+    const end=duration(editorProject(s));
+    if(s.activeComposition!==old.activeComposition) {clock.pause();clock.seek(0);}
+    else if(clock.get().frame>=end) {clock.pause();clock.seek(Math.max(0,end-1));}
+  }),[]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.setProperty("--accent", accent);

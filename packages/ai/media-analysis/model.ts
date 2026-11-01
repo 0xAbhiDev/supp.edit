@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { transcriptSchema } from "../transcript";
+import { identitySchema } from "../../project-schema/identity";
 const ms = z.number().int().min(0).max(1_800_000),
   unit = z.number().finite().min(0).max(1);
 export const mediaRangeSchema = z
@@ -122,7 +123,7 @@ export const visionAnalysisSchema = z
   .strict();
 export const analysisResultSchema = z
   .object({
-    assetId: z.string().min(1).max(128),
+    assetId: identitySchema,
     fingerprint: z.string().min(1).max(8192),
     cacheKey: z.string().regex(/^[a-f0-9]{64}$/),
     algorithm: z.literal("media-analysis-1"),

@@ -15,6 +15,8 @@ export function AIStudio() {
     revision = useEditor((s) => s.revision),
     selected = useEditor((s) => s.selected),
     history = useEditor((s) => s.historyNames);
+  const activeSequence = useEditor((s) => s.activeComposition);
+  const sequence = project.compositions.find((c) => c.id === activeSequence);
   const entries = useSyncExternalStore(
       aiStudio.subscribe,
       aiStudio.getSnapshot,
@@ -75,7 +77,7 @@ export function AIStudio() {
         <div>
           <strong>AI Studio</strong>
           <p>
-            {project.name} · Main sequence ·{" "}
+            {project.name} · {sequence?.name ?? "Main sequence"} ·{" "}
             {selected ? "1 selected layer" : "No layer selected"} ·{" "}
             {project.transcripts.length} transcripts
           </p>
@@ -83,6 +85,21 @@ export function AIStudio() {
         <span className="ai-local">LOCAL · No media upload</span>
       </header>
       <AIEditBox />
+      {!!sequence?.revisions?.length && (
+        <details>
+          <summary>
+            Sequence revision history · {sequence.revisions.length}
+          </summary>
+          <ol>
+            {sequence.revisions.map((r) => (
+              <li key={r.id}>
+                <strong>{r.request}</strong>
+                <p>{r.summary}</p>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
       <MediaAnalysisPanel />
       <div className="ai-columns">
         <div className="ai-input">

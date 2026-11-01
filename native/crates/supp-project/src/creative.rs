@@ -3,6 +3,32 @@ use crate::{ensure, range, Error};
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RevisionRecord {
+    pub id: String,
+    pub request: String,
+    pub summary: String,
+    pub created_at: String,
+    pub changed_layer_ids: Vec<String>,
+}
+impl RevisionRecord {
+    pub fn validate(&self) -> Result<(), Error> {
+        ensure(
+            crate::valid_id(&self.id)
+                && !self.request.trim().is_empty()
+                && self.request.chars().count() <= 4000
+                && !self.summary.is_empty()
+                && self.summary.chars().count() <= 2000
+                && (20..=40).contains(&self.created_at.len())
+                && self.created_at.contains('T')
+                && self.created_at.ends_with('Z')
+                && self.changed_layer_ids.len() <= 512
+                && self.changed_layer_ids.iter().all(|id| crate::valid_id(id)),
+            "Invalid sequence revision",
+        )
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditBrief {
     pub prompt: String,
     pub profile: String,
@@ -26,6 +52,9 @@ mod tests {
         track["id"] = "ai-track".into();
         let c = serde_json::json!({"id":"ai-sequence","name":"AI Gym Edit 01","settings":p.settings,"duration":90,"background":"#000000","tracks":[track],"layers":[],"markers":[{"id":"hook","frame":0,"name":"HOOK"}],"ai":{"plannerVersion":"rough-cut-1","createdAt":"2026-10-30T00:00:00.000Z","brief":{"prompt":"Pick my best gym lifts and sync cuts to the music.","profile":"gym","durationSeconds":30,"aspect":"9:16","pacing":"balanced","beatSync":"balanced","captions":false,"speedRamps":"off","prioritize":[]},"evidence":[],"warnings":[]}});
         p.compositions.push(serde_json::from_value(c).unwrap());
+        for index in 1..=2 {
+            p.compositions[0].revisions.push(serde_json::from_value(serde_json::json!({"id":format!("revision-{index}"),"request":"Make it shorter.","summary":"Trim existing clip ranges","createdAt":"2026-11-01T00:00:00.000Z","changedLayerIds":["legacy-clip"]})).unwrap());
+        }
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("gym.supp");
         save(&path, &p).unwrap();
@@ -81,8 +110,7 @@ impl AiEditMetadata {
         ensure(
             self.evidence.len() <= 512
                 && self.evidence.iter().all(|e| {
-                    !e.asset_id.is_empty()
-                        && e.asset_id.len() <= 128
+                    crate::valid_id(&e.asset_id)
                         && !e.fingerprint.is_empty()
                         && e.fingerprint.chars().count() <= 8192
                         && e.cache_key.len() == 64

@@ -1,5 +1,11 @@
 # AI Studio foundation
 
+## Existing-sequence revisions
+
+`revisions/service.ts` routes supported local requests to `planRevision`, inspecting the current composition and reusing source-bound analysis when needed. `sequence.revise` is a bounded changeset of existing clip IDs, source/range patches, removals and marker movements. The shared command adapter preserves retained masks/effects/animation and validates locks, source handles and dependencies. Detached preview, explicit Apply and one-step normal history Undo/Redo are mandatory. Descriptive revision records persist on the composition; they are never executable project data. The UI provides real sequence playback, per-layer changes, Cancel and persisted revision history. See [REVISION_ACCEPTANCE.md](docs/REVISION_ACCEPTANCE.md).
+
+Project and native analysis share an opaque asset-ID contract; UUID format is not required. See [IDENTITY_CONTRACT.md](docs/IDENTITY_CONTRACT.md). Native session path grants remain independent of IDs.
+
 ## Editable rough-cut execution
 
 `rough-cut/service.ts` runs bounded local analysis directly within a shared background job, with source-bound results and real monotonic progress. Models install only on explicit request. `model.ts` parses bounded edit briefs; `planner.ts` retains component evidence, diversifies non-overlapping source windows and proposes measured-onset-aligned cuts. Multiple music sources require selection or unambiguous context. `beats.ts` uses measured events only.

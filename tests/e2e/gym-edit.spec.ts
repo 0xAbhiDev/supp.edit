@@ -65,6 +65,9 @@ test("real gym prompt creates an editable sequence with preview, atomic undo, re
   await page.goto("/");
   const original = await seed(page);
   await page.getByRole("button", { name: "AI Studio", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "AI Studio workspace" }),
+  ).toHaveCSS("overflow-y", "auto");
   await page
     .getByLabel("Describe your edit")
     .fill("Pick my best gym lifts and sync cuts to the music.");
@@ -119,13 +122,11 @@ test("real gym prompt creates an editable sequence with preview, atomic undo, re
   await page.close();
   const reopened = await context.newPage();
   await reopened.goto("/");
-  await reopened
-    .getByTestId("project-input")
-    .setInputFiles({
-      name: "GYM_EDIT.supp",
-      mimeType: "application/json",
-      buffer: Buffer.from(saved),
-    });
+  await reopened.getByTestId("project-input").setInputFiles({
+    name: "GYM_EDIT.supp",
+    mimeType: "application/json",
+    buffer: Buffer.from(saved),
+  });
   expect((await state(reopened)).compositions).toEqual(applied.compositions);
   await reopened.getByLabel("Active sequence").selectOption(sequence.id);
   await expect(reopened.locator(".timeline-clip")).toHaveCount(
@@ -199,3 +200,133 @@ test("real gym prompt creates an editable sequence with preview, atomic undo, re
   ).toBeVisible({ timeout: 45000 });
   expect((await state(reopened)).compositions).toHaveLength(0);
 });
+
+test("revision chat preserves existing IDs through two revisions, undo and disk reopen", async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(120000);
+  await page.goto("/");
+  await seed(page);
+  await page.getByRole("button", { name: "AI Studio", exact: true }).click();
+  await page
+    .getByLabel("Describe your edit")
+    .fill("Pick my best gym lifts and sync cuts to the music.");
+  await page
+    .getByRole("button", { name: "Preview edit plan", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Apply AI edit", exact: true })
+    .click();
+  const initial = await state(page),
+    id = initial.compositions[0].id;
+  for (const [index, request] of [
+    "Make it 20 seconds.",
+    "Replace the second shot.",
+  ].entries()) {
+    await page.getByLabel("Describe your edit").fill(request);
+    await page
+      .getByRole("button", { name: "Preview edit plan", exact: true })
+      .click();
+    const review = page.getByRole("region", { name: "AI revision plan" });
+    await expect(
+      review.getByRole("heading", { name: "AI REVISION PLAN" }),
+    ).toBeVisible();
+    const before = await state(page);
+    await review
+      .getByRole("button", { name: "Preview revision", exact: true })
+      .click();
+    await expect
+      .poll(() => review.getByLabel("Revision preview frame").inputValue())
+      .not.toBe("0");
+    await review
+      .getByRole("button", { name: "Pause revision preview", exact: true })
+      .click();
+    await review
+      .getByRole("button", { name: "Apply revision", exact: true })
+      .click();
+    const applied = await state(page);
+    expect(applied.compositions).toHaveLength(1);
+    expect(applied.compositions[0].id).toBe(id);
+    expect(applied.compositions[0].duration).toBe(600);
+    expect(applied.compositions[0].layers.map((l: any) => l.id)).toEqual(
+      before.compositions[0].layers.map((l: any) => l.id),
+    );
+    expect(applied.compositions[0].revisions).toHaveLength(index + 1);
+    await review
+      .getByRole("button", { name: "Undo revision", exact: true })
+      .click();
+    expect(await state(page)).toEqual(before);
+    await page.getByRole("button", { name: "Redo", exact: true }).click();
+    expect(await state(page)).toEqual(applied);
+  }
+  const final = await state(page);
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("button", { name: "Save project", exact: true }).click(),
+  ]);
+  const saved = await fs.readFile((await download.path())!, "utf8");
+  await fs.mkdir("test-results/revisions", { recursive: true });
+  await fs.writeFile("test-results/revisions/REVISED.supp", saved);
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.goto("/");
+  await reopened
+    .getByTestId("project-input")
+    .setInputFiles({
+      name: "REVISED.supp",
+      mimeType: "application/json",
+      buffer: Buffer.from(saved),
+    });
+  expect((await state(reopened)).compositions).toEqual(final.compositions);
+  await reopened.getByLabel("Active sequence").selectOption(id);
+  await reopened
+    .getByRole("button", { name: "AI Studio", exact: true })
+    .click();
+  await expect(
+    reopened.getByText("Sequence revision history · 2", { exact: true }),
+  ).toBeVisible();
+});
+
+for (const scale of [1, 1.25, 1.5])
+  test(`AI Studio controls remain reachable at ${scale * 100}% effective laptop scale`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({
+      width: Math.floor(1366 / scale),
+      height: Math.floor(768 / scale),
+    });
+    await page.goto("/");
+    await seed(page);
+    await page.getByRole("button", { name: "AI Studio", exact: true }).click();
+    const panel = page.getByRole("region", { name: "AI Studio workspace" });
+    await expect(panel).toHaveCSS("overflow-y", "auto");
+    await page
+      .getByLabel("Describe your edit")
+      .fill("Pick my best gym lifts and sync cuts to the music.");
+    await page
+      .getByRole("button", { name: "Preview edit plan", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Apply AI edit", exact: true }),
+    ).toBeAttached();
+    for (const target of [
+      page.getByLabel("Describe your edit"),
+      page.getByRole("button", { name: "Play sequence preview", exact: true }),
+      page.getByRole("button", { name: "Apply AI edit", exact: true }),
+      page.getByRole("button", { name: "Undo AI edit", exact: true }),
+      page.getByRole("heading", { name: "Background jobs", exact: true }),
+    ]) {
+      await target.scrollIntoViewIfNeeded();
+      await expect(target).toBeInViewport();
+    }
+    // A wheel-driven scroll must work too; automation's scrollIntoView can hide overflow:hidden bugs.
+    await panel.evaluate((e) => {
+      e.scrollTop = 0;
+    });
+    await panel.hover();
+    await page.mouse.wheel(0, 650);
+    await expect
+      .poll(() => panel.evaluate((e) => e.scrollTop))
+      .toBeGreaterThan(0);
+  });

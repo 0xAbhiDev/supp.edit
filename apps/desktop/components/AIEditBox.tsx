@@ -15,6 +15,8 @@ import {
   type RoughCutSession,
 } from "../../../packages/ai/rough-cut/service";
 import { RoughCutReview } from "./RoughCutReview";
+import { revisionService } from "../../../packages/ai/revisions/service";
+import { RevisionReview } from "./RevisionReview";
 import "./ai-edit-box.css";
 export function AIEditBox() {
   const project = useEditor((s) => s.project),
@@ -73,6 +75,24 @@ export function AIEditBox() {
     setApplied(false);
     const token = ++generation.current;
     try {
+      if (/^undo (?:that|the) revision[.!]?$/i.test(request.trim())) {
+        const s = useEditor.getState();
+        if (!s.historyNames.at(-1)?.startsWith("AI Revision:"))
+          throw new Error(
+            "The latest project edit is not an AI revision; use normal Undo to review intervening edits",
+          );
+        s.undo();
+        return;
+      }
+      if (routeRequest(request) === "revision") {
+        const handle = revisionService.plan(request, project, revision, scope);
+        setJobId(handle.id);
+        const outcome = await handle.finished;
+        if (token !== generation.current) return;
+        if (outcome.state === "Completed") setPreview(outcome.result);
+        else if (outcome.state === "Failed") setError(outcome.error);
+        return;
+      }
       if (routeRequest(request) === "creative") {
         const handle = roughCutService.plan(
           request,
@@ -108,7 +128,15 @@ export function AIEditBox() {
     try {
       const s = useEditor.getState(),
         edit = applyEditPreview(preview, s.project, s.revision);
-      s.execute("AI Editor: " + preview.plan.summary, edit);
+      const isRevision = preview.plan.commands.some(
+        (c) => c.tool === "sequence.revise",
+      );
+      s.execute(
+        (isRevision ? "AI Revision: " : "AI Editor: ") + preview.plan.summary,
+        edit,
+      );
+      if (preview.plan.resultCompositionId)
+        s.setComposition(preview.plan.resultCompositionId);
       if (useEditor.getState().project !== s.project) setApplied(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -168,44 +196,60 @@ export function AIEditBox() {
       )}
       {error && <p role="alert">{error}</p>}
       {roughCut && <RoughCutReview session={roughCut} onChange={setRoughCut} />}
-      {preview && (
-        <div className="ai-edit-plan">
-          <div>
-            <h3>Edit plan</h3>
-            <p>{preview.plan.summary}</p>
-            <p>
-              {preview.validation} · {preview.changedLayerIds.length} changed
-              layers · {preview.removedLayerIds.length} removed layers
-            </p>
-            <ol>
-              {preview.plan.commands.map((c, i) => (
-                <li key={i}>
-                  {c.tool}
-                  {"clipId" in c ? ` · ${c.clipId}` : ""}
-                </li>
-              ))}
-            </ol>
-            <button disabled={!current || applied} onClick={apply}>
-              {applied ? "Edit applied" : "Create edit"}
-            </button>
-            <button
-              disabled={!useEditor.getState().historyNames.length}
-              onClick={() => useEditor.getState().undo()}
-            >
-              Undo last edit
-            </button>
-            {!current && !applied && (
-              <p>Project changed. Preview again before applying.</p>
-            )}
+      {preview?.plan.commands.some((c) => c.tool === "sequence.revise") ? (
+        <RevisionReview
+          key={preview.plan.id}
+          preview={preview}
+          onCancel={() => setPreview(null)}
+        />
+      ) : (
+        preview && (
+          <div className="ai-edit-plan">
+            <div>
+              <h3>Edit plan</h3>
+              <p>{preview.plan.summary}</p>
+              <p>
+                {preview.validation} · {preview.changedLayerIds.length} changed
+                layers · {preview.removedLayerIds.length} removed layers
+              </p>
+              <ol>
+                {preview.plan.commands.map((c, i) => (
+                  <li key={i}>
+                    {c.tool === "sequence.revise"
+                      ? `${c.changes.length} layer ranges changed · ${c.remove.length} layers removed · ${(c.duration / (project.compositions.find((s) => s.id === c.sequenceId)!.settings.fps.num / project.compositions.find((s) => s.id === c.sequenceId)!.settings.fps.den)).toFixed(2)} seconds`
+                      : c.tool}
+                    {"clipId" in c ? ` · ${c.clipId}` : ""}
+                  </li>
+                ))}
+              </ol>
+              <button disabled={!current || applied} onClick={apply}>
+                {applied
+                  ? "Edit applied"
+                  : preview.plan.commands.some(
+                        (c) => c.tool === "sequence.revise",
+                      )
+                    ? "Apply revision"
+                    : "Create edit"}
+              </button>
+              <button
+                disabled={!useEditor.getState().historyNames.length}
+                onClick={() => useEditor.getState().undo()}
+              >
+                Undo last edit
+              </button>
+              {!current && !applied && (
+                <p>Project changed. Preview again before applying.</p>
+              )}
+            </div>
+            <figure>
+              <canvas ref={canvas} aria-label="Proposed edit preview" />
+              <figcaption>
+                Proposed project frame · original project remains unchanged
+                until Create edit
+              </figcaption>
+            </figure>
           </div>
-          <figure>
-            <canvas ref={canvas} aria-label="Proposed edit preview" />
-            <figcaption>
-              Proposed project frame · original project remains unchanged until
-              Create edit
-            </figcaption>
-          </figure>
-        </div>
+        )
       )}
     </section>
   );

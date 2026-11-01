@@ -1,4 +1,4 @@
-.ai-studio {
+.ai-studio.panel {
   grid-column: 1/-1;
   overflow: auto;
   padding: 20px;
