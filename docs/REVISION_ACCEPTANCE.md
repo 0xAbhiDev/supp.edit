@@ -1,3 +1,5 @@
+2 November 2026 native revision acceptance PASSED: cafcc83 executable, Make it 20 seconds then Replace the second shot, actual preview/play/Apply, individual Undo/Redo, Save, app close/relaunch, reopen same sequence. GYM_EDIT.supp contains AI Gym Edit 02 at 600 frames with two records. Native Deliver export test-results/gym/NATIVE_REVISED.mp4: H.264/AAC, 180x320, exactly 20 seconds / 600 frames, zero entirely black decoded frames, audio RMS 0.02189297. Report: test-results/revisions/native-verification.json. This completes native revision/save/reopen acceptance; person-aware reframe is the next active work, followed by aesthetic finishing.
+
 # Existing-sequence revisions
 
 The revision path uses the current composition and existing layer IDs. It does not call the rough-cut builder. A strict `sequence.revise` changeset contains named range/source patches, explicit removals, marker movements and a descriptive revision record. The shared command registry validates source fingerprints, handles, locks and references. Preview uses detached history; Apply is one normal history transaction guarded against stale project snapshots.
@@ -17,3 +19,4 @@ Validation on 1 November 2026:
 - Native rebuilt Windows app completed local analysis, displayed/applied seven-shot 27.5-second AI Gym Edit 02, and exported `test-results/gym/NATIVE_UI.mp4`. FFprobe confirms H.264/AAC, 180×320, 825 frames, 27.5 seconds. All decoded frames have nonblack content; mono decoded audio RMS is 0.02191. Native toolbar Undo/Redo and Save were exercised. Full native revision/reopen acceptance is still in progress; vertical auto-reframe is not yet implemented.
 
 Next: finish the native revision/save/reopen workflow, then person-box association, safe margins, dead zone, smoothing and reduced editable x/y/scale keys; validate portrait export before aesthetic finishing work.
+
