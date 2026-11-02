@@ -17,7 +17,11 @@ import { properties, propertyNames } from "../../animation";
 import { transcriptSchema } from "../transcript";
 import { importTranscript, captionsForClip } from "../../commands/transcripts";
 import { rippleDeleteRanges } from "../../commands/nle";
-import { createSequence, insertSequenceRange, addSequenceMarker } from "../../commands/sequences";
+import {
+  createSequence,
+  insertSequenceRange,
+  addSequenceMarker,
+} from "../../commands/sequences";
 import { inComposition } from "../../commands/compositions";
 import { aiEditMetadataSchema } from "../rough-cut/model";
 import { sequenceRevisionSchema } from "../revisions/model";
@@ -28,14 +32,84 @@ const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
-  reframeSchema.extend({tool:z.literal("sequence.reframe")}).strict(),
-  z.object({tool:z.literal("sequence.duplicate"),sequenceId:id,id,name:z.string().min(1).max(256)}).strict(),
-  sequenceRevisionSchema.extend({tool:z.literal("sequence.revise")}).strict(),
-  z.object({tool:z.literal("sequence.create"),id,name:z.string().min(1).max(256),settings:settingsSchema,duration:frame.min(1),videoTrackId:id,audioTrackId:id,ai:aiEditMetadataSchema}).strict(),
-  z.object({tool:z.literal("sequence.insert"),sequenceId:id,clipId:id,trackId:id,assetId:id,fingerprint:z.string().min(1).max(8192),startFrame:frame,sourceIn:frame,duration:frame.min(1),gain:value.min(-60).max(12)}).strict(),
-  z.object({tool:z.literal("sequence.marker"),sequenceId:id,id,frame,name:z.string().max(256)}).strict(),
-  z.object({tool:z.literal("sequence.keyframe"),sequenceId:id,clipId:id,property:z.enum(["x","y","scale"]),value,frame,easing:z.enum(interpolationModes)}).strict(),
-  z.object({tool:z.literal("sequence.captions"),sequenceId:id,clipId:id,transcriptId:id,trackId:id,prefix:id}).strict(),
+  reframeSchema.extend({ tool: z.literal("sequence.reframe") }).strict(),
+  z
+    .object({
+      tool: z.literal("sequence.duplicate"),
+      sequenceId: id,
+      id,
+      name: z.string().min(1).max(256),
+    })
+    .strict(),
+  sequenceRevisionSchema
+    .extend({ tool: z.literal("sequence.revise") })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.create"),
+      id,
+      name: z.string().min(1).max(256),
+      settings: settingsSchema,
+      duration: frame.min(1),
+      videoTrackId: id,
+      audioTrackId: id,
+      ai: aiEditMetadataSchema,
+    })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.insert"),
+      sequenceId: id,
+      clipId: id,
+      trackId: id,
+      assetId: id,
+      fingerprint: z.string().min(1).max(8192),
+      startFrame: frame,
+      sourceIn: frame,
+      duration: frame.min(1),
+      gain: value.min(-60).max(12),
+    })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.marker"),
+      sequenceId: id,
+      id,
+      frame,
+      name: z.string().max(256),
+    })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.keyframe"),
+      sequenceId: id,
+      clipId: id,
+      property: z.enum(["x", "y", "scale"]),
+      value,
+      frame,
+      easing: z.enum(interpolationModes),
+    })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.effect"),
+      sequenceId: id,
+      clipId: id,
+      effectId: id,
+      type: z.enum(effectTypes),
+      value,
+    })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.captions"),
+      sequenceId: id,
+      clipId: id,
+      transcriptId: id,
+      trackId: id,
+      prefix: id,
+    })
+    .strict(),
   z
     .object({
       tool: z.literal("transcript.import"),
@@ -107,14 +181,46 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
 export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
-  {name:"sequence.reframe",description:"Apply bounded source-verified editable camera animation and portrait canvas"},
-  {name:"sequence.duplicate",description:"Duplicate a sequence with fresh stable identities, preserving its source"},
-  {name:"sequence.revise",description:"Patch an existing sequence and record one undoable revision"},
-  {name:"sequence.create",description:"Create a new independent editable sequence with provenance"},
-  {name:"sequence.insert",description:"Insert a source-bound media range into an unlocked sequence track"},
-  {name:"sequence.marker",description:"Add a named sequence marker at a measured frame"},
-  {name:"sequence.keyframe",description:"Set real transform keys through the shared animation commands"},
-  {name:"sequence.captions",description:"Create editable timed text in a named sequence"},
+  {
+    name: "sequence.reframe",
+    description:
+      "Apply bounded source-verified editable camera animation and portrait canvas",
+  },
+  {
+    name: "sequence.duplicate",
+    description:
+      "Duplicate a sequence with fresh stable identities, preserving its source",
+  },
+  {
+    name: "sequence.revise",
+    description: "Patch an existing sequence and record one undoable revision",
+  },
+  {
+    name: "sequence.create",
+    description: "Create a new independent editable sequence with provenance",
+  },
+  {
+    name: "sequence.insert",
+    description:
+      "Insert a source-bound media range into an unlocked sequence track",
+  },
+  {
+    name: "sequence.marker",
+    description: "Add a named sequence marker at a measured frame",
+  },
+  {
+    name: "sequence.keyframe",
+    description:
+      "Set real transform keys through the shared animation commands",
+  },
+  {
+    name: "sequence.effect",
+    description: "Add an editable ordered effect in a named sequence",
+  },
+  {
+    name: "sequence.captions",
+    description: "Create editable timed text in a named sequence",
+  },
   {
     name: "transcript.import",
     description: "Save source-bound timestamped speech in the project",
@@ -168,15 +274,73 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
-  if(call.tool==="sequence.reframe"){const {tool: _tool,...change}=call;return reframeSequence(change);}
-  if(call.tool==="sequence.duplicate")return duplicateSequence(call.sequenceId,call.id,call.name);
+  if (call.tool === "sequence.reframe") {
+    const { tool: _tool, ...change } = call;
+    return reframeSequence(change);
+  }
+  if (call.tool === "sequence.duplicate")
+    return duplicateSequence(call.sequenceId, call.id, call.name);
   return (p) => {
-    if(call.tool==="sequence.revise") { const {tool: _tool,...revision}=call; reviseSequence(revision)(p); return; }
-    if(call.tool==="sequence.create") {createSequence(call)(p);return;}
-    if(call.tool==="sequence.insert") {insertSequenceRange(call)(p);return;}
-    if(call.tool==="sequence.marker") {addSequenceMarker(call.sequenceId,{id:call.id,frame:call.frame,name:call.name})(p);return;}
-    if(call.tool==="sequence.keyframe") {inComposition(call.sequenceId,toolEdit({tool:"keyframe.set",clipId:call.clipId,property:call.property,value:call.value,frame:call.frame,easing:call.easing}))(p);return;}
-    if(call.tool==="sequence.captions") {inComposition(call.sequenceId,captionsForClip(call.transcriptId,call.clipId,call.trackId,call.prefix))(p);return;}
+    if (call.tool === "sequence.revise") {
+      const { tool: _tool, ...revision } = call;
+      reviseSequence(revision)(p);
+      return;
+    }
+    if (call.tool === "sequence.create") {
+      createSequence(call)(p);
+      return;
+    }
+    if (call.tool === "sequence.insert") {
+      insertSequenceRange(call)(p);
+      return;
+    }
+    if (call.tool === "sequence.marker") {
+      addSequenceMarker(call.sequenceId, {
+        id: call.id,
+        frame: call.frame,
+        name: call.name,
+      })(p);
+      return;
+    }
+    if (call.tool === "sequence.keyframe") {
+      inComposition(
+        call.sequenceId,
+        toolEdit({
+          tool: "keyframe.set",
+          clipId: call.clipId,
+          property: call.property,
+          value: call.value,
+          frame: call.frame,
+          easing: call.easing,
+        }),
+      )(p);
+      return;
+    }
+    if (call.tool === "sequence.effect") {
+      inComposition(
+        call.sequenceId,
+        toolEdit({
+          tool: "effect.add",
+          clipId: call.clipId,
+          effectId: call.effectId,
+          type: call.type,
+          value: call.value,
+        }),
+      )(p);
+      return;
+    }
+    if (call.tool === "sequence.captions") {
+      inComposition(
+        call.sequenceId,
+        captionsForClip(
+          call.transcriptId,
+          call.clipId,
+          call.trackId,
+          call.prefix,
+        ),
+      )(p);
+      return;
+    }
     if (call.tool === "transcript.import") {
       importTranscript(call.transcript)(p);
       return;

@@ -13,6 +13,7 @@ import {
   roughCutService,
 } from "../../../packages/ai/rough-cut/service";
 import { clock } from "../../../packages/engine/clock";
+import { gymStyles } from "../../../packages/ai/rough-cut/styles";
 function MomentThumbnail({ asset, timeMs }: { asset: Asset; timeMs: number }) {
   const [url, setUrl] = useState("");
   useEffect(() => {
@@ -132,6 +133,16 @@ export function RoughCutReview({
     <section className="rough-cut-review" aria-label="Gym edit plan">
       <h3>{view.name}</h3>
       <p>{cut.brief.prompt}</p>
+      {cut.brief.style && (
+        <p>
+          Style: {gymStyles[cut.brief.style].name} · {view.settings.width}×
+          {view.settings.height} ·{" "}
+          {cut.shots.filter((s) => s.beatAligned).length} aligned boundaries ·{" "}
+          {cut.musicEvents.filter((e) => e.kind === "strong-onset").length}{" "}
+          strong measured music events ·{" "}
+          {cut.color.filter((c) => c.length).length} shots with editable color
+        </p>
+      )}
       <p>
         {cut.analyzedAssets} videos analyzed · {cut.candidates.length} candidate
         moments · {cut.shots.length} selected · {cut.durationSeconds.toFixed(1)}{" "}
@@ -192,6 +203,12 @@ export function RoughCutReview({
               </p>
               <details>
                 <summary>Why this moment</summary>
+                {shot.placementReason && <p>{shot.placementReason}</p>}
+                {cut.color[i].map((e) => (
+                  <p key={e.type}>
+                    {e.type}: {e.value.toFixed(3)} · {e.reason}
+                  </p>
+                ))}
                 <ul>
                   {c.reasons.map((r) => (
                     <li key={r}>{r}</li>

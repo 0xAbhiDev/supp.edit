@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { visualRevision, musicRevision, removeRequest } from "../revisions/requests";
+import {
+  visualRevision,
+  musicRevision,
+  removeRequest,
+} from "../revisions/requests";
+import { gymStyleSchema, gymStyles, requestedGymStyle } from "./styles";
 export const pacingSchema = z.enum([
   "cinematic",
   "balanced",
@@ -10,6 +15,7 @@ export const briefSchema = z
   .object({
     prompt: z.string().trim().min(1).max(4000),
     profile: z.enum(["gym", "general"]),
+    style: gymStyleSchema.optional(),
     durationSeconds: z.number().finite().min(3).max(300),
     aspect: z.enum(["9:16", "16:9", "1:1", "4:5"]),
     pacing: pacingSchema,
@@ -49,7 +55,12 @@ export function routeRequest(input: string): RequestRoute {
   )
     return "transcript";
   if (/^(which|analy[sz]e|detect)\b/i.test(input)) return "analysis";
-  if(visualRevision(input)||musicRevision(input)||removeRequest.test(input))return "revision";
+  if (
+    visualRevision(input) ||
+    musicRevision(input) ||
+    removeRequest.test(input)
+  )
+    return "revision";
   if (
     /(?:third (?:shot|clip)|3rd (?:shot|clip)|intro faster|faster opening|opening faster|first \d+ seconds faster|remove captions|sync (?:the )?ending|make (?:this|it) (?:\d+|shorter)|shorten (?:it|this) to|use more|less bench|use (?:an?other|different) clip first|remove (?:the )?(?:last|final) (?:clip|shot)|tighten (?:the )?cuts|undo (?:that|the) revision)/i.test(
       input,
@@ -67,7 +78,9 @@ export function routeRequest(input: string): RequestRoute {
 }
 /** Deterministic local brief parsing; no pretend language model or unbounded command generation. */
 export function parseEditBrief(prompt: string): EditBrief {
-  const duration = prompt.match(
+  const style = requestedGymStyle(prompt),
+    preset = style ? gymStyles[style] : undefined,
+    duration = prompt.match(
       /\b(\d+(?:\.\d+)?)\s*[- ]?\s*(?:seconds?|secs?|s)\b/i,
     ),
     aspect = prompt.match(/\b(9:16|16:9|1:1|4:5)\b/),
@@ -77,9 +90,10 @@ export function parseEditBrief(prompt: string): EditBrief {
         ? "energetic"
         : /cinematic/i.test(prompt)
           ? "cinematic"
-          : "balanced";
+          : (preset?.pacing ?? "balanced");
   return briefSchema.parse({
     prompt,
+    ...(style ? { style } : {}),
     profile: /gym|fitness|lift|deadlift|barbell|bench|physique/i.test(prompt)
       ? "gym"
       : "general",
@@ -92,16 +106,21 @@ export function parseEditBrief(prompt: string): EditBrief {
       : /tight|strong beats/i.test(prompt)
         ? "tight"
         : /music|beat|sync/i.test(prompt)
-          ? "balanced"
+          ? (preset?.beatSync ?? "balanced")
           : "off",
     captions:
       /caption|subtitle/i.test(prompt) &&
       !/(?:no|remove|without) captions?/i.test(prompt),
-    speedRamps: /speed ramp/i.test(prompt)
-      ? /dynamic/i.test(prompt)
-        ? "dynamic"
-        : "subtle"
-      : "off",
+    speedRamps:
+      /(?:no|without|disable) speed ramps?|speed ramps?\s*(?:off|disabled)/i.test(
+        prompt,
+      )
+        ? "off"
+        : /speed ramp/i.test(prompt)
+          ? /dynamic/i.test(prompt)
+            ? "dynamic"
+            : "subtle"
+          : (preset?.speedRamps ?? "off"),
     prioritize: [
       ...new Set(
         prompt

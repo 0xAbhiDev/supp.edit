@@ -32,6 +32,8 @@ impl RevisionRecord {
 pub struct EditBrief {
     pub prompt: String,
     pub profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
     pub duration_seconds: f64,
     pub aspect: String,
     pub pacing: String,
@@ -52,6 +54,7 @@ mod tests {
         track["id"] = "ai-track".into();
         let c = serde_json::json!({"id":"ai-sequence","name":"AI Gym Edit 01","settings":p.settings,"duration":90,"background":"#000000","tracks":[track],"layers":[],"markers":[{"id":"hook","frame":0,"name":"HOOK"}],"ai":{"plannerVersion":"rough-cut-1","createdAt":"2026-10-30T00:00:00.000Z","brief":{"prompt":"Pick my best gym lifts and sync cuts to the music.","profile":"gym","durationSeconds":30,"aspect":"9:16","pacing":"balanced","beatSync":"balanced","captions":false,"speedRamps":"off","prioritize":[]},"evidence":[],"warnings":[]}});
         p.compositions.push(serde_json::from_value(c).unwrap());
+        p.compositions[0].ai.as_mut().unwrap().brief.style = Some("dark-aesthetic".into());
         for index in 1..=2 {
             p.compositions[0].revisions.push(serde_json::from_value(serde_json::json!({"id":format!("revision-{index}"),"request":"Make it shorter.","summary":"Trim existing clip ranges","createdAt":"2026-11-01T00:00:00.000Z","changedLayerIds":["legacy-clip"]})).unwrap());
         }
@@ -97,6 +100,18 @@ impl AiEditMetadata {
             !b.prompt.trim().is_empty()
                 && b.prompt.chars().count() <= 4000
                 && ["gym", "general"].contains(&b.profile.as_str())
+                && b.style.as_ref().is_none_or(|s| {
+                    [
+                        "dark-aesthetic",
+                        "clean-aesthetic",
+                        "cinematic",
+                        "hardcore",
+                        "physique",
+                        "powerlifting",
+                        "minimal",
+                    ]
+                    .contains(&s.as_str())
+                })
                 && range(b.duration_seconds, 3., 300.)
                 && ["9:16", "16:9", "1:1", "4:5"].contains(&b.aspect.as_str())
                 && ["cinematic", "balanced", "energetic", "aggressive"]

@@ -78,10 +78,11 @@ export function subjectEvidence(frame: VisualEvidence) {
   };
 }
 /** Broad activity gate; never converts a candidate exercise name into an observed fact. */
-export function gymEvidence(frame: VisualEvidence) {
-  const active = frame.labels.filter((l) =>
-      activeTrainingLabels.includes(l.label),
-    ),
+export function gymEvidence(frame: VisualEvidence, includePosing = false) {
+  const trainingLabels = includePosing
+    ? [...activeTrainingLabels, "posing", "mirror pose", "training setup"]
+    : activeTrainingLabels;
+  const active = frame.labels.filter((l) => trainingLabels.includes(l.label)),
     strongest = active.reduce((n, l) => Math.max(n, l.similarity), -1),
     competition = frame.labels
       .filter((l) => competingLabels.includes(l.label))

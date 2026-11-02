@@ -14,6 +14,11 @@ import { type EditorPlan, previewEditPlan } from "../editor-agent/execution";
 import { type EditorToolCall } from "../editor-agent/registry";
 import { type EditBrief, briefSchema } from "./model";
 import { nearestStrongBeat, strongEvents } from "./beats";
+import { gymStyles } from "./styles";
+import { musicEvents, type MusicEvent } from "./music";
+import { styleRelevance } from "./hooks";
+import { placeStyledShots } from "./placement";
+import { initialShotColor, type ShotTreatment } from "./color";
 const unit = (n: number) => Math.max(0, Math.min(1, n));
 const mean = (values: number[]) =>
   values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
@@ -32,8 +37,10 @@ export interface EditCandidate {
   motionScore: number;
   diversityScore: number;
   overallScore: number;
+  visualQuality: number;
   qualitySignals: {
     sharpness: number | null;
+    meanLuma: number | null;
     darkFraction: number | null;
     clippedFraction: number | null;
     frozenFraction: number | null;
@@ -57,6 +64,7 @@ export interface PlannedShot {
   startFrame: number;
   duration: number;
   beatAligned: boolean;
+  placementReason?: string;
   role: "HOOK" | "BUILD" | "PEAK" | "END";
 }
 export interface RoughCutPlan {
@@ -68,6 +76,8 @@ export interface RoughCutPlan {
   durationSeconds: number;
   music: Asset | null;
   beatMap: BeatMap | null;
+  musicEvents: MusicEvent[];
+  color: ShotTreatment[][];
   analyzedAssets: number;
 }
 export function rankMoments(
@@ -110,7 +120,10 @@ export function rankMoments(
         const f = [...frames].sort(
             (a, b) => Math.abs(a.timeMs - center) - Math.abs(b.timeMs - center),
           )[0],
-          gym = gymEvidence(f),
+          gym = gymEvidence(
+            f,
+            brief.style === "physique" || brief.style === "powerlifting",
+          ),
           subject = subjectEvidence(f);
         const quality = result.video.quality.filter(
             (q) => q.timeMs >= begin && q.timeMs < end,
@@ -126,8 +139,10 @@ export function rankMoments(
           end - begin < 1500 ||
           (brief.profile === "gym" && !gym.eligible) ||
           (dark ?? 0) > 0.75 ||
-          (frozen ?? 0) > 0.85 ||
-          (brief.profile === "gym" && (motion === null || motion < 0.001))
+          (frozen ?? 0) > (brief.style === "physique" ? 0.98 : 0.85) ||
+          (brief.profile === "gym" &&
+            brief.style !== "physique" &&
+            (motion === null || motion < 0.001))
         ) {
           rejectedRanges++;
           continue;
@@ -153,13 +168,23 @@ export function rankMoments(
           motionScore = unit((motion ?? 0) / 0.05),
           sharpScore = unit(Math.log1p(sharpness ?? 0) / Math.log(2001)),
           exposure = unit(1 - (dark ?? 0) - (clipped ?? 0));
-        const overallScore =
+        const visualQuality = 0.6 * sharpScore + 0.4 * exposure;
+        let overallScore =
           0.25 * semanticScore +
           0.15 * promptRelevance +
           0.2 * subjectScore +
           0.15 * motionScore +
           0.15 * sharpScore +
           0.1 * exposure;
+        const style = brief.style ? gymStyles[brief.style] : undefined;
+        if (style)
+          overallScore =
+            0.2 * semanticScore +
+            0.15 * promptRelevance +
+            0.2 * subjectScore +
+            0.2 * visualQuality +
+            0.15 * styleRelevance({ frame: f, semanticScore }, style) +
+            0.1 * (1 - Math.abs(motionScore - style.motionTarget));
         const reasons = [
           `Broad training similarity ${gym.similarity.toFixed(3)}; exact exercise unverified`,
           `Person confidence ${(subject.presence * 100).toFixed(0)}%, ${(subject.area * 100).toFixed(0)}% frame area`,
@@ -186,8 +211,10 @@ export function rankMoments(
           motionScore,
           diversityScore: 1,
           overallScore,
+          visualQuality,
           qualitySignals: {
             sharpness,
+            meanLuma: mean(quality.map((q) => q.meanLuma)),
             darkFraction: dark,
             clippedFraction: clipped,
             frozenFraction: frozen,
@@ -305,12 +332,23 @@ export function buildRoughCut(
       Math.min(brief.durationSeconds, music?.duration ?? Infinity) * rate,
     ),
     minimum = Math.ceil(0.9 * rate),
-    shots: PlannedShot[] = [];
+    events = beatMap ? musicEvents(beatMap, (target / rate) * 1000) : [],
+    shots: PlannedShot[] = brief.style
+      ? placeStyledShots(
+          project,
+          brief,
+          ordered,
+          target,
+          events,
+          beatMap,
+          !!selectedIds,
+        )
+      : [];
   const tolerance = { off: 0, loose: 120, balanced: 300, tight: 650 }[
     brief.beatSync
   ];
-  let cursor = 0;
-  for (const c of ordered) {
+  let cursor = shots.reduce((n, s) => n + s.duration, 0);
+  for (const c of brief.style ? [] : ordered) {
     const asset = project.assets.find(
       (a) => a.id === c.assetId && a.fingerprint === c.fingerprint,
     );
@@ -361,7 +399,7 @@ export function buildRoughCut(
   }
   if (!shots.length)
     throw new Error("The selected source ranges are too short");
-  if (shots.length >= 3) shots[shots.length - 2].role = "PEAK";
+  if (!brief.style && shots.length >= 3) shots[shots.length - 2].role = "PEAK";
   if (shots.length > 1) shots[shots.length - 1].role = "END";
   if (cursor < target - rate)
     warnings.push(
@@ -383,6 +421,10 @@ export function buildRoughCut(
     warnings.push(
       "This rough-cut pass does not add captions yet. Source audio is preserved; transcript captions remain available in Media understanding.",
     );
+  if (brief.style)
+    warnings.push(
+      "Initial color uses measured luma matching and restrained contrast/saturation. White balance, skin-aware matching, grain, vignette, sharpening, punch-ins and automatic ducking are not included in this pass.",
+    );
   warnings.push(
     "Exercise identity, equipment type, rep phases, camera shake and occlusion are not verified. Scores are relative ranking signals, not probabilities.",
   );
@@ -399,7 +441,9 @@ export function buildRoughCut(
     number++;
   const name = `${prefix} ${String(number).padStart(2, "0")}`;
   // Preserve the current long-edge resolution, with even dimensions for H.264.
-  const long = Math.max(project.settings.width, project.settings.height),
+  const long = brief.style
+      ? 1920
+      : Math.max(project.settings.width, project.settings.height),
     [aw, ah] = brief.aspect.split(":").map(Number),
     factor = long / Math.max(aw, ah),
     settings = {
@@ -437,11 +481,14 @@ export function buildRoughCut(
       },
     },
   ];
-  for (const shot of shots) {
+  const style = brief.style ? gymStyles[brief.style] : null,
+    color = style ? initialShotColor(shots, style) : shots.map(() => []);
+  for (const [index, shot] of shots.entries()) {
+    const clipId = uid();
     commands.push({
       tool: "sequence.insert",
       sequenceId: id,
-      clipId: uid(),
+      clipId,
       trackId: videoTrackId,
       assetId: shot.candidate.assetId,
       fingerprint: shot.candidate.fingerprint,
@@ -450,6 +497,15 @@ export function buildRoughCut(
       duration: shot.duration,
       gain: 0,
     });
+    for (const effect of color[index])
+      commands.push({
+        tool: "sequence.effect",
+        sequenceId: id,
+        clipId,
+        effectId: uid(),
+        type: effect.type,
+        value: effect.value,
+      });
     commands.push({
       tool: "sequence.marker",
       sequenceId: id,
@@ -469,7 +525,7 @@ export function buildRoughCut(
       startFrame: 0,
       sourceIn: 0,
       duration: cursor,
-      gain: -14,
+      gain: style?.audio.musicDb ?? -14,
     });
   const plan: EditorPlan = {
     id: uid(),
@@ -491,6 +547,8 @@ export function buildRoughCut(
     durationSeconds: cursor / rate,
     music,
     beatMap,
+    musicEvents: events,
+    color,
     analyzedAssets: evidence.analyzedAssets,
   };
 }

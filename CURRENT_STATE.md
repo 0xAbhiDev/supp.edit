@@ -1,6 +1,6 @@
 # Current state — editable portrait acceptance complete
 
-2 November 2026. Continue this repository and working tree. Latest brief: `aadd39d0-2959-4f92-9a49-853a0be8ae1c/Pasted text.txt`.
+2 November 2026. Continue this repository and working tree. Latest brief: `79b53cfb-06ea-466a-8a4f-1a5ba773e93b/Pasted text.txt`. Accepted portrait baseline: `d893688`.
 
 The bounded gym workflow has passed native Windows acceptance:
 
@@ -15,6 +15,6 @@ Local dense YOLOX sampling, source-fingerprinted caching, conservative associati
 
 Validation: 122 TypeScript tests passed across the full run plus an isolated rerun of the 100,000-clip performance test (the parallel run timed out under simultaneous native inference/build load). Sixteen focused framing tests include actual gym inference and controlled translated/duplicated/occluded/edge footage, plus low confidence, stationary, rapid displacement and nonfinite inputs. Browser Preview/Apply/Undo/Redo/manual Inspector edit/save/close/reopen passes. Native media tests, workspace Clippy, production frontend and embedded Windows build pass. Native thumbnail/relink paths now accept the same opaque asset IDs as project/analysis.
 
-Active next milestone: Aesthetic Gym Reel Editing. Add actual style decisions, hook/music-structure ranking, editable time remapping, restrained zooms, measured shot color matching/looks, grain/vignette/sharpen, captions and audio finishing, integrated preview and existing-sequence revisions. The exact 25-second aesthetic prompt is NOT complete yet. Do not expose unsupported controls or claim fake exercise-phase recognition.
+Active milestone: Aesthetic Gym Reel Editing. Seven profiles now change real ranking, hook selection, pacing, measured music-event placement and ordinary editable luma/contrast/saturation effects and music gain. The captured real footage produces exactly 25 seconds with a 1–2s ranked hook, distinct bounded ranges and 1080×1920 canvas. Events disclose confidence and distinguish actual onsets from qualified energy/section/drop estimates. Preview displays actual counts/reasons; manual review order is respected. Native provenance accepts the optional style, preserving older projects. Time remapping, integrated portrait generation, restrained zooms, full color matching, grain/vignette/sharpen, captions and automatic mix remain next. The exact 25-second aesthetic prompt is NOT complete yet. Do not expose unsupported controls or claim fake exercise-phase recognition.
 
 Existing compositor, nested compositions, masks/mattes, blend modes, effect stacks and normal command/history boundary remain intact. No cloud upload or automatic model download. Known limits: natural independent two-person footage/identity crossings, physical-GPU/4K/cross-platform certification remain open; controlled two-person stress footage duplicates a licensed source. Ten-layer 1080p SwiftShader stress still times out at 120 seconds. Distribution manifest/source ZIP need an accurate refresh.
