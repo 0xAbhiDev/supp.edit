@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { transcriptSchema } from "../transcript";
 import { identitySchema } from "../../project-schema/identity";
+export const VISION_MODEL_VERSION = "mobileclip-757d59c9-fp32-yolox-0.1.1rc0-ort1.31.1";
 const ms = z.number().int().min(0).max(1_800_000),
   unit = z.number().finite().min(0).max(1);
 export const mediaRangeSchema = z

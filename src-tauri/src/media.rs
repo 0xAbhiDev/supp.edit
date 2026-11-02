@@ -55,8 +55,10 @@ pub async fn import_media(app: AppHandle) -> Result<ImportResult, String> {
 }
 #[tauri::command]
 pub async fn relink_media(app: AppHandle, asset_id: String) -> Result<Option<Imported>, String> {
-    // UUID is used as a cache filename; reject traversal and arbitrary names.
-    uuid::Uuid::parse_str(&asset_id).map_err(|_| "Invalid asset ID")?;
+    // Project IDs are opaque; derived cache paths are fingerprint hashes.
+    if !supp_project::valid_id(&asset_id) {
+        return Err("Invalid asset ID".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let Some(path) = rfd::FileDialog::new()
             .set_title("Relink source media")
@@ -84,7 +86,9 @@ pub async fn get_thumbnail(
     asset_id: String,
     path: String,
 ) -> Result<Option<String>, String> {
-    uuid::Uuid::parse_str(&asset_id).map_err(|_| "Invalid asset ID")?;
+    if !supp_project::valid_id(&asset_id) {
+        return Err("Invalid asset ID".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let source = app
             .state::<Session>()

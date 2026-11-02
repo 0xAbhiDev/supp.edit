@@ -5,6 +5,8 @@ pub mod diagnostics;
 pub mod runtime;
 #[path = "vision_spec.rs"]
 pub mod spec;
+#[path = "vision_subjects.rs"]
+pub mod subjects;
 use super::{check, execute, video::VideoAnalysis};
 use crate::{models::Progress, vision_models};
 use image::{
@@ -489,7 +491,7 @@ pub fn analyze(
                         "-frames:v",
                         "1",
                         "-vf",
-                        "scale=960:960:force_original_aspect_ratio=decrease",
+                        "scale=960:960:force_original_aspect_ratio=decrease:out_range=full,format=yuvj420p",
                         "-f",
                         "image2pipe",
                         "-c:v",

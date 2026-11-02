@@ -17,8 +17,15 @@ import {
 import { RoughCutReview } from "./RoughCutReview";
 import { revisionService } from "../../../packages/ai/revisions/service";
 import { RevisionReview } from "./RevisionReview";
+import {
+  reframeRequest,
+  type ReframeMode,
+} from "../../../packages/ai/reframe/model";
+import { reframeService } from "../../../packages/ai/reframe/service";
+import { ReframeReview } from "./ReframeReview";
 import "./ai-edit-box.css";
 export function AIEditBox() {
+  const [reframeMode, setReframeMode] = useState<ReframeMode>("smooth");
   const project = useEditor((s) => s.project),
     revision = useEditor((s) => s.revision),
     selected = useEditor((s) => s.selected),
@@ -82,6 +89,21 @@ export function AIEditBox() {
             "The latest project edit is not an AI revision; use normal Undo to review intervening edits",
           );
         s.undo();
+        return;
+      }
+      if (reframeRequest.test(request)) {
+        const handle = reframeService.plan(
+          request,
+          project,
+          revision,
+          scope,
+          reframeMode,
+        );
+        setJobId(handle.id);
+        const outcome = await handle.finished;
+        if (token !== generation.current) return;
+        if (outcome.state === "Completed") setPreview(outcome.result);
+        else if (outcome.state === "Failed") setError(outcome.error);
         return;
       }
       if (routeRequest(request) === "revision") {
@@ -178,6 +200,20 @@ export function AIEditBox() {
           </select>
         </label>
       )}
+      {reframeRequest.test(request) && (
+        <label>
+          Camera motion{" "}
+          <select
+            aria-label="Reframe camera motion"
+            value={reframeMode}
+            onChange={(e) => setReframeMode(e.target.value as ReframeMode)}
+          >
+            <option value="locked">Locked</option>
+            <option value="smooth">Smooth</option>
+            <option value="responsive">Responsive</option>
+          </select>
+        </label>
+      )}
       <button disabled={busy || !request.trim()} onClick={() => void plan()}>
         Preview edit plan
       </button>
@@ -196,7 +232,13 @@ export function AIEditBox() {
       )}
       {error && <p role="alert">{error}</p>}
       {roughCut && <RoughCutReview session={roughCut} onChange={setRoughCut} />}
-      {preview?.plan.commands.some((c) => c.tool === "sequence.revise") ? (
+      {preview?.plan.commands.some((c) => c.tool === "sequence.reframe") ? (
+        <ReframeReview
+          key={preview.plan.id}
+          preview={preview}
+          onCancel={() => setPreview(null)}
+        />
+      ) : preview?.plan.commands.some((c) => c.tool === "sequence.revise") ? (
         <RevisionReview
           key={preview.plan.id}
           preview={preview}

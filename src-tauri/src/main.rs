@@ -58,6 +58,7 @@ fn main() {
             analysis::install_speech_model,
             analysis::analyze_media,
             analysis::embed_vision_query,
+            analysis::sample_subjects,
             render::begin_export,
             render::write_frame,
             render::finish_export,

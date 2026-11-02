@@ -22,10 +22,14 @@ import { inComposition } from "../../commands/compositions";
 import { aiEditMetadataSchema } from "../rough-cut/model";
 import { sequenceRevisionSchema } from "../revisions/model";
 import { reviseSequence } from "../../commands/revisions";
+import { duplicateSequence, reframeSequence } from "../../commands/reframe";
+import { reframeSchema } from "../reframe/model";
 const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  reframeSchema.extend({tool:z.literal("sequence.reframe")}).strict(),
+  z.object({tool:z.literal("sequence.duplicate"),sequenceId:id,id,name:z.string().min(1).max(256)}).strict(),
   sequenceRevisionSchema.extend({tool:z.literal("sequence.revise")}).strict(),
   z.object({tool:z.literal("sequence.create"),id,name:z.string().min(1).max(256),settings:settingsSchema,duration:frame.min(1),videoTrackId:id,audioTrackId:id,ai:aiEditMetadataSchema}).strict(),
   z.object({tool:z.literal("sequence.insert"),sequenceId:id,clipId:id,trackId:id,assetId:id,fingerprint:z.string().min(1).max(8192),startFrame:frame,sourceIn:frame,duration:frame.min(1),gain:value.min(-60).max(12)}).strict(),
@@ -103,6 +107,8 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
 export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
+  {name:"sequence.reframe",description:"Apply bounded source-verified editable camera animation and portrait canvas"},
+  {name:"sequence.duplicate",description:"Duplicate a sequence with fresh stable identities, preserving its source"},
   {name:"sequence.revise",description:"Patch an existing sequence and record one undoable revision"},
   {name:"sequence.create",description:"Create a new independent editable sequence with provenance"},
   {name:"sequence.insert",description:"Insert a source-bound media range into an unlocked sequence track"},
@@ -162,6 +168,8 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
+  if(call.tool==="sequence.reframe"){const {tool: _tool,...change}=call;return reframeSequence(change);}
+  if(call.tool==="sequence.duplicate")return duplicateSequence(call.sequenceId,call.id,call.name);
   return (p) => {
     if(call.tool==="sequence.revise") { const {tool: _tool,...revision}=call; reviseSequence(revision)(p); return; }
     if(call.tool==="sequence.create") {createSequence(call)(p);return;}

@@ -13,6 +13,7 @@ import { freezeSnapshot } from "../context";
 import { AIModelManager, type AIModel } from "../models";
 import {
   analysisResultSchema,
+  VISION_MODEL_VERSION,
   analysisSettingsSchema,
   defaultAnalysisSettings,
   type AnalysisSettings,
@@ -58,7 +59,7 @@ export const visionModel: AIModel = {
   installedState: "not-installed",
   executionDevice: "CPU",
   supportedDevices: ["CPU"],
-  version: "mobileclip-757d59c9-fp32-yolox-0.1.1rc0-ort1.31.1",
+  version: VISION_MODEL_VERSION,
   download: { state: "not-requested" },
   runtime: "native-inference",
 };
@@ -70,7 +71,7 @@ export interface AnalysisBackend {
     job: JobContext,
   ): Promise<MediaAnalysis>;
 }
-async function nativeJob<T>(
+export async function nativeJob<T>(
   command: string,
   args: Record<string, unknown>,
   job: JobContext,
