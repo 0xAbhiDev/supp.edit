@@ -19,6 +19,7 @@ import { musicEvents, type MusicEvent } from "./music";
 import { styleRelevance } from "./hooks";
 import { placeStyledShots } from "./placement";
 import { initialShotColor, type ShotTreatment } from "./color";
+import { proposeRamps, type ProposedRamp } from "./ramps";
 const unit = (n: number) => Math.max(0, Math.min(1, n));
 const mean = (values: number[]) =>
   values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
@@ -78,6 +79,7 @@ export interface RoughCutPlan {
   beatMap: BeatMap | null;
   musicEvents: MusicEvent[];
   color: ShotTreatment[][];
+  ramps: ProposedRamp[];
   analyzedAssets: number;
 }
 export function rankMoments(
@@ -302,6 +304,7 @@ export function buildRoughCut(
   music: Asset | null,
   beatMap: BeatMap | null,
   selectedIds?: readonly string[],
+  disabledRampIds: readonly string[] = [],
 ): RoughCutPlan {
   const brief = briefSchema.parse(input),
     rate = fps(project),
@@ -415,7 +418,7 @@ export function buildRoughCut(
     );
   if (brief.speedRamps !== "off")
     warnings.push(
-      "Speed remapping is not implemented; this preview uses original source speed.",
+      "Speed ramps preserve chosen source endpoints and cut positions. Audio pitch follows speed; slow motion repeats source frames without optical flow.",
     );
   if (brief.captions)
     warnings.push(
@@ -481,6 +484,7 @@ export function buildRoughCut(
       },
     },
   ];
+  const ramps = proposeRamps(shots, brief, rate, events, disabledRampIds);
   const style = brief.style ? gymStyles[brief.style] : null,
     color = style ? initialShotColor(shots, style) : shots.map(() => []);
   for (const [index, shot] of shots.entries()) {
@@ -497,6 +501,16 @@ export function buildRoughCut(
       duration: shot.duration,
       gain: 0,
     });
+    const ramp = ramps.find(
+      (r) => r.candidateId === shot.candidate.id && r.enabled,
+    );
+    if (ramp)
+      commands.push({
+        tool: "sequence.speed",
+        sequenceId: id,
+        clipId,
+        curve: ramp.curve,
+      });
     for (const effect of color[index])
       commands.push({
         tool: "sequence.effect",
@@ -549,6 +563,7 @@ export function buildRoughCut(
     beatMap,
     musicEvents: events,
     color,
+    ramps,
     analyzedAssets: evidence.analyzedAssets,
   };
 }

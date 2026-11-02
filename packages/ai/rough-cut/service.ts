@@ -136,7 +136,13 @@ export class RoughCutService {
       },
     });
   }
-  reselect(session: RoughCutSession, ids: readonly string[]): RoughCutSession {
+  reselect(
+    session: RoughCutSession,
+    ids: readonly string[],
+    disabledRampIds = session.cut.ramps
+      .filter((r) => !r.enabled)
+      .map((r) => r.candidateId),
+  ): RoughCutSession {
     const cut = buildRoughCut(
       session.project,
       session.revision,
@@ -145,6 +151,7 @@ export class RoughCutService {
       session.cut.music,
       session.cut.beatMap,
       ids,
+      disabledRampIds,
     );
     return {
       ...session,

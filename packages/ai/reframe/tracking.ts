@@ -153,6 +153,7 @@ export function cameraPath(
   height: number,
   mode: ReframeMode = "smooth",
   choice: SubjectChoice = "main",
+  sourceTime?: (frame: number) => number,
 ) {
   if (
     !Number.isFinite(rate) ||
@@ -196,7 +197,8 @@ export function cameraPath(
     lastX = 0,
     lastY = 0;
   for (let frame = 0; frame < duration; frame++) {
-    const time = input.sampling.startMs + (frame * 1000) / rate;
+    const time =
+      sourceTime?.(frame) ?? input.sampling.startMs + (frame * 1000) / rate;
     while (index + 1 < samples.length && samples[index + 1].timeMs <= time)
       index++;
     const a = samples[index],

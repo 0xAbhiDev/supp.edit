@@ -30,6 +30,7 @@ import { Section, NumberField, IconButton } from "./Controls";
 import { MaskEditor } from "./MaskEditor";
 import { CompositingControls } from "./CompositingControls";
 import { EffectStack } from "./EffectStack";
+import { SpeedEditor } from "./SpeedEditor";
 export function Inspector() {
   const [preserveWorld, setPreserveWorld] = useState(true);
   const project = useEditor(editorProject),
@@ -156,6 +157,7 @@ export function Inspector() {
           {timecode(clip.start + clip.duration, fps(project))}
         </div>
         <fieldset disabled={!!locked}>
+          <SpeedEditor clip={clip} />
           {clip.kind !== "null" &&
             project.tracks.find((t) => t.id === clip.trackId)?.kind ===
               "video" && (

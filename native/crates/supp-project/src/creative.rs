@@ -49,7 +49,7 @@ mod tests {
     fn ai_sequence_roundtrip_preserves_provenance_and_markers() {
         let mut p: Project =
             serde_json::from_str(include_str!("../../../../tests/fixtures/project.supp")).unwrap();
-        p.schema_version = 9;
+        p.schema_version = 10;
         let mut track = serde_json::to_value(&p.tracks[0]).unwrap();
         track["id"] = "ai-track".into();
         let c = serde_json::json!({"id":"ai-sequence","name":"AI Gym Edit 01","settings":p.settings,"duration":90,"background":"#000000","tracks":[track],"layers":[],"markers":[{"id":"hook","frame":0,"name":"HOOK"}],"ai":{"plannerVersion":"rough-cut-1","createdAt":"2026-10-30T00:00:00.000Z","brief":{"prompt":"Pick my best gym lifts and sync cuts to the music.","profile":"gym","durationSeconds":30,"aspect":"9:16","pacing":"balanced","beatSync":"balanced","captions":false,"speedRamps":"off","prioritize":[]},"evidence":[],"warnings":[]}});

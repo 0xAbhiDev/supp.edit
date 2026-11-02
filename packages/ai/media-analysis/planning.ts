@@ -3,6 +3,7 @@ import { type Transcript } from "../transcript";
 import { previewEditPlan } from "../editor-agent/execution";
 import { type EditorToolCall } from "../editor-agent/registry";
 import { type MediaRange } from "./model";
+import { timelineFrameAt } from "../../time-remap/model";
 export function previewAnalysisCommands(
   project: Project,
   revision: number,
@@ -56,11 +57,12 @@ export function sourceToTimelineRanges(
     .map((r) => ({
       startFrame: Math.max(
         clip.start,
-        clip.start + Math.floor((r.startMs * rate) / 1000) - clip.sourceIn,
+        clip.start +
+          Math.floor(timelineFrameAt(clip, (r.startMs * rate) / 1000)),
       ),
       endFrame: Math.min(
         clip.start + clip.duration,
-        clip.start + Math.ceil((r.endMs * rate) / 1000) - clip.sourceIn,
+        clip.start + Math.ceil(timelineFrameAt(clip, (r.endMs * rate) / 1000)),
       ),
     }))
     .filter((r) => r.endFrame > r.startFrame)

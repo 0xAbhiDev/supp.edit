@@ -56,7 +56,8 @@ export function importTranscript(input: Transcript): Edit {
     p.transcripts.push(structuredClone(transcript));
   };
 }
-/** Map source timestamps through the actual instance's source In/trim. */
+import { sourceFrameAt, timelineFrameAt } from "../time-remap/model";
+/** Map source timestamps through the actual instance's source In/trim/speed curve. */
 export function captionsForClip(
   transcriptId: string,
   clipId: string,
@@ -91,20 +92,18 @@ export function captionsForClip(
       lastEnd = source.start;
     for (const segment of speechCaptionCues(
       transcript,
-      (source.sourceIn * 1000) / rate,
-      ((source.sourceIn + source.duration) * 1000) / rate,
+      (sourceFrameAt(source, 0) * 1000) / rate,
+      (sourceFrameAt(source, source.duration) * 1000) / rate,
     )) {
       const start = Math.max(
         source.start,
         source.start +
-          Math.round((segment.startMs * rate) / 1000) -
-          source.sourceIn,
+          Math.round(timelineFrameAt(source, (segment.startMs * rate) / 1000)),
       );
       const end = Math.min(
         source.start + source.duration,
         source.start +
-          Math.round((segment.endMs * rate) / 1000) -
-          source.sourceIn,
+          Math.round(timelineFrameAt(source, (segment.endMs * rate) / 1000)),
       );
       if (end <= start) continue;
       if (start < lastEnd)

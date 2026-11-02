@@ -131,6 +131,43 @@ describe("Aesthetic profiles use measured evidence and ordinary project commands
     expect(cut.shots.map((s) => s.candidate.id)).toEqual(ids);
     expect(cut.warnings.join(" ")).toMatch(/Only .*seconds of distinct/);
   });
+  it("proposes selective editable ramps and can disable one without changing cuts", () => {
+    const { p, brief, evidence, music, beatMap, cut } = setup();
+    expect(cut.ramps.length).toBeGreaterThan(0);
+    expect(cut.ramps.length).toBeLessThan(cut.shots.length);
+    const first = cut.ramps[0];
+    const reduced = buildRoughCut(
+      p,
+      0,
+      brief,
+      evidence,
+      music,
+      beatMap,
+      cut.shots.map((s) => s.candidate.id),
+      [first.candidateId],
+    );
+    expect(
+      reduced.ramps.find((r) => r.candidateId === first.candidateId)?.enabled,
+    ).toBe(false);
+    expect(
+      reduced.plan.commands.filter((c) => c.tool === "sequence.speed").length,
+    ).toBe(cut.ramps.length - 1);
+    expect(
+      reduced.shots.map((s) => [
+        s.candidate.id,
+        s.startFrame,
+        s.sourceIn,
+        s.duration,
+      ]),
+    ).toEqual(
+      cut.shots.map((s) => [
+        s.candidate.id,
+        s.startFrame,
+        s.sourceIn,
+        s.duration,
+      ]),
+    );
+  });
 });
 describe("Measured music events", () => {
   const map = (

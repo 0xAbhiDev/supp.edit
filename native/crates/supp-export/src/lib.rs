@@ -8,6 +8,7 @@ use std::{
     thread::JoinHandle,
 };
 use supp_project::{Asset, Clip, Composition, Project, Track};
+mod remap_audio;
 
 #[derive(Debug)]
 struct AudioSegment<'a> {
@@ -16,6 +17,7 @@ struct AudioSegment<'a> {
     duration: f64,
     output_start: f64,
     gain: f64,
+    remap: Option<(&'a Clip, f64, f64)>,
 }
 
 #[derive(Clone, Copy)]
@@ -38,7 +40,7 @@ impl<'a> AudioCollector<'a> {
     fn scene(
         &mut self,
         tracks: &[Track],
-        layers: &[Clip],
+        layers: &'a [Clip],
         rate: f64,
         window: AudioWindow,
         depth: usize,
@@ -102,8 +104,13 @@ impl<'a> AudioCollector<'a> {
                 if !asset.has_audio || asset.kind == "image" {
                     continue;
                 }
-                let source_start = c.source_in as f64 / rate + (start - clip_start);
-                let duration = (end - start).min(asset.duration - source_start);
+                let local_start = (start - clip_start) * rate;
+                let source_start = c.source_frame(local_start) / rate;
+                let duration = if c.time_remap.is_some() {
+                    end - start
+                } else {
+                    (end - start).min(asset.duration - source_start)
+                };
                 if duration <= 0. {
                     continue;
                 }
@@ -116,6 +123,7 @@ impl<'a> AudioCollector<'a> {
                     duration,
                     output_start: start,
                     gain,
+                    remap: c.time_remap.as_ref().map(|_| (c, local_start, rate)),
                 });
             }
         }
@@ -161,6 +169,7 @@ pub struct Encoder {
     height: u32,
     expected: u32,
     received: u32,
+    _audio_temps: Vec<tempfile::TempPath>,
 }
 impl Encoder {
     pub fn start(p: &Project, output: PathBuf) -> Result<Self, String> {
@@ -196,19 +205,27 @@ impl Encoder {
         let rate = p.settings.fps.value();
         let mut filters = vec![];
         let mut audio = vec![];
+        let mut audio_temps = vec![];
         for segment in collect_audio(p)? {
             let path = supp_media::validate_path(std::path::Path::new(&segment.asset.path))?;
             let i = audio.len() + 1;
-            cmd.args([
-                "-ss",
-                &format!("{:.9}", segment.source_start),
-                "-t",
-                &format!("{:.9}", segment.duration),
-                "-protocol_whitelist",
-                "file,pipe",
-                "-i",
-            ])
-            .arg(path);
+            if let Some((clip, local_start, rate)) = segment.remap {
+                let path = remap_audio::render(&path, clip, local_start, rate, segment.duration)?;
+                cmd.args(["-f", "f32le", "-ar", "48000", "-ac", "2", "-i"])
+                    .arg(&path);
+                audio_temps.push(path);
+            } else {
+                cmd.args([
+                    "-ss",
+                    &format!("{:.9}", segment.source_start),
+                    "-t",
+                    &format!("{:.9}", segment.duration),
+                    "-protocol_whitelist",
+                    "file,pipe",
+                    "-i",
+                ])
+                .arg(path);
+            }
             filters.push(audio_filter(i, &segment));
             audio.push(format!("[a{i}]"));
         }
@@ -285,6 +302,7 @@ impl Encoder {
             height: p.settings.height,
             expected: p.duration(),
             received: 0,
+            _audio_temps: audio_temps,
         })
     }
     pub fn frame(&mut self, png: &[u8]) -> Result<(), String> {

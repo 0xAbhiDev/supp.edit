@@ -1,4 +1,5 @@
 import { type Project, uid } from "../../project-schema";
+import { sourceFrameAt } from "../../time-remap/model";
 import { History } from "../../commands";
 import { duplicateSequence } from "../../commands/reframe";
 import { revisionTarget } from "../revisions/planner";
@@ -71,8 +72,8 @@ export function planReframe(
     )
       throw Error("Person evidence does not match the current source/model");
     const rate = target.settings.fps.num / target.settings.fps.den,
-      startMs = Math.floor((clip.sourceIn * 1000) / rate),
-      endMs = Math.floor(((clip.sourceIn + clip.duration) * 1000) / rate);
+      startMs = Math.floor((sourceFrameAt(clip, 0) * 1000) / rate),
+      endMs = Math.floor((sourceFrameAt(clip, clip.duration) * 1000) / rate);
     if (data.sampling.startMs !== startMs || data.sampling.endMs !== endMs)
       throw Error("Person evidence does not match the selected source range");
     const path = cameraPath(
@@ -83,6 +84,9 @@ export function planReframe(
       height,
       mode,
       choice,
+      clip.timeRemap
+        ? (frame) => (sourceFrameAt(clip, frame) * 1000) / rate
+        : undefined,
     );
     changes.push({
       clipId: clip.id,
@@ -90,6 +94,7 @@ export function planReframe(
       fingerprint: asset.fingerprint,
       sourceIn: clip.sourceIn,
       duration: clip.duration,
+      ...(clip.timeRemap ? { timeRemap: clip.timeRemap } : {}),
       x: path.x,
       y: path.y,
       scale: path.scale,

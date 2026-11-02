@@ -1,6 +1,7 @@
 import { type Asset, type Clip, type Project, fps } from "../project-schema";
 import { sourceUrl, waitEvent } from "../platform";
 import { LruCache } from "./lru";
+import { sourceFrameAt, speedAt } from "../time-remap/model";
 export interface Resource {
   element: HTMLImageElement | HTMLVideoElement | HTMLAudioElement;
   gain?: GainNode;
@@ -120,7 +121,7 @@ export class ResourcePool {
     return entry.promise;
   }
   private time(clip: Clip, p: Project, frame: number) {
-    return Math.max(0, (clip.sourceIn + frame - clip.start) / fps(p));
+    return Math.max(0, sourceFrameAt(clip, frame - clip.start) / fps(p));
   }
   private key(clip: Clip, asset: Asset, p: Project, frame: number) {
     return `${asset.id}:${asset.fingerprint}:${this.time(clip, p, frame).toFixed(9)}`;
@@ -155,7 +156,11 @@ export class ResourcePool {
         }
       } else {
         if (Math.abs(media.currentTime - time) > 0.12) media.currentTime = time;
-        media.playbackRate = Math.max(0.25, Math.min(4, speed));
+        media.preservesPitch = !clip.timeRemap;
+        media.playbackRate = Math.max(
+          0.0625,
+          Math.min(16, speed * speedAt(clip, frame - clip.start)),
+        );
         await media.play();
       }
     }

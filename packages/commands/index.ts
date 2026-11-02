@@ -18,6 +18,8 @@ import {
 enablePatches();
 import { assertMattes } from "../compositing/model";
 import { assertEffectStacks } from "../effects/model";
+import { assertTimeRemaps } from "../time-remap/validate";
+import { offsetSource, timelineFrameAt } from "../time-remap/model";
 export {
   rippleTrim,
   rollEdit,
@@ -55,6 +57,7 @@ export class History {
     assertParenting(next);
     assertMattes(next);
     assertEffectStacks(next);
+    assertTimeRemaps(next);
     const modifiedAt = new Date().toISOString();
     forward.push({ op: "replace", path: ["modifiedAt"], value: modifiedAt });
     inverse.unshift({
@@ -125,7 +128,7 @@ export function splitClip(id: string, at: number): Edit {
     right.id = uid();
     right.start = at;
     right.duration -= offset;
-    right.sourceIn += offset;
+    offsetSource(right, offset);
     for (const key of Object.keys(c.keyframes) as AnimatedProperty[]) {
       // Retain out-of-range keys so both pieces preserve the exact original interpolation.
       right.keyframes[key] = c.keyframes[key].map((k) => ({
@@ -157,11 +160,14 @@ export function trimClip(id: string, edge: "in" | "out", target: number): Edit {
         ? Math.floor(asset.duration * fps(p))
         : 2_000_000_000;
     if (edge === "out") {
-      c.duration = Math.max(1, Math.min(target - c.start, max - c.sourceIn));
+      c.duration = Math.max(
+        1,
+        Math.min(target - c.start, Math.floor(timelineFrameAt(c, max) + 1e-8)),
+      );
       return;
     }
     const delta = Math.max(
-      -Math.min(c.start, c.sourceIn),
+      Math.max(-c.start, Math.ceil(timelineFrameAt(c, 0) - 1e-8)),
       Math.min(target - c.start, c.duration - 1),
     );
     for (const key of Object.keys(c.keyframes) as AnimatedProperty[]) {
@@ -173,7 +179,7 @@ export function trimClip(id: string, edge: "in" | "out", target: number): Edit {
     offsetMaskKeys(c, delta);
     offsetEffectKeys(c, delta);
     c.start += delta;
-    c.sourceIn += delta;
+    offsetSource(c, delta);
     c.duration -= delta;
   };
 }

@@ -8,13 +8,11 @@ async function save(page: Page) {
   return JSON.parse(await fs.readFile((await d.path())!, "utf8"));
 }
 async function open(page: Page, p: unknown) {
-  await page
-    .getByTestId("project-input")
-    .setInputFiles({
-      name: "masks.supp",
-      mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify(p)),
-    });
+  await page.getByTestId("project-input").setInputFiles({
+    name: "masks.supp",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(p)),
+  });
 }
 test("Bezier mask controls, tangents, pen, animation, undo, reopen and PNG", async ({
   page,
@@ -45,7 +43,7 @@ test("Bezier mask controls, tangents, pen, animation, undo, reopen and PNG", asy
   await page.getByLabel("Mask feather", { exact: true }).fill("8");
   await page.getByLabel("Vertex X", { exact: true }).fill("0.6");
   let saved = await save(page);
-  expect(saved.schemaVersion).toBe(9);
+  expect(saved.schemaVersion).toBe(10);
   expect(saved.clips[0].masks[0].pathKeys).toHaveLength(2);
   expect(saved.clips[0].masks[0].keyframes.feather).toHaveLength(2);
   await page.getByRole("button", { name: "Undo", exact: true }).click();

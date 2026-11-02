@@ -10,6 +10,11 @@ import {
 import { editable, type Edit } from "./index";
 import { offsetMaskKeys } from "../masks/timing";
 import { offsetEffectKeys } from "../effects/evaluate";
+import {
+  offsetSource,
+  sourceFrameAt,
+  timelineFrameAt,
+} from "../time-remap/model";
 function sourceLimit(p: Project, c: Clip) {
   const a = p.assets.find((a) => a.id === c.assetId);
   return a && a.kind !== "image"
@@ -79,16 +84,17 @@ export function rippleTrim(
       delta = clamp(
         target - end,
         1 - c.duration,
-        sourceLimit(p, c) - c.sourceIn - c.duration,
+        Math.floor(timelineFrameAt(c, sourceLimit(p, c)) + 1e-8) - c.duration,
       );
       c.duration += delta;
     } else {
       const removed = clamp(
         target - c.start,
-        timed(p, c) ? -c.sourceIn : -c.start,
+        timed(p, c) ? Math.ceil(timelineFrameAt(c, 0) - 1e-8) : -c.start,
         c.duration - 1,
       );
-      c.sourceIn = Math.max(0, c.sourceIn + removed);
+      offsetSource(c, removed);
+      c.sourceIn = Math.max(0, c.sourceIn);
       c.duration -= removed;
       offsetKeys(c, removed);
       delta = -removed;
@@ -118,16 +124,20 @@ export function rollEdit(id: string, edge: "in" | "out", target: number): Edit {
       target - right.start,
       Math.max(
         1 - left.duration,
-        timed(p, right) ? -right.sourceIn : -right.start,
+        timed(p, right)
+          ? Math.ceil(timelineFrameAt(right, 0) - 1e-8)
+          : -right.start,
       ),
       Math.min(
         right.duration - 1,
-        sourceLimit(p, left) - left.sourceIn - left.duration,
+        Math.floor(timelineFrameAt(left, sourceLimit(p, left)) + 1e-8) -
+          left.duration,
       ),
     );
     left.duration += delta;
     right.start += delta;
-    right.sourceIn = Math.max(0, right.sourceIn + delta);
+    offsetSource(right, delta);
+    right.sourceIn = Math.max(0, right.sourceIn);
     right.duration -= delta;
     offsetKeys(right, delta);
   };
@@ -137,7 +147,13 @@ export function slipEdit(id: string, delta: number): Edit {
     const c = editable(p, id);
     if (!c) return;
     if (!timed(p, c)) throw new Error("Slip requires a video or audio source.");
-    c.sourceIn = clamp(c.sourceIn + delta, 0, sourceLimit(p, c) - c.duration);
+    c.sourceIn = clamp(
+      c.sourceIn + delta,
+      0,
+      Math.floor(
+        sourceLimit(p, c) - sourceFrameAt(c, c.duration) + c.sourceIn + 1e-8,
+      ),
+    );
   };
 }
 export function slideEdit(id: string, delta: number): Edit {
@@ -154,18 +170,22 @@ export function slideEdit(id: string, delta: number): Edit {
       delta,
       Math.max(
         1 - left.duration,
-        timed(p, right) ? -right.sourceIn : -right.start,
+        timed(p, right)
+          ? Math.ceil(timelineFrameAt(right, 0) - 1e-8)
+          : -right.start,
         -c.start,
       ),
       Math.min(
         right.duration - 1,
-        sourceLimit(p, left) - left.sourceIn - left.duration,
+        Math.floor(timelineFrameAt(left, sourceLimit(p, left)) + 1e-8) -
+          left.duration,
       ),
     );
     left.duration += delta;
     c.start += delta;
     right.start += delta;
-    right.sourceIn = Math.max(0, right.sourceIn + delta);
+    offsetSource(right, delta);
+    right.sourceIn = Math.max(0, right.sourceIn);
     right.duration -= delta;
     offsetKeys(right, delta);
   };
@@ -176,7 +196,7 @@ function piece(c: Clip, start: number, end: number, id = c.id) {
   result.id = id;
   result.start = start;
   result.duration = end - start;
-  result.sourceIn += delta;
+  offsetSource(result, delta);
   offsetKeys(result, delta);
   return result;
 }

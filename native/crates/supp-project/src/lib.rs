@@ -11,6 +11,7 @@ use thiserror::Error;
 pub mod compositing;
 pub mod effect_stack;
 pub mod masks;
+pub mod time_remap;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -164,6 +165,8 @@ pub struct Clip {
     pub start: u32,
     pub duration: u32,
     pub source_in: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_remap: Option<time_remap::TimeRemap>,
     pub gain: f64,
     pub transform: Transform,
     #[serde(default)]
@@ -414,8 +417,8 @@ fn validate_parenting(clips: &[Clip], tracks: &HashMap<&str, &Track>) -> Result<
 impl Project {
     pub fn validate(&self) -> Result<(), Error> {
         ensure(
-            (1..=9).contains(&self.schema_version),
-            "Unsupported schema version (expected versions 1–9)",
+            (1..=10).contains(&self.schema_version),
+            "Unsupported schema version (expected versions 1–10)",
         )?;
         ensure(
             !self.name.is_empty() && self.name.len() <= 1024,
@@ -693,6 +696,20 @@ impl Project {
                         "Invalid animation",
                     )?;
                 }
+                if let Some(map) = &c.time_remap {
+                    map.validate()?;
+                    ensure(
+                        c.kind == "media",
+                        "Speed ramps require a video or audio source",
+                    )?;
+                    ensure(
+                        c.duration as f64 / settings.fps.value() <= 300.
+                            && (c.source_frame(c.duration as f64) - c.source_frame(0.))
+                                / settings.fps.value()
+                                <= 300.,
+                        "Speed remapping supports up to 5 minutes",
+                    )?;
+                }
                 if c.kind == "media" {
                     ensure(
                         c.composition_id.is_none(),
@@ -707,10 +724,18 @@ impl Project {
                         (track.kind == "audio") == (asset.kind == "audio"),
                         "Incompatible track and asset",
                     )?;
+                    ensure(
+                        c.time_remap.is_none() || asset.kind != "image",
+                        "Speed ramps require a video or audio source",
+                    )?;
                     if asset.kind != "image" {
                         ensure(
-                            c.source_in as f64 + c.duration as f64
-                                <= (asset.duration * settings.fps.value()).ceil() + 1.,
+                            c.source_frame(c.duration as f64)
+                                <= if c.time_remap.is_some() {
+                                    asset.duration * settings.fps.value() + 1e-7
+                                } else {
+                                    (asset.duration * settings.fps.value()).ceil() + 1.
+                                },
                             "Clip exceeds source duration",
                         )?;
                     }
@@ -797,7 +822,7 @@ pub fn read(path: &Path) -> Result<Project, Error> {
     )?;
     let mut p: Project = serde_json::from_reader(fs::File::open(path)?)?;
     p.validate()?;
-    p.schema_version = 9;
+    p.schema_version = 10;
     Ok(p)
 }
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), Error> {
@@ -899,13 +924,13 @@ mod tests {
             serde_json::from_str(&serde_json::to_string(&project).unwrap()).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), value);
         let mut value = value;
-        value["schemaVersion"] = 9.into();
+        value["schemaVersion"] = 10.into();
 
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("parenting.supp");
         fs::write(&path, include_str!("../tests/fixtures/parenting-v4.supp")).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 9);
+        assert_eq!(reopened.schema_version, 10);
         assert_eq!(serde_json::to_value(&reopened).unwrap(), value);
         save(&path, &reopened).unwrap();
         assert_eq!(serde_json::to_value(read(&path).unwrap()).unwrap(), value);
@@ -947,7 +972,7 @@ mod tests {
             let path = dir.path().join(format!("v{version}.supp"));
             fs::write(&path, &original).unwrap();
             let reopened = read(&path).unwrap();
-            assert_eq!(reopened.schema_version, 9);
+            assert_eq!(reopened.schema_version, 10);
             assert_eq!(fs::read(&path).unwrap(), original);
             for clip in reopened
                 .clips
@@ -1165,7 +1190,7 @@ mod tests {
         let path = dir.path().join("nested.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        p.schema_version = 9;
+        p.schema_version = 10;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1191,7 +1216,7 @@ mod tests {
         let path = dir.path().join("animation.supp");
         save(&path, &p).unwrap();
         let reopened = read(&path).unwrap();
-        assert_eq!(reopened.schema_version, 9);
+        assert_eq!(reopened.schema_version, 10);
         assert_eq!(reopened.clips[0].transform.scale_x, 1.);
         assert_eq!(
             reopened.clips[0].keyframes.extra["scaleX"][0]
@@ -1201,7 +1226,7 @@ mod tests {
                 .x,
             0.6
         );
-        p.schema_version = 9;
+        p.schema_version = 10;
         assert_eq!(
             serde_json::to_value(&p).unwrap(),
             serde_json::to_value(reopened).unwrap()
@@ -1218,7 +1243,7 @@ mod tests {
             include_str!("../../../../tests/fixtures/project.supp"),
         )
         .unwrap();
-        assert_eq!(read(&old).unwrap().schema_version, 9);
+        assert_eq!(read(&old).unwrap().schema_version, 10);
         assert!(fs::read_to_string(old)
             .unwrap()
             .contains("\"schemaVersion\":1"));

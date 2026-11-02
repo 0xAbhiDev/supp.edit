@@ -66,7 +66,8 @@ export function reframeSequence(input: ReframeChange): Edit {
         clip.assetId !== asset.id ||
         asset.fingerprint !== patch.fingerprint ||
         clip.sourceIn !== patch.sourceIn ||
-        clip.duration !== patch.duration
+        clip.duration !== patch.duration ||
+        JSON.stringify(clip.timeRemap) !== JSON.stringify(patch.timeRemap)
       )
         throw Error("Framing source or range changed");
       if (c.tracks.find((t) => t.id === clip.trackId)?.locked)

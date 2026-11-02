@@ -2,6 +2,7 @@ import { z } from "zod";
 import { identitySchema as id } from "../../project-schema/identity";
 import { keyframeSchema } from "../../animation/schema";
 import { revisionRecordSchema } from "../revisions/model";
+import { timeRemapSchema } from "../../time-remap/model";
 const unit = z.number().finite().min(0).max(1),
   ms = z
     .number()
@@ -89,6 +90,7 @@ export const reframeSchema = z
             fingerprint: z.string().min(1).max(8192),
             sourceIn: z.number().int().nonnegative(),
             duration: z.number().int().positive(),
+            timeRemap: timeRemapSchema.optional(),
             x: keys,
             y: keys,
             scale: keys,

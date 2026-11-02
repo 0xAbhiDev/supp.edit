@@ -14,6 +14,7 @@ import {
 } from "../../../packages/ai/rough-cut/service";
 import { clock } from "../../../packages/engine/clock";
 import { gymStyles } from "../../../packages/ai/rough-cut/styles";
+import { speedAt } from "../../../packages/time-remap/model";
 function MomentThumbnail({ asset, timeMs }: { asset: Asset; timeMs: number }) {
   const [url, setUrl] = useState("");
   useEffect(() => {
@@ -222,6 +223,57 @@ export function RoughCutReview({
                   {c.diversityScore.toFixed(2)}
                 </p>
               </details>
+              {cut.ramps
+                .filter((r) => r.candidateId === c.id)
+                .map((r) => (
+                  <div key={r.candidateId}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={r.enabled}
+                        disabled={applied || !current}
+                        onChange={() => {
+                          const disabled = cut.ramps
+                            .filter((x) =>
+                              x.candidateId === r.candidateId
+                                ? r.enabled
+                                : !x.enabled,
+                            )
+                            .map((x) => x.candidateId);
+                          try {
+                            onChange(
+                              roughCutService.reselect(session, ids, disabled),
+                            );
+                          } catch (e) {
+                            setError(String(e));
+                          }
+                        }}
+                      />{" "}
+                      Speed ramp
+                    </label>
+                    <p>
+                      Timeline: {(r.beforeFrames / rate).toFixed(2)}s →{" "}
+                      {(r.afterFrames / rate).toFixed(2)}s · {r.reason}
+                    </p>
+                    <svg
+                      viewBox="0 0 300 90"
+                      role="img"
+                      aria-label={`Proposed speed curve ${i + 1}`}
+                      style={{ width: "100%", height: 65 }}
+                    >
+                      <polyline
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        points={Array.from(
+                          { length: 61 },
+                          (_, j) =>
+                            `${j * 5},${85 - speedAt({ sourceIn: 0, timeRemap: r.curve }, (shot.duration * j) / 60) * 35}`,
+                        ).join(" ")}
+                      />
+                    </svg>
+                  </div>
+                ))}
               <button
                 aria-label={`Remove shot ${i + 1}`}
                 disabled={applied || !current || ids.length < 2}

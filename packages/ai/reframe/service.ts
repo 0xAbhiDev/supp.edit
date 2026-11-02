@@ -1,4 +1,5 @@
 import { type Project } from "../../project-schema";
+import { sourceFrameAt } from "../../time-remap/model";
 import { backgroundJobs, type JobContext } from "../../jobs";
 import { nativeJob } from "../media-analysis/service";
 import { revisionTarget } from "../revisions/planner";
@@ -85,8 +86,10 @@ export class ReframeService {
           await job.checkpoint();
           const asset = project.assets.find((a) => a.id === clip.assetId)!;
           const sampling = {
-            startMs: Math.floor((clip.sourceIn * 1000) / rate),
-            endMs: Math.floor(((clip.sourceIn + clip.duration) * 1000) / rate),
+            startMs: Math.floor((sourceFrameAt(clip, 0) * 1000) / rate),
+            endMs: Math.floor(
+              (sourceFrameAt(clip, clip.duration) * 1000) / rate,
+            ),
             intervalMs: 250,
           };
           const data = await this.backend(asset, sampling, {

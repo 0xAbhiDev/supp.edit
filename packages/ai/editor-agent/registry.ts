@@ -28,10 +28,20 @@ import { sequenceRevisionSchema } from "../revisions/model";
 import { reviseSequence } from "../../commands/revisions";
 import { duplicateSequence, reframeSequence } from "../../commands/reframe";
 import { reframeSchema } from "../reframe/model";
+import { timeRemapSchema } from "../../time-remap/model";
+import { setTimeRemap } from "../../commands/time-remap";
 const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  z
+    .object({
+      tool: z.literal("sequence.speed"),
+      sequenceId: id,
+      clipId: id,
+      curve: timeRemapSchema,
+    })
+    .strict(),
   reframeSchema.extend({ tool: z.literal("sequence.reframe") }).strict(),
   z
     .object({
@@ -182,6 +192,10 @@ export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
   {
+    name: "sequence.speed",
+    description: "Set a source-bounded editable speed curve in a sequence",
+  },
+  {
     name: "sequence.reframe",
     description:
       "Apply bounded source-verified editable camera animation and portrait canvas",
@@ -274,6 +288,11 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
+  if (call.tool === "sequence.speed")
+    return inComposition(
+      call.sequenceId,
+      setTimeRemap(call.clipId, call.curve),
+    );
   if (call.tool === "sequence.reframe") {
     const { tool: _tool, ...change } = call;
     return reframeSequence(change);

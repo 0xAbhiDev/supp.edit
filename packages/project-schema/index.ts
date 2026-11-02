@@ -4,6 +4,8 @@ import { transcriptSchema } from "../ai/transcript";
 import { aiEditMetadataSchema } from "../ai/rough-cut/model";
 import { revisionRecordSchema } from "../ai/revisions/model";
 import { identitySchema } from "./identity";
+import { timeRemapSchema, sourceFrameAt } from "../time-remap/model";
+import { assertTimeRemaps } from "../time-remap/validate";
 
 const finite = z.number().finite();
 const frame = finite.int().min(0).max(2_000_000_000);
@@ -68,6 +70,7 @@ export const clipSchema = z.object({
   start: frame,
   duration: frame.min(1),
   sourceIn: frame,
+  timeRemap: timeRemapSchema.optional(),
   gain: finite.min(-60).max(12),
   transform: transformSchema,
   crop: cropSchema.default({}),
@@ -153,13 +156,16 @@ export const compositionSchema = z.object({
   background: z.string().regex(/^(transparent|#[0-9a-fA-F]{6})$/),
   tracks: z.array(trackSchema).min(1).max(1000),
   layers: z.array(clipSchema).max(100000),
-  markers: z.array(z.object({ id, frame, name:z.string().max(256) })).max(10000).optional(),
+  markers: z
+    .array(z.object({ id, frame, name: z.string().max(256) }))
+    .max(10000)
+    .optional(),
   ai: aiEditMetadataSchema.optional(),
   revisions: z.array(revisionRecordSchema).max(100).optional(),
 });
 export type Composition = z.infer<typeof compositionSchema>;
 const projectBase = z.object({
-  schemaVersion: z.literal(9),
+  schemaVersion: z.literal(10),
   id,
   name: z.string().min(1).max(256),
   createdAt: z.string().datetime(),
@@ -196,6 +202,7 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
   try {
     assertParenting(p);
     assertMattes(p);
+    assertTimeRemaps(p);
   } catch (error) {
     ctx.addIssue({
       code: "custom",
@@ -211,7 +218,7 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
       ...scopes.flatMap((s) => s.tracks),
       ...allLayers,
       ...p.markers,
-      ...p.compositions.flatMap(c=>c.markers??[]),
+      ...p.compositions.flatMap((c) => c.markers ?? []),
       ...p.compositions,
       ...p.transcripts,
     ],
@@ -286,7 +293,7 @@ export const projectSchema = projectBase.superRefine((p, ctx) => {
       if (
         asset &&
         asset.kind !== "image" &&
-        c.sourceIn + c.duration >
+        sourceFrameAt(c, c.duration) >
           Math.ceil(
             (asset.duration * scope.settings.fps.num) / scope.settings.fps.den,
           ) +
@@ -392,7 +399,7 @@ export function newProject(
 ): Project {
   const now = new Date().toISOString();
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     id: uid(),
     name,
     createdAt: now,
@@ -472,12 +479,12 @@ export function parseProject(input: unknown): Project {
     !("schemaVersion" in input)
   )
     throw new Error("Not a supp.edit project: schemaVersion is missing.");
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(input.schemaVersion as number))
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(input.schemaVersion as number))
     throw new Error(
-      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–9. The file was not changed.`,
+      `Unsupported project version ${input.schemaVersion}. This build reads versions 1–10. The file was not changed.`,
     );
   // Copy before migration; old files and callers' objects remain untouched.
-  return projectSchema.parse({ ...input, schemaVersion: 9 });
+  return projectSchema.parse({ ...input, schemaVersion: 10 });
 }
 export function timecode(frame: number, rate: number): string {
   const nominal = Math.round(rate),

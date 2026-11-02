@@ -1,6 +1,7 @@
 import { type Edit, deleteClip } from "./index";
 import { fps } from "../project-schema";
 import { inComposition } from "./compositions";
+import { sourceFrameAt } from "../time-remap/model";
 import {
   sequenceRevisionSchema,
   type SequenceRevision,
@@ -24,6 +25,10 @@ export function reviseSequence(input: SequenceRevision): Edit {
       for (const change of edit.changes) {
         const clip = view.clips.find((x) => x.id === change.clipId)!;
         if (change.source) {
+          if (clip.timeRemap)
+            throw new Error(
+              "Review or remove the existing speed ramp before replacing this source",
+            );
           const source = view.assets.find(
             (a) => a.id === change.source!.assetId,
           );
@@ -44,7 +49,7 @@ export function reviseSequence(input: SequenceRevision): Edit {
         if (
           source &&
           source.kind !== "image" &&
-          clip.sourceIn + change.duration >
+          sourceFrameAt(clip, change.duration) >
             Math.floor(source.duration * fps(view))
         )
           throw new Error("Revision exceeds the available source range");

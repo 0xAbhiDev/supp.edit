@@ -1,5 +1,6 @@
 import type { Project, Clip } from "../project-schema";
 import type { Transcript } from "./transcript";
+import { sourceFrameAt } from "../time-remap/model";
 
 export interface ContextSelection {
   frame?: number;
@@ -27,6 +28,8 @@ export interface AIProjectContext {
     start: number;
     duration: number;
     sourceIn: number;
+    sourceEnd: number;
+    speedKeys: number;
   }>[];
   readonly snapshotId: string;
   readonly projectId: string;
@@ -133,6 +136,8 @@ export function snapshotContext(
       start: c.start,
       duration: c.duration,
       sourceIn: c.sourceIn,
+      sourceEnd: sourceFrameAt(c, c.duration),
+      speedKeys: c.timeRemap?.keys.length ?? 0,
     })),
     snapshotId: crypto.randomUUID(),
     projectId: project.id,
