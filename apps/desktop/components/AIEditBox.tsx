@@ -151,7 +151,7 @@ export function AIEditBox() {
       const s = useEditor.getState(),
         edit = applyEditPreview(preview, s.project, s.revision);
       const isRevision = preview.plan.commands.some(
-        (c) => c.tool === "sequence.revise",
+        (c) => c.tool === "sequence.revise" || c.tool === "sequence.treatment",
       );
       s.execute(
         (isRevision ? "AI Revision: " : "AI Editor: ") + preview.plan.summary,
@@ -238,7 +238,10 @@ export function AIEditBox() {
           preview={preview}
           onCancel={() => setPreview(null)}
         />
-      ) : preview?.plan.commands.some((c) => c.tool === "sequence.revise") ? (
+      ) : preview?.plan.commands.some(
+          (c) =>
+            c.tool === "sequence.revise" || c.tool === "sequence.treatment",
+        ) ? (
         <RevisionReview
           key={preview.plan.id}
           preview={preview}

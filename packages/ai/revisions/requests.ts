@@ -1,4 +1,8 @@
 const ordinal = "(?:first|second|third|fourth|1st|2nd|3rd|4th)";
+export const audioRevision = (s: string) =>
+  /\b(?:remove (?:the )?ducking|music louder|music (?:loud|powerful).*voice clear|lower (?:the )?music when I speak|keep (?:the )?original gym sounds)\b/i.test(
+    s,
+  );
 export const replaceRequest = new RegExp(
   `replace (?:the )?(${ordinal}) (?:shot|clip)`,
   "i",

@@ -450,18 +450,22 @@ export function Inspector() {
             </>
           )}
           <Section title="Audio">
-            <NumberField
-              label="Clip gain (dB)"
-              value={clip.gain}
-              min={-60}
-              max={12}
-              step={0.5}
-              onChange={(v) =>
-                edit("Set clip gain", (c) => {
-                  c.gain = v;
-                })
-              }
-            />
+            {clip.kind === "media" ? (
+              number("Clip gain (dB)", "gain", -60, 12, 0.5)
+            ) : (
+              <NumberField
+                label="Clip gain (dB)"
+                value={clip.gain}
+                min={-60}
+                max={12}
+                step={0.5}
+                onChange={(v) =>
+                  edit("Set clip gain", (c) => {
+                    c.gain = v;
+                  })
+                }
+              />
+            )}
             <p className="field-hint">
               Applies to source audio in playback and MP4 export.
             </p>

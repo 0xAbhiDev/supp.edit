@@ -16,6 +16,8 @@ function validValue(property: AnimatedProperty, value: number) {
   return clampValue(property, value);
 }
 function put(c: Clip, property: AnimatedProperty, key: Keyframe) {
+  if (property === "gain" && c.kind !== "media")
+    throw new Error("Gain automation requires a media clip");
   const keys = c.keyframes[property],
     existing = keys.find((k) => k.frame === key.frame);
   if (existing) Object.assign(existing, key);

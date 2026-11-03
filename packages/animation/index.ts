@@ -4,12 +4,13 @@ export const properties: Record<
   AnimatedProperty,
   {
     label: string;
-    group: "transform" | "effects" | "crop";
+    group: "transform" | "effects" | "crop" | "audio";
     min: number;
     max: number;
     step: number;
   }
 > = {
+  gain: { label: "Gain (dB)", group: "audio", min: -60, max: 12, step: 0.5 },
   x: {
     label: "Position X",
     group: "transform",
@@ -100,14 +101,23 @@ export function clampValue(key: AnimatedProperty, value: number) {
   return Math.max(min, Math.min(max, value));
 }
 export function baseValue(clip: Clip, key: AnimatedProperty): number {
-  const group = clip[properties[key].group] as Record<string, number>;
+  if (key === "gain") return clip.gain;
+  const group = clip[
+    properties[key].group as "transform" | "effects" | "crop"
+  ] as Record<string, number>;
   return group?.[key] ?? (key.startsWith("scale") ? 1 : 0);
 }
 export function writeBase(clip: Clip, key: AnimatedProperty, value: number) {
-  (clip[properties[key].group] as Record<string, number>)[key] = clampValue(
-    key,
-    value,
-  );
+  if (key === "gain") {
+    clip.gain = clampValue(key, value);
+    return;
+  }
+  (
+    clip[properties[key].group as "transform" | "effects" | "crop"] as Record<
+      string,
+      number
+    >
+  )[key] = clampValue(key, value);
 }
 
 const sortedCache = new WeakMap<Keyframe[], Keyframe[]>();

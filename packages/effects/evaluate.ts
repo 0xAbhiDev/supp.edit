@@ -8,7 +8,11 @@ export function effectValue(e: Effect, localFrame: number) {
 export function resolvedEffects(c: Clip, frame: number) {
   return c.effectStack
     .filter((e) => e.enabled)
-    .map((e) => ({ type: e.type, value: effectValue(e, frame - c.start) }));
+    .map((e) => ({
+      type: e.type,
+      value: effectValue(e, frame - c.start),
+      parameters: e.parameters,
+    }));
 }
 export function offsetEffectKeys(c: Clip, delta: number) {
   for (const e of c.effectStack) for (const k of e.keys) k.frame -= delta;

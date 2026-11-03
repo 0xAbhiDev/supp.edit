@@ -132,11 +132,14 @@ describe("shared animation engine", () => {
     p.schemaVersion = 1;
     expect(parseProject(p).schemaVersion).toBe(10);
   });
-  it("commands animate all channels, retain values when disabled, undo and reload", () => {
+  it("commands animate visual channels, retain values when disabled, undo and reload", () => {
     let p = setup();
     const h = new History(p),
       id = p.clips[0].id;
-    for (const key of propertyNames) {
+    expect(() =>
+      h.execute(p, "invalid audio", enableAnimation(id, "gain", true, 0)),
+    ).toThrow(/media clip/);
+    for (const key of propertyNames.filter((k) => k !== "gain")) {
       p = h.execute(p, "enable", enableAnimation(id, key, true, 0));
       p = h.execute(p, "set", setProperty(id, key, 0.5, 50));
       expect(p.clips[0].keyframes[key]).toHaveLength(2);

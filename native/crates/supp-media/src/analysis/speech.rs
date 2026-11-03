@@ -12,7 +12,7 @@ pub fn transcribe(
     settings: &Settings,
     cancel: &AtomicBool,
     report: &impl Fn(Progress),
-) -> Result<Transcript, String> {
+) -> Result<Option<Transcript>, String> {
     if !asset.has_audio {
         return Err("Source has no audio stream".into());
     }
@@ -94,7 +94,11 @@ pub fn transcribe(
     });
     Ok(result)
 }
-pub fn parse(bytes: &[u8], asset: &Asset, settings: &Settings) -> Result<Transcript, String> {
+pub fn parse(
+    bytes: &[u8],
+    asset: &Asset,
+    settings: &Settings,
+) -> Result<Option<Transcript>, String> {
     let json: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
     let rows = json["transcription"]
         .as_array()
@@ -120,7 +124,13 @@ pub fn parse(bytes: &[u8], asset: &Asset, settings: &Settings) -> Result<Transcr
         let text = row["text"].as_str().ok_or("Missing speech text")?.trim();
         let start = timestamp(&row["offsets"]["from"])?;
         let end = timestamp(&row["offsets"]["to"])?.min(duration);
-        if text.is_empty() || end <= start {
+        // Whisper includes non-verbal annotations such as [SIGH] / (music).
+        // They are not dialogue and must not trigger captions or speech ducking.
+        if text.is_empty()
+            || end <= start
+            || ((text.starts_with('[') && text.ends_with(']'))
+                || (text.starts_with('(') && text.ends_with(')')))
+        {
             continue;
         }
         if text.chars().count() > 10000 {
@@ -179,12 +189,12 @@ pub fn parse(bytes: &[u8], asset: &Asset, settings: &Settings) -> Result<Transcr
         });
     }
     if segments.is_empty() {
-        return Err("No speech segments were detected".into());
+        return Ok(None);
     }
     if segments.windows(2).any(|p| p[1].start_ms < p[0].start_ms) {
         return Err("Whisper returned unordered segments".into());
     }
-    Ok(Transcript {
+    Ok(Some(Transcript {
         id,
         name: format!("Transcript · {}", asset.name)
             .chars()
@@ -199,7 +209,7 @@ pub fn parse(bytes: &[u8], asset: &Asset, settings: &Settings) -> Result<Transcr
         timing_quality: Some("approximate".into()),
         translated: Some(settings.translate),
         segments,
-    })
+    }))
 }
 fn timestamp(value: &Value) -> Result<u32, String> {
     value

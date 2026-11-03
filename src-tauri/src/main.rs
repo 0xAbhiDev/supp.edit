@@ -59,6 +59,7 @@ fn main() {
             analysis::analyze_media,
             analysis::embed_vision_query,
             analysis::sample_subjects,
+            analysis::sample_color,
             render::begin_export,
             render::write_frame,
             render::finish_export,

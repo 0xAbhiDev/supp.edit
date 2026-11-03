@@ -20,7 +20,9 @@ export function RevisionReview({
   const [original] = useState(project),
     [applied, setApplied] = useState(false),
     [error, setError] = useState("");
-  const call = preview.plan.commands.find((c) => c.tool === "sequence.revise");
+  const call = preview.plan.commands.find(
+    (c) => c.tool === "sequence.revise" || c.tool === "sequence.treatment",
+  );
   const view = useMemo(
     () =>
       compositionView(
@@ -59,24 +61,41 @@ export function RevisionReview({
       <p>{preview.plan.summary}</p>
       <h4>Planned changes</h4>
       <ul>
-        {call.changes.map((change) => {
-          const old = before.layers.find((l) => l.id === change.clipId)!;
-          return (
-            <li key={old.id}>
-              {old.name}:{" "}
-              {change.source
-                ? `replace source with ${project.assets.find((a) => a.id === change.source!.assetId)?.name}; `
-                : ""}
-              {old.start !== change.start
-                ? `move ${(old.start / rate).toFixed(2)}s → ${(change.start / rate).toFixed(2)}s; `
-                : ""}
-              {old.duration !== change.duration
-                ? `duration ${(old.duration / rate).toFixed(2)}s → ${(change.duration / rate).toFixed(2)}s`
-                : "duration unchanged"}
-            </li>
-          );
-        })}
-        {call.remove.map((id) => (
+        {call.tool === "sequence.treatment"
+          ? call.changes.map((change) => (
+              <li key={change.clipId}>
+                {before.layers.find((l) => l.id === change.clipId)?.name}:{" "}
+                {change.gain !== undefined
+                  ? `base gain ${change.gain.toFixed(1)} dB; `
+                  : ""}
+                {change.gainKeys
+                  ? `${change.gainKeys.length} editable gain keys; `
+                  : ""}
+                {change.timeRemap === null ? "normal playback speed; " : ""}
+                {change.scaleKeys
+                  ? `${change.scaleKeys.length} scale keys; `
+                  : ""}
+                {change.effects ? `${change.effects.length} effects` : ""}
+              </li>
+            ))
+          : call.changes.map((change) => {
+              const old = before.layers.find((l) => l.id === change.clipId)!;
+              return (
+                <li key={old.id}>
+                  {old.name}:{" "}
+                  {change.source
+                    ? `replace source with ${project.assets.find((a) => a.id === change.source!.assetId)?.name}; `
+                    : ""}
+                  {old.start !== change.start
+                    ? `move ${(old.start / rate).toFixed(2)}s → ${(change.start / rate).toFixed(2)}s; `
+                    : ""}
+                  {old.duration !== change.duration
+                    ? `duration ${(old.duration / rate).toFixed(2)}s → ${(change.duration / rate).toFixed(2)}s`
+                    : "duration unchanged"}
+                </li>
+              );
+            })}
+        {("remove" in call ? call.remove : []).map((id) => (
           <li key={id}>
             Remove {before.layers.find((l) => l.id === id)?.name}
           </li>

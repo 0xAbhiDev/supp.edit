@@ -17,6 +17,7 @@ export class ResourcePool {
   private entries = new Map<string, Entry>();
   private active = new Set<string>();
   private context: AudioContext | null = null;
+  private limiter: WaveShaperNode | null = null;
   private disposed = false;
   private prefetching = 0;
   private borrowed = new Set<ImageBitmap>();
@@ -202,11 +203,18 @@ export class ResourcePool {
   ) {
     const el = r.element;
     if (!(el instanceof HTMLMediaElement) || this.silent) return;
-    if (!this.context) this.context = new AudioContext();
+    if (!this.context) {
+      this.context = new AudioContext();
+      this.limiter = this.context.createWaveShaper();
+      this.limiter.curve = Float32Array.from({ length: 65537 }, (_, i) =>
+        Math.max(-0.95, Math.min(0.95, i / 32768 - 1)),
+      );
+      this.limiter.connect(this.context.destination);
+    }
     if (!r.gain) {
       r.source = this.context.createMediaElementSource(el);
       r.gain = this.context.createGain();
-      r.source.connect(r.gain).connect(this.context.destination);
+      r.source.connect(r.gain).connect(this.limiter!);
     }
     r.gain.gain.value = audible && speed > 0 ? 10 ** (clip.gain / 20) : 0;
     el.muted = false;
@@ -248,5 +256,6 @@ export class ResourcePool {
     for (const [key, e] of this.entries) this.remove(key, e);
     await this.context?.close();
     this.context = null;
+    this.limiter = null;
   }
 }

@@ -6,6 +6,11 @@ export const effectTypes = [
   "brightness",
   "contrast",
   "saturation",
+  "tonalContrast",
+  "temperature",
+  "grain",
+  "vignette",
+  "sharpen",
 ] as const;
 export type EffectType = (typeof effectTypes)[number];
 export const effectInfo = {
@@ -13,7 +18,36 @@ export const effectInfo = {
   brightness: { label: "Brightness", min: 0, max: 3, step: 0.05, initial: 1 },
   contrast: { label: "Contrast", min: 0, max: 3, step: 0.05, initial: 1 },
   saturation: { label: "Saturation", min: 0, max: 3, step: 0.05, initial: 1 },
+  tonalContrast: {
+    label: "Tonal contrast",
+    min: 0.5,
+    max: 1.5,
+    step: 0.01,
+    initial: 1.06,
+  },
+  temperature: {
+    label: "Temperature",
+    min: -1,
+    max: 1,
+    step: 0.02,
+    initial: 0,
+  },
+  grain: { label: "Grain", min: 0, max: 0.2, step: 0.005, initial: 0.025 },
+  vignette: { label: "Vignette", min: 0, max: 0.8, step: 0.02, initial: 0.12 },
+  sharpen: {
+    label: "Controlled sharpen",
+    min: 0,
+    max: 1,
+    step: 0.02,
+    initial: 0.1,
+  },
 };
+export const grainParametersSchema = z
+  .object({
+    size: z.number().finite().min(0.5).max(8),
+    softness: z.number().finite().min(0).max(1),
+  })
+  .strict();
 export const effectSchema = z
   .object({
     id: z.string().min(1).max(128),
@@ -21,8 +55,14 @@ export const effectSchema = z
     enabled: z.boolean(),
     value: z.number().finite(),
     keys: z.array(keyframeSchema).max(1000).default([]),
+    parameters: grainParametersSchema.optional(),
   })
   .superRefine((e, ctx) => {
+    if (e.parameters && e.type !== "grain")
+      ctx.addIssue({
+        code: "custom",
+        message: "Grain parameters require a grain effect",
+      });
     const { min, max } = effectInfo[e.type];
     if (
       e.value < min ||

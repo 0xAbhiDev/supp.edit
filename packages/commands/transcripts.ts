@@ -57,12 +57,21 @@ export function importTranscript(input: Transcript): Edit {
   };
 }
 import { sourceFrameAt, timelineFrameAt } from "../time-remap/model";
+export const captionStyles = [
+  "Minimal",
+  "Bold",
+  "Creator",
+  "Fitness",
+  "Karaoke",
+] as const;
+export type CaptionStyle = (typeof captionStyles)[number];
 /** Map source timestamps through the actual instance's source In/trim/speed curve. */
 export function captionsForClip(
   transcriptId: string,
   clipId: string,
   trackId: string,
   prefix: string,
+  style: CaptionStyle = "Minimal",
 ): Edit {
   return (p) => {
     const transcript = p.transcripts.find((t) => t.id === transcriptId),
@@ -87,14 +96,20 @@ export function captionsForClip(
     const rate = fps(p),
       track = newTrack("video", p.tracks.length + 1);
     track.id = trackId;
-    track.name = "Speech captions";
+    track.name = `${style} speech captions`;
     let count = 0,
       lastEnd = source.start;
-    for (const segment of speechCaptionCues(
-      transcript,
-      (sourceFrameAt(source, 0) * 1000) / rate,
-      (sourceFrameAt(source, source.duration) * 1000) / rate,
-    )) {
+    const sourceStart = (sourceFrameAt(source, 0) * 1000) / rate,
+      sourceEnd = (sourceFrameAt(source, source.duration) * 1000) / rate;
+    const cues =
+      style === "Karaoke"
+        ? transcript.segments
+            .flatMap((s) => s.words ?? [])
+            .filter((w) => w.endMs > sourceStart && w.startMs < sourceEnd)
+        : speechCaptionCues(transcript, sourceStart, sourceEnd);
+    if (style === "Karaoke" && !cues.length)
+      throw new Error("Karaoke requires real word timestamps");
+    for (const segment of cues) {
       const start = Math.max(
         source.start,
         source.start +
@@ -119,6 +134,27 @@ export function captionsForClip(
         Math.min(72, Math.round(p.settings.height * 0.05)),
       );
       caption.transform.y = Math.round(p.settings.height * 0.37);
+      caption.text.weight = style === "Minimal" ? "normal" : "bold";
+      caption.text.color =
+        style === "Fitness"
+          ? "#F5EDB5"
+          : style === "Creator"
+            ? "#D5F2FF"
+            : style === "Karaoke"
+              ? "#D4FF79"
+              : "#FFFFFF";
+      if (style === "Bold" || style === "Fitness")
+        caption.text.size = Math.min(96, caption.text.size * 1.2);
+      // Bound long phrases to a conservative portrait safe width; text remains editable.
+      caption.text.size = Math.max(
+        6,
+        Math.min(
+          caption.text.size,
+          (p.settings.width * 0.8) /
+            (Math.max(1, ...segment.text.split("\n").map((s) => s.length)) *
+              0.6),
+        ),
+      );
       p.clips.push(caption);
       lastEnd = end;
     }

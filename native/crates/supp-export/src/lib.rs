@@ -123,7 +123,12 @@ impl<'a> AudioCollector<'a> {
                     duration,
                     output_start: start,
                     gain,
-                    remap: c.time_remap.as_ref().map(|_| (c, local_start, rate)),
+                    remap: (c.time_remap.is_some()
+                        || c.keyframes
+                            .extra
+                            .get("gain")
+                            .is_some_and(|keys| !keys.is_empty()))
+                    .then_some((c, local_start, rate)),
                 });
             }
         }
@@ -157,7 +162,12 @@ fn collect_audio(p: &Project) -> Result<Vec<AudioSegment<'_>>, String> {
 fn audio_filter(index: usize, segment: &AudioSegment<'_>) -> String {
     // FFmpeg's S suffix delays by samples rather than rounded milliseconds.
     let delay = (segment.output_start * 48000.).round() as u64;
-    format!("[{index}:a:0]aresample=48000,asetpts=PTS-STARTPTS,atrim=duration={:.9},volume={:.9}dB,adelay={delay}S:all=1[a{index}]", segment.duration, segment.gain)
+    let source_start = if segment.remap.is_some() {
+        0.
+    } else {
+        segment.source_start
+    };
+    format!("[{index}:a:0]aresample=48000,atrim=start={source_start:.9}:duration={:.9},asetpts=PTS-STARTPTS,volume={:.9}dB,adelay={delay}S:all=1[a{index}]", segment.duration, segment.gain)
 }
 pub struct Encoder {
     child: Child,
@@ -215,16 +225,8 @@ impl Encoder {
                     .arg(&path);
                 audio_temps.push(path);
             } else {
-                cmd.args([
-                    "-ss",
-                    &format!("{:.9}", segment.source_start),
-                    "-t",
-                    &format!("{:.9}", segment.duration),
-                    "-protocol_whitelist",
-                    "file,pipe",
-                    "-i",
-                ])
-                .arg(path);
+                cmd.args(["-protocol_whitelist", "file,pipe", "-i"])
+                    .arg(path);
             }
             filters.push(audio_filter(i, &segment));
             audio.push(format!("[a{i}]"));
@@ -241,7 +243,7 @@ impl Encoder {
                 "1:a:0",
             ]);
         } else {
-            filters.push(format!("{}amix=inputs={}:normalize=0:duration=longest,alimiter=limit=0.95:latency=1,apad[aout]",audio.join(""),audio.len()));
+            filters.push(format!("{}amix=inputs={}:normalize=0:duration=longest,alimiter=limit=0.95:level=false:latency=1,apad[aout]",audio.join(""),audio.len()));
             cmd.args([
                 "-filter_complex",
                 &filters.join(";"),

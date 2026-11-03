@@ -85,6 +85,7 @@ export const clipSchema = z.object({
     y: z.array(keyframeSchema).max(10000),
     scale: z.array(keyframeSchema).max(10000),
     opacity: z.array(keyframeSchema).max(10000),
+    gain: channel(),
     rotation: channel(),
     scaleX: channel(),
     scaleY: channel(),

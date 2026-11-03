@@ -12,10 +12,18 @@ import {
   setInterpolation,
 } from "../../commands/animation";
 import { addEffect, setEffectValue, editEffect } from "../../commands/effects";
-import { effectTypes, effectInfo } from "../../effects/model";
+import {
+  effectTypes,
+  effectInfo,
+  grainParametersSchema,
+} from "../../effects/model";
 import { properties, propertyNames } from "../../animation";
 import { transcriptSchema } from "../transcript";
-import { importTranscript, captionsForClip } from "../../commands/transcripts";
+import {
+  importTranscript,
+  captionsForClip,
+  captionStyles,
+} from "../../commands/transcripts";
 import { rippleDeleteRanges } from "../../commands/nle";
 import {
   createSequence,
@@ -30,10 +38,31 @@ import { duplicateSequence, reframeSequence } from "../../commands/reframe";
 import { reframeSchema } from "../reframe/model";
 import { timeRemapSchema } from "../../time-remap/model";
 import { setTimeRemap } from "../../commands/time-remap";
+import { addPunchIn } from "../../commands/punch-in";
+import { treatmentRevisionSchema } from "../revisions/treatment-model";
+import {
+  rememberTreatments,
+  reviseTreatments,
+} from "../../commands/treatments";
 const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  z.object({ tool: z.literal("sequence.remember"), sequenceId: id }).strict(),
+  treatmentRevisionSchema
+    .extend({ tool: z.literal("sequence.treatment") })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.punchIn"),
+      sequenceId: id,
+      clipId: id,
+      controllerId: id,
+      amount: z.number().finite().nonnegative().max(0.07),
+      peak: frame.positive(),
+      baseScale: z.number().finite().min(0.94).max(1.04).optional(),
+    })
+    .strict(),
   z
     .object({
       tool: z.literal("sequence.speed"),
@@ -94,7 +123,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       tool: z.literal("sequence.keyframe"),
       sequenceId: id,
       clipId: id,
-      property: z.enum(["x", "y", "scale"]),
+      property: z.enum(["x", "y", "scale", "gain"]),
       value,
       frame,
       easing: z.enum(interpolationModes),
@@ -108,6 +137,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       effectId: id,
       type: z.enum(effectTypes),
       value,
+      parameters: grainParametersSchema.optional(),
     })
     .strict(),
   z
@@ -118,6 +148,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       transcriptId: id,
       trackId: id,
       prefix: id,
+      style: z.enum(captionStyles).optional(),
     })
     .strict(),
   z
@@ -133,6 +164,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       clipId: id,
       trackId: id,
       prefix: id,
+      style: z.enum(captionStyles).optional(),
     })
     .strict(),
   z
@@ -164,6 +196,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       effectId: id,
       type: z.enum(effectTypes),
       value,
+      parameters: grainParametersSchema.optional(),
     })
     .strict(),
   z
@@ -191,6 +224,11 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
 export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
+  {
+    name: "sequence.punchIn",
+    description:
+      "Compose a small zoom through an editable parent controller, preserving shot camera keys",
+  },
   {
     name: "sequence.speed",
     description: "Set a source-bounded editable speed curve in a sequence",
@@ -288,6 +326,17 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
+  if (call.tool === "sequence.punchIn")
+    return inComposition(
+      call.sequenceId,
+      addPunchIn(
+        call.clipId,
+        call.controllerId,
+        call.amount,
+        call.peak,
+        call.baseScale,
+      ),
+    );
   if (call.tool === "sequence.speed")
     return inComposition(
       call.sequenceId,
@@ -300,6 +349,19 @@ export function toolEdit(input: unknown): Edit {
   if (call.tool === "sequence.duplicate")
     return duplicateSequence(call.sequenceId, call.id, call.name);
   return (p) => {
+    if (call.tool === "sequence.remember") {
+      rememberTreatments(call.sequenceId)(p);
+      return;
+    }
+    if (call.tool === "sequence.treatment") {
+      reviseTreatments(
+        call.sequenceId,
+        call.changes,
+        call.record,
+        call.generated,
+      )(p);
+      return;
+    }
     if (call.tool === "sequence.revise") {
       const { tool: _tool, ...revision } = call;
       reviseSequence(revision)(p);
@@ -344,6 +406,7 @@ export function toolEdit(input: unknown): Edit {
           effectId: call.effectId,
           type: call.type,
           value: call.value,
+          parameters: call.parameters,
         }),
       )(p);
       return;
@@ -356,6 +419,7 @@ export function toolEdit(input: unknown): Edit {
           call.clipId,
           call.trackId,
           call.prefix,
+          call.style,
         ),
       )(p);
       return;
@@ -376,6 +440,7 @@ export function toolEdit(input: unknown): Edit {
           call.clipId,
           call.trackId,
           call.prefix,
+          call.style,
         )(p);
         break;
       case "clip.move":
@@ -399,6 +464,7 @@ export function toolEdit(input: unknown): Edit {
         addEffect(c.id, call.type, call.effectId)(p);
         editEffect(c.id, call.effectId, (e) => {
           e.value = call.value;
+          if (call.parameters) e.parameters = call.parameters;
         })(p);
         break;
       }

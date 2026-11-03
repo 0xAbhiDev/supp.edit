@@ -127,6 +127,46 @@ export function EffectStack({ clip }: { clip: Clip }) {
                   {key ? "◆" : "◇"}
                 </button>
               </NumberField>
+              {e.type === "grain" && (
+                <div className="two-fields">
+                  <NumberField
+                    label={`Grain size ${i + 1}`}
+                    min={0.5}
+                    max={8}
+                    step={0.1}
+                    value={e.parameters?.size ?? 1.2}
+                    onChange={(v) =>
+                      execute(
+                        "Change grain size",
+                        editEffect(clip.id, e.id, (e) => {
+                          e.parameters = {
+                            size: v,
+                            softness: e.parameters?.softness ?? 0.6,
+                          };
+                        }),
+                      )
+                    }
+                  />
+                  <NumberField
+                    label={`Grain softness ${i + 1}`}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={e.parameters?.softness ?? 0.6}
+                    onChange={(v) =>
+                      execute(
+                        "Change grain softness",
+                        editEffect(clip.id, e.id, (e) => {
+                          e.parameters = {
+                            size: e.parameters?.size ?? 1.2,
+                            softness: v,
+                          };
+                        }),
+                      )
+                    }
+                  />
+                </div>
+              )}
               {e.keys.length > 0 && (
                 <div className="effect-animation">
                   <span>

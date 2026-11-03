@@ -13,6 +13,8 @@ import { LruCache } from "./lru";
 import { blendModes, matteModes } from "../compositing/model";
 import { blendShader } from "./blend-shader";
 import { resolvedEffects } from "../effects/evaluate";
+import { finishShader } from "./finish-shader";
+import { isFinishEffect } from "./finish-effects";
 
 const vertex = `#version 300 es
 in vec2 a_position;
@@ -27,6 +29,7 @@ void main(){
 }`;
 const fragment = `#version 300 es
 precision highp float;
+precision highp int;
 uniform sampler2D u_image;
 uniform sampler2D u_bezierMask;
 uniform bool u_hasBezierMask;
@@ -49,6 +52,7 @@ in vec2 v_uv;
 out vec4 result;
 ${blendShader}
 vec4 sampleFrame(vec2 uv){if(any(lessThan(uv,vec2(0)))||any(greaterThan(uv,vec2(1))))return vec4(0);return texture(u_image,vec2(uv.x,1.0-uv.y));}
+${finishShader}
 void main(){
   if(u_pass==0){result=texture(u_image,v_uv);return;}
   vec4 pixel;
@@ -60,6 +64,7 @@ void main(){
   }
   pixel=sampleFrame(v_uv);
   vec3 rgb=pixel.a>0.000001?pixel.rgb/pixel.a:vec3(0);
+  if(u_pass==5){result=vec4(clamp(finishColor(rgb,pixel),0.0,1.0)*pixel.a,pixel.a);return;}
   rgb*=u_color.x;
   rgb=(rgb-0.5)*u_color.y+0.5;
   float luminance=dot(rgb,vec3(0.2126,0.7152,0.0722));
@@ -565,7 +570,29 @@ export class GpuRenderer {
           const next = 1 - current;
           this.target(this.targets[next]);
           gl.bindTexture(gl.TEXTURE_2D, this.targets[current].texture);
-          gl.uniform1i(this.uniform("u_pass"), 3);
+          gl.uniform1i(
+            this.uniform("u_pass"),
+            isFinishEffect(effect.type) ? 5 : 3,
+          );
+          if (isFinishEffect(effect.type)) {
+            gl.uniform1i(
+              this.uniform("u_finishKind"),
+              {
+                grain: 1,
+                vignette: 2,
+                sharpen: 3,
+                temperature: 4,
+                tonalContrast: 5,
+              }[effect.type],
+            );
+            gl.uniform4f(
+              this.uniform("u_finish"),
+              effect.value,
+              (effect.parameters?.size ?? 1.2) * scale,
+              effect.parameters?.softness ?? 0.6,
+              Math.floor(frame - c.start),
+            );
+          }
           gl.uniform4f(
             this.uniform("u_color"),
             effect.type === "brightness" ? effect.value : 1,

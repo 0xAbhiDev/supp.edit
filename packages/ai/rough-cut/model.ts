@@ -3,8 +3,10 @@ import {
   visualRevision,
   musicRevision,
   removeRequest,
+  audioRevision,
 } from "../revisions/requests";
 import { gymStyleSchema, gymStyles, requestedGymStyle } from "./styles";
+import { treatmentSchema } from "../revisions/treatment-model";
 export const pacingSchema = z.enum([
   "cinematic",
   "balanced",
@@ -43,12 +45,14 @@ export const aiEditMetadataSchema = z
       )
       .max(512),
     warnings: z.array(z.string().max(1000)).max(64),
+    generated: z.array(treatmentSchema).max(512).optional(),
   })
   .strict();
 export type AIEditMetadata = z.infer<typeof aiEditMetadataSchema>;
 export type RequestRoute =
   "creative" | "search" | "analysis" | "transcript" | "revision" | "precise";
 export function routeRequest(input: string): RequestRoute {
+  if (audioRevision(input)) return "revision";
   if (/^(find|search|show)(?:\s+me)?\s/i.test(input)) return "search";
   if (
     /(?:remove|delete|cut)\s+(?:all\s+)?(?:pauses|silences|filler)/i.test(input)

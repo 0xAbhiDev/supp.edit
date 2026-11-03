@@ -365,39 +365,44 @@ function Curves({ clip }: { clip: Clip }) {
       }}
     >
       <div className="animation-properties">
-        {(["transform", "effects", "crop"] as const).map((group) => (
-          <details key={group} open={group === "transform"}>
-            <summary>{group}</summary>
-            {propertyNames
-              .filter((p) => properties[p].group === group)
-              .map((p) => (
-                <div key={p} className={primary === p ? "active-property" : ""}>
-                  <input
-                    type="checkbox"
-                    aria-label={`Show ${properties[p].label} curve`}
-                    checked={visible.includes(p)}
-                    onChange={(e) =>
-                      setVisible(
-                        e.target.checked
-                          ? [...visible, p]
-                          : visible.filter((v) => v !== p),
-                      )
-                    }
-                  />
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      setPrimary(p);
-                      if (!visible.includes(p)) setVisible([...visible, p]);
-                    }}
+        {(["transform", "effects", "crop", "audio"] as const)
+          .filter((group) => group !== "audio" || clip.kind === "media")
+          .map((group) => (
+            <details key={group} open={group === "transform"}>
+              <summary>{group}</summary>
+              {propertyNames
+                .filter((p) => properties[p].group === group)
+                .map((p) => (
+                  <div
+                    key={p}
+                    className={primary === p ? "active-property" : ""}
                   >
-                    {properties[p].label}
-                  </button>
-                  <span>{clip.keyframes[p].length || "—"}</span>
-                </div>
-              ))}
-          </details>
-        ))}
+                    <input
+                      type="checkbox"
+                      aria-label={`Show ${properties[p].label} curve`}
+                      checked={visible.includes(p)}
+                      onChange={(e) =>
+                        setVisible(
+                          e.target.checked
+                            ? [...visible, p]
+                            : visible.filter((v) => v !== p),
+                        )
+                      }
+                    />
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setPrimary(p);
+                        if (!visible.includes(p)) setVisible([...visible, p]);
+                      }}
+                    >
+                      {properties[p].label}
+                    </button>
+                    <span>{clip.keyframes[p].length || "—"}</span>
+                  </div>
+                ))}
+            </details>
+          ))}
       </div>
       <div className="animation-main">
         <div className="animation-tools">

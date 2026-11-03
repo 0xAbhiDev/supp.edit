@@ -8,8 +8,10 @@ use std::{
     path::Path,
 };
 use thiserror::Error;
+pub mod animation;
 pub mod compositing;
 pub mod effect_stack;
+pub mod generated;
 pub mod masks;
 pub mod time_remap;
 
@@ -645,6 +647,7 @@ impl Project {
                     c.keyframes.extra.keys().all(|k| {
                         [
                             "rotation",
+                            "gain",
                             "scaleX",
                             "scaleY",
                             "anchorX",
@@ -696,6 +699,16 @@ impl Project {
                         "Invalid animation",
                     )?;
                 }
+                if c.keyframes
+                    .extra
+                    .get("gain")
+                    .is_some_and(|keys| !keys.is_empty())
+                {
+                    ensure(
+                        c.kind == "media" && c.duration as f64 / settings.fps.value() <= 300.,
+                        "Gain automation requires media up to 5 minutes",
+                    )?;
+                }
                 if let Some(map) = &c.time_remap {
                     map.validate()?;
                     ensure(
@@ -727,6 +740,11 @@ impl Project {
                     ensure(
                         c.time_remap.is_none() || asset.kind != "image",
                         "Speed ramps require a video or audio source",
+                    )?;
+                    ensure(
+                        asset.kind != "image"
+                            || c.keyframes.extra.get("gain").is_none_or(Vec::is_empty),
+                        "Gain automation requires a video or audio source",
                     )?;
                     if asset.kind != "image" {
                         ensure(

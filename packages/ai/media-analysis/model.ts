@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { transcriptSchema } from "../transcript";
 import { identitySchema } from "../../project-schema/identity";
-export const VISION_MODEL_VERSION = "mobileclip-757d59c9-fp32-yolox-0.1.1rc0-ort1.31.1";
+export const VISION_MODEL_VERSION =
+  "mobileclip-757d59c9-fp32-yolox-0.1.1rc0-ort1.31.1";
 const ms = z.number().int().min(0).max(1_800_000),
   unit = z.number().finite().min(0).max(1);
 export const mediaRangeSchema = z
@@ -132,6 +133,7 @@ export const analysisResultSchema = z
     durationMs: ms,
     settings: analysisSettingsSchema,
     transcript: transcriptSchema.optional(),
+    speechDetected: z.boolean().optional(),
     vision: visionAnalysisSchema.optional(),
     audio: z
       .object({
@@ -167,7 +169,7 @@ export const analysisResultSchema = z
   .superRefine((r, c) => {
     const expected =
       r.settings.task === "speech"
-        ? r.transcript
+        ? r.transcript || r.speechDetected === false
         : r.settings.task === "audio"
           ? r.audio
           : r.settings.task === "vision"
@@ -177,6 +179,11 @@ export const analysisResultSchema = z
       c.addIssue({
         code: "custom",
         message: "Analysis result is missing its task output",
+      });
+    if (r.speechDetected === false && r.transcript)
+      c.addIssue({
+        code: "custom",
+        message: "No-speech output cannot contain a transcript",
       });
     if (
       r.transcript &&

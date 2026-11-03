@@ -243,3 +243,36 @@ pub async fn sample_subjects(
     finish(&app, &id);
     result?
 }
+
+#[tauri::command]
+pub async fn sample_color(
+    app: AppHandle,
+    id: String,
+    asset_id: String,
+    path: String,
+    range: supp_media::analysis::Range,
+    on_progress: Channel<Progress>,
+) -> Result<supp_media::analysis::color::ColorStats, String> {
+    if !supp_project::valid_id(&asset_id) {
+        return Err("Invalid asset ID".into());
+    }
+    let source = app
+        .state::<Session>()
+        .require(std::path::Path::new(&path))?;
+    let cancel = start(&app, &id)?;
+    let worker = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let cache = worker
+            .path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("color-samples-v1");
+        supp_media::analysis::color::run(&cache, &source, &asset_id, range, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}

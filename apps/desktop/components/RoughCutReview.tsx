@@ -15,6 +15,7 @@ import {
 import { clock } from "../../../packages/engine/clock";
 import { gymStyles } from "../../../packages/ai/rough-cut/styles";
 import { speedAt } from "../../../packages/time-remap/model";
+import type { ReviewOptions } from "../../../packages/ai/rough-cut/planner";
 function MomentThumbnail({ asset, timeMs }: { asset: Asset; timeMs: number }) {
   const [url, setUrl] = useState("");
   useEffect(() => {
@@ -54,6 +55,7 @@ export function RoughCutReview({
     history = useEditor((s) => s.historyNames),
     [error, setError] = useState(""),
     [applied, setApplied] = useState(false),
+    [rebuilding, setRebuilding] = useState(false),
     [frame, setFrame] = useState(0),
     [playing, setPlaying] = useState(false),
     canvas = useRef<HTMLCanvasElement>(null);
@@ -121,19 +123,44 @@ export function RoughCutReview({
       void pending.then(() => renderer.dispose());
     };
   }, [view, seekFrame, playing, end, rate]);
-  function change(ids: string[]) {
+  async function change(
+    ids: string[],
+    disabled?: string[],
+    options?: ReviewOptions,
+  ) {
+    if (rebuilding) return;
+    setRebuilding(true);
+    setPlaying(false);
+    setError("");
     try {
-      onChange(roughCutService.reselect(session, ids));
+      const outcome = await roughCutService.reselect(
+        session,
+        ids,
+        disabled,
+        options,
+      ).finished;
+      if (outcome.state === "Completed") onChange(outcome.result);
+      else if (outcome.state === "Failed") setError(outcome.error);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setRebuilding(false);
     }
   }
   const ids = cut.shots.map((s) => s.candidate.id),
     alternatives = cut.candidates.filter((c) => !ids.includes(c.id));
   return (
     <section className="rough-cut-review" aria-label="Gym edit plan">
-      <h3>{view.name}</h3>
+      <h3>
+        {cut.brief.style ? "Aesthetic gym edit" : "Gym edit plan"} · {view.name}
+      </h3>
       <p>{cut.brief.prompt}</p>
+      {rebuilding && (
+        <p role="status">
+          Updating the framed preview. Progress and cancellation are available
+          in Jobs.
+        </p>
+      )}
       {cut.brief.style && (
         <p>
           Style: {gymStyles[cut.brief.style].name} · {view.settings.width}×
@@ -141,7 +168,18 @@ export function RoughCutReview({
           {cut.shots.filter((s) => s.beatAligned).length} aligned boundaries ·{" "}
           {cut.musicEvents.filter((e) => e.kind === "strong-onset").length}{" "}
           strong measured music events ·{" "}
-          {cut.color.filter((c) => c.length).length} shots with editable color
+          {
+            view.clips.filter((c) => c.effectStack.some((e) => e.enabled))
+              .length
+          }{" "}
+          shots with editable color
+          {" · "}
+          {cut.colorMatchedShots} shots matched from RGB measurements
+          {" · "}
+          {cut.framedShots} framed shots ·{" "}
+          {cut.ramps.filter((r) => r.enabled).length} speed ramps ·{" "}
+          {cut.punchIns.filter((p) => p.enabled).length} punch-ins ·{" "}
+          {cut.framingTreatment}
         </p>
       )}
       <p>
@@ -154,6 +192,16 @@ export function RoughCutReview({
         {cut.beatMap?.bpm ? `${cut.beatMap.bpm.toFixed(1)} BPM` : "unavailable"}{" "}
         · Beat sync: {cut.brief.beatSync}
       </p>
+      {cut.audio && (
+        <p>
+          Audio: {cut.audio.speechClips} spoken shots · {cut.audio.duckedRanges}{" "}
+          speech ranges duck music · {cut.audio.suppressedSources} room-audio
+          clips suppressed · editable fades and gain · peak protection.
+          Captions: {view.clips.filter((c) => c.kind === "text").length}{" "}
+          editable clips
+          {cut.audio.captionStyle ? ` (${cut.audio.captionStyle})` : " · Off"}.
+        </p>
+      )}
       <div className="rough-cut-preview">
         <canvas ref={canvas} aria-label="Gym sequence preview" />
         <label>
@@ -207,6 +255,28 @@ export function RoughCutReview({
                 {shot.placementReason && <p>{shot.placementReason}</p>}
                 {cut.color[i].map((e) => (
                   <p key={e.type}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label={`Enable ${e.type} on shot ${i + 1}`}
+                        disabled={rebuilding || applied || !current}
+                        checked={
+                          !cut.reviewOptions.disabledEffects.includes(
+                            `${c.id}:${e.type}`,
+                          )
+                        }
+                        onChange={() => {
+                          const key = `${c.id}:${e.type}`,
+                            prior = cut.reviewOptions.disabledEffects;
+                          void change(ids, undefined, {
+                            ...cut.reviewOptions,
+                            disabledEffects: prior.includes(key)
+                              ? prior.filter((k) => k !== key)
+                              : [...prior, key],
+                          });
+                        }}
+                      />
+                    </label>{" "}
                     {e.type}: {e.value.toFixed(3)} · {e.reason}
                   </p>
                 ))}
@@ -223,6 +293,28 @@ export function RoughCutReview({
                   {c.diversityScore.toFixed(2)}
                 </p>
               </details>
+              {cut.punchIns
+                .filter((p) => p.candidateId === c.id)
+                .map((p) => (
+                  <label key={p.controllerId}>
+                    <input
+                      type="checkbox"
+                      checked={p.enabled}
+                      disabled={rebuilding || applied || !current}
+                      onChange={() => {
+                        const prior = cut.reviewOptions.disabledPunchIns;
+                        void change(ids, undefined, {
+                          ...cut.reviewOptions,
+                          disabledPunchIns: p.enabled
+                            ? [...prior, c.id]
+                            : prior.filter((id) => id !== c.id),
+                        });
+                      }}
+                    />{" "}
+                    Punch-in +{(p.amount * 100).toFixed(1)}% · independent
+                    controller
+                  </label>
+                ))}
               {cut.ramps
                 .filter((r) => r.candidateId === c.id)
                 .map((r) => (
@@ -231,7 +323,7 @@ export function RoughCutReview({
                       <input
                         type="checkbox"
                         checked={r.enabled}
-                        disabled={applied || !current}
+                        disabled={rebuilding || applied || !current}
                         onChange={() => {
                           const disabled = cut.ramps
                             .filter((x) =>
@@ -240,13 +332,7 @@ export function RoughCutReview({
                                 : !x.enabled,
                             )
                             .map((x) => x.candidateId);
-                          try {
-                            onChange(
-                              roughCutService.reselect(session, ids, disabled),
-                            );
-                          } catch (e) {
-                            setError(String(e));
-                          }
+                          void change(ids, disabled);
                         }}
                       />{" "}
                       Speed ramp
@@ -276,14 +362,14 @@ export function RoughCutReview({
                 ))}
               <button
                 aria-label={`Remove shot ${i + 1}`}
-                disabled={applied || !current || ids.length < 2}
+                disabled={rebuilding || applied || !current || ids.length < 2}
                 onClick={() => change(ids.filter((id) => id !== c.id))}
               >
                 Remove
               </button>
               <button
                 aria-label={`Move shot ${i + 1} earlier`}
-                disabled={applied || !current || i === 0}
+                disabled={rebuilding || applied || !current || i === 0}
                 onClick={() => {
                   const next = [...ids];
                   [next[i - 1], next[i]] = [next[i], next[i - 1]];
@@ -296,7 +382,7 @@ export function RoughCutReview({
                 <select
                   aria-label={`Replace shot ${i + 1}`}
                   value=""
-                  disabled={applied || !current}
+                  disabled={rebuilding || applied || !current}
                   onChange={(e) =>
                     change(ids.map((id, j) => (j === i ? e.target.value : id)))
                   }
@@ -329,7 +415,7 @@ export function RoughCutReview({
       </details>
       <button
         className="primary"
-        disabled={!current || applied}
+        disabled={rebuilding || !current || applied}
         onClick={() => {
           try {
             const s = useEditor.getState();

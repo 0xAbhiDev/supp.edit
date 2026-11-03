@@ -1,5 +1,5 @@
 import { type Project, type Clip } from "../project-schema";
-import { resolveClip } from "../animation";
+import { resolveClip, propertyValue } from "../animation";
 import { canvasMatrix, type Affine } from "../animation/affine";
 import { ResourcePool } from "./resources";
 import { GpuRenderer } from "./gpu";
@@ -140,7 +140,7 @@ export class Compositor {
           const resourceClip = {
             ...c,
             id: layer.resourceId,
-            gain: c.gain + scope.gain,
+            gain: propertyValue(c, "gain", time) + scope.gain,
           };
           try {
             const r = await this.pool.prepare(
@@ -271,7 +271,16 @@ export class Compositor {
               if (effect.type === "blur") {
                 fx.filter = `blur(${effect.value * scale}px)`;
                 fx.drawImage(surface, 0, 0);
-              } else colorEffect(surface, fx, effect.type, effect.value);
+              } else
+                colorEffect(
+                  surface,
+                  fx,
+                  effect.type,
+                  effect.value,
+                  effect.parameters,
+                  scope.frame - l.clip.start,
+                  scale,
+                );
               surface = next;
             }
             if (l.clip.matte) {

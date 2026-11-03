@@ -8,6 +8,7 @@ import { parseEditBrief } from "../rough-cut/model";
 import { rankMoments } from "../rough-cut/planner";
 import { planRevision, revisionTarget } from "./planner";
 import { visualRevision, musicRevision } from "./requests";
+import { audioRevision, planAudioRevision } from "./audio";
 export class RevisionService {
   constructor(readonly analysis: MediaAnalysisService = mediaAnalysis) {}
   plan(
@@ -22,6 +23,35 @@ export class RevisionService {
       scope: project.id,
       run: async (job) => {
         await job.checkpoint();
+        if (audioRevision(request)) {
+          if (
+            !/remove (?:the )?ducking|music louder|original gym sounds/i.test(
+              request,
+            )
+          ) {
+            for (const asset of project.assets.filter(
+              (a) =>
+                a.kind === "video" &&
+                a.hasAudio &&
+                target.layers.some((l) => l.assetId === a.id),
+            )) {
+              await this.analysis.restore(asset);
+              for (const task of ["audio", "speech"] as const)
+                await this.analysis.runTask(
+                  asset,
+                  defaultAnalysisSettings(task),
+                  job,
+                );
+            }
+          }
+          return planAudioRevision(
+            request,
+            project,
+            revision,
+            target.id,
+            this.analysis.getSnapshot(),
+          );
+        }
         const replacement = visualRevision(request);
         const sync = musicRevision(request);
         let evidence;

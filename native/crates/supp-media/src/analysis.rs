@@ -1,5 +1,6 @@
 //! Local, fingerprinted media analysis. Results are data; this crate cannot edit a project.
 pub mod audio;
+pub mod color;
 pub mod speech;
 pub mod video;
 pub mod vision;
@@ -81,6 +82,8 @@ pub struct AnalysisResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcript: Option<supp_project::Transcript>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub speech_detected: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub audio: Option<audio::AudioAnalysis>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video: Option<video::VideoAnalysis>,
@@ -128,9 +131,9 @@ pub fn run(
         Sha256::digest(format!(
             "{VERSION}:{CACHE_REVISION}:{}:{}:{stamp}:{}:{}",
             match settings.task {
-                Task::Speech => crate::models::VERSION,
-                Task::Vision => crate::vision_models::VERSION,
-                _ => "ffmpeg-classical-1",
+                Task::Speech => format!("{}:speech-parser-2", crate::models::VERSION),
+                Task::Vision => crate::vision_models::VERSION.into(),
+                _ => "ffmpeg-classical-1".into(),
             },
             asset.fingerprint,
             asset_id,
@@ -158,15 +161,16 @@ pub fn run(
         duration_ms: (asset.duration * 1000.).round() as u32,
         settings: settings.clone(),
         transcript: None,
+        speech_detected: None,
         audio: None,
         video: None,
         vision: None,
     };
     match settings.task {
         Task::Speech => {
-            result.transcript = Some(speech::transcribe(
-                model_root, &source, &asset, &settings, cancel, &report,
-            )?)
+            result.transcript =
+                speech::transcribe(model_root, &source, &asset, &settings, cancel, &report)?;
+            result.speech_detected = Some(result.transcript.is_some());
         }
         Task::Audio => {
             result.audio = Some(audio::analyze(&source, &asset, &settings, cancel, &report)?)

@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct GrainParameters {
+    pub size: f64,
+    pub softness: f64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Effect {
     pub id: String,
     #[serde(rename = "type")]
@@ -11,6 +17,8 @@ pub struct Effect {
     pub value: f64,
     #[serde(default)]
     pub keys: Vec<Keyframe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<GrainParameters>,
 }
 pub fn validate(stack: &[Effect], visual: bool) -> Result<(), Error> {
     ensure(
@@ -21,16 +29,43 @@ pub fn validate(stack: &[Effect], visual: bool) -> Result<(), Error> {
     )?;
     for e in stack {
         ensure(
-            ["blur", "brightness", "contrast", "saturation"].contains(&e.kind.as_str()),
+            [
+                "blur",
+                "brightness",
+                "contrast",
+                "saturation",
+                "tonalContrast",
+                "temperature",
+                "grain",
+                "vignette",
+                "sharpen",
+            ]
+            .contains(&e.kind.as_str()),
             "Unknown effect type",
         )?;
-        let max = if e.kind == "blur" { 100. } else { 3. };
-        ensure(range(e.value, 0., max), "Invalid effect value")?;
+        let (min, max) = match e.kind.as_str() {
+            "blur" => (0., 100.),
+            "grain" => (0., 0.2),
+            "vignette" => (0., 0.8),
+            "sharpen" => (0., 1.),
+            "temperature" => (-1., 1.),
+            "tonalContrast" => (0.5, 1.5),
+            _ => (0., 3.),
+        };
+        ensure(range(e.value, min, max), "Invalid effect value")?;
+        if let Some(parameters) = &e.parameters {
+            ensure(
+                e.kind == "grain"
+                    && range(parameters.size, 0.5, 8.)
+                    && range(parameters.softness, 0., 1.),
+                "Invalid grain parameters",
+            )?;
+        }
         let mut times = HashSet::new();
         ensure(
             e.keys.len() <= 1000
                 && e.keys.iter().all(|k| {
-                    range(k.value, 0., max)
+                    range(k.value, min, max)
                         && (-2_000_000_000..=2_000_000_000).contains(&k.frame)
                         && times.insert(k.frame)
                         && [
@@ -59,6 +94,31 @@ mod tests {
     use super::*;
     use crate::{read, save, Project};
     #[test]
+    fn finishing_effects_preserve_parameters_and_reject_invalid_ranges() {
+        let mut p: Project =
+            serde_json::from_str(include_str!("../tests/fixtures/parenting-v4.supp")).unwrap();
+        p.schema_version = 10;
+        p.clips[0].effect_stack=serde_json::from_value(serde_json::json!([
+            {"id":"tone","type":"tonalContrast","enabled":true,"value":1.09},
+            {"id":"temp","type":"temperature","enabled":true,"value":-0.2},
+            {"id":"grain","type":"grain","enabled":true,"value":0.025,"parameters":{"size":2.4,"softness":0.75}},
+            {"id":"vignette","type":"vignette","enabled":true,"value":0.12},
+            {"id":"sharp","type":"sharpen","enabled":true,"value":0.08}
+        ])).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("finish.supp");
+        save(&file, &p).unwrap();
+        assert_eq!(
+            serde_json::to_value(read(&file).unwrap()).unwrap(),
+            serde_json::to_value(&p).unwrap()
+        );
+        p.clips[0].effect_stack[2].parameters.as_mut().unwrap().size = 0.;
+        assert!(p.validate().is_err());
+        p.clips[0].effect_stack[2].parameters.as_mut().unwrap().size = 2.4;
+        p.clips[0].effect_stack[2].value = 0.3;
+        assert!(p.validate().is_err());
+    }
+    #[test]
     fn ordered_effects_roundtrip_and_validate() {
         let mut p: Project =
             serde_json::from_str(include_str!("../tests/fixtures/parenting-v4.supp")).unwrap();
@@ -69,12 +129,14 @@ mod tests {
                 enabled: true,
                 value: 2.,
                 keys: vec![],
+                parameters: None,
             },
             Effect {
                 id: "bright".into(),
                 kind: "brightness".into(),
                 enabled: false,
                 value: 0.6,
+                parameters: None,
                 keys: vec![Keyframe {
                     frame: 0,
                     value: 0.2,

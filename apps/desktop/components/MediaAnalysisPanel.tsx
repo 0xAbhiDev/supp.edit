@@ -699,8 +699,12 @@ export function MediaAnalysisPanel() {
             </>
           ) : (
             <p>
-              Transcribe a source to search speech, select timed words, and
-              create editable captions.
+              {own.some(
+                (r) =>
+                  r.settings.task === "speech" && r.speechDetected === false,
+              )
+                ? "No speech was detected in this source. No transcript or captions were invented."
+                : "Transcribe a source to search speech, select timed words, and create editable captions."}
             </p>
           )}
         </div>

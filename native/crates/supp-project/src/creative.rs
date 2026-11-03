@@ -85,10 +85,15 @@ pub struct AiEditMetadata {
     pub brief: EditBrief,
     pub evidence: Vec<Evidence>,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated: Option<Vec<crate::generated::Treatment>>,
 }
 impl AiEditMetadata {
     pub fn validate(&self) -> Result<(), Error> {
         let b = &self.brief;
+        if let Some(values) = &self.generated {
+            crate::generated::validate(values)?;
+        }
         ensure(
             self.planner_version == "rough-cut-1"
                 && (20..=40).contains(&self.created_at.len())

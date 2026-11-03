@@ -68,6 +68,10 @@ export interface PlannedShot {
   placementReason?: string;
   role: "HOOK" | "BUILD" | "PEAK" | "END";
 }
+export interface ReviewOptions {
+  disabledPunchIns: readonly string[];
+  disabledEffects: readonly string[];
+}
 export interface RoughCutPlan {
   plan: EditorPlan;
   shots: PlannedShot[];
@@ -80,6 +84,23 @@ export interface RoughCutPlan {
   musicEvents: MusicEvent[];
   color: ShotTreatment[][];
   ramps: ProposedRamp[];
+  punchIns: {
+    candidateId: string;
+    controllerId: string;
+    amount: number;
+    enabled: boolean;
+  }[];
+  reviewOptions: ReviewOptions;
+  framingTreatment: string;
+  framedShots: number;
+  colorMatchedShots: number;
+  audio?: {
+    speechClips: number;
+    duckedRanges: number;
+    suppressedSources: number;
+    musicGain: number | null;
+    captionStyle: string | null;
+  };
   analyzedAssets: number;
 }
 export function rankMoments(
@@ -305,6 +326,7 @@ export function buildRoughCut(
   beatMap: BeatMap | null,
   selectedIds?: readonly string[],
   disabledRampIds: readonly string[] = [],
+  reviewOptions: ReviewOptions = { disabledPunchIns: [], disabledEffects: [] },
 ): RoughCutPlan {
   const brief = briefSchema.parse(input),
     rate = fps(project),
@@ -426,7 +448,7 @@ export function buildRoughCut(
     );
   if (brief.style)
     warnings.push(
-      "Initial color uses measured luma matching and restrained contrast/saturation. White balance, skin-aware matching, grain, vignette, sharpening, punch-ins and automatic ducking are not included in this pass.",
+      "Initial color uses measured luma matching, restrained tonal contrast/saturation and conservative global grading. White balance matching, skin isolation and automatic ducking are not included in this pass.",
     );
   warnings.push(
     "Exercise identity, equipment type, rep phases, camera shake and occlusion are not verified. Scores are relative ranking signals, not probabilities.",
@@ -511,7 +533,12 @@ export function buildRoughCut(
         clipId,
         curve: ramp.curve,
       });
-    for (const effect of color[index])
+    for (const effect of color[index].filter(
+      (e) =>
+        !reviewOptions.disabledEffects.includes(
+          `${shot.candidate.id}:${e.type}`,
+        ),
+    ))
       commands.push({
         tool: "sequence.effect",
         sequenceId: id,
@@ -519,6 +546,7 @@ export function buildRoughCut(
         effectId: uid(),
         type: effect.type,
         value: effect.value,
+        ...(effect.parameters ? { parameters: effect.parameters } : {}),
       });
     commands.push({
       tool: "sequence.marker",
@@ -564,6 +592,11 @@ export function buildRoughCut(
     musicEvents: events,
     color,
     ramps,
+    punchIns: [],
+    reviewOptions,
+    framingTreatment: "Base camera",
+    framedShots: 0,
+    colorMatchedShots: 0,
     analyzedAssets: evidence.analyzedAssets,
   };
 }

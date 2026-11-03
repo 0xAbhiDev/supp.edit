@@ -3,10 +3,28 @@ import { sourceFrameAt, timeRemapSchema } from "./model";
 /** Only remapped clips pay for the additional source-bound validation at history boundaries. */
 export function assertTimeRemaps(p: Project) {
   const scopes = [{ settings: p.settings, layers: p.clips }, ...p.compositions];
-  if (!scopes.some((s) => s.layers.some((c) => c.timeRemap))) return;
+  if (
+    !scopes.some((s) =>
+      s.layers.some((c) => c.timeRemap || c.keyframes.gain.length),
+    )
+  )
+    return;
   const assets = new Map(p.assets.map((a) => [a.id, a]));
   for (const scope of scopes)
     for (const c of scope.layers) {
+      if (c.keyframes.gain.length) {
+        const asset = assets.get(c.assetId ?? ""),
+          rate = scope.settings.fps.num / scope.settings.fps.den;
+        if (
+          c.kind !== "media" ||
+          !asset ||
+          asset.kind === "image" ||
+          c.duration / rate > 300
+        )
+          throw new Error(
+            "Gain automation requires a video/audio clip up to 5 minutes",
+          );
+      }
       if (!c.timeRemap) continue;
       timeRemapSchema.parse(c.timeRemap);
       const asset = assets.get(c.assetId ?? "");

@@ -34,15 +34,15 @@ AIModelManager tracks ID, name, task, provider ID, size (null means unknown), in
 
 ## Operations and project results
 
-| Operation                         | Result contract                            | Executor / apply adapter                                    |
-| --------------------------------- | ------------------------------------------ | ----------------------------------------------------------- |
-| Transcribe                        | Timestamped transcript                     | Local whisper.cpp CPU; source-bound words/segments          |
-| DetectSilence                     | Source pauses mapped to timeline ranges    | Local PCM/RMS analysis; shared ripple commands               |
-| GenerateCaptions                  | Transcript and timed caption cues          | Local SRT backend; real text clips                          |
-| SegmentSubject / RemoveBackground | Clip/frame mask proposals                  | No inference executor; compositor supports Bezier masks     |
-| TrackObject                       | Existing animation channels and keyframes  | Unavailable                                                 |
-| EnhanceSpeech                     | Opaque native artifact handle and duration | Unavailable                                                 |
-| SemanticSearch                    | Asset IDs, ranges and scores               | Local paired embeddings over analyzed source ranges         |
+| Operation                         | Result contract                            | Executor / apply adapter                                |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------------------- |
+| Transcribe                        | Timestamped transcript                     | Local whisper.cpp CPU; source-bound words/segments      |
+| DetectSilence                     | Source pauses mapped to timeline ranges    | Local PCM/RMS analysis; shared ripple commands          |
+| GenerateCaptions                  | Transcript and timed caption cues          | Local SRT backend; real text clips                      |
+| SegmentSubject / RemoveBackground | Clip/frame mask proposals                  | No inference executor; compositor supports Bezier masks |
+| TrackObject                       | Existing animation channels and keyframes  | Unavailable                                             |
+| EnhanceSpeech                     | Opaque native artifact handle and duration | Unavailable                                             |
+| SemanticSearch                    | Asset IDs, ranges and scores               | Local paired embeddings over analyzed source ranges     |
 
 These are extension contracts, not claims that unsupported processing has run. Segmentation needs a real validated inference executor and command adapter. No provider result is interpreted as chat text saying an edit was completed.
 
@@ -50,7 +50,7 @@ These are extension contracts, not claims that unsupported processing has run. S
 
 ## Context, planning and history
 
-`snapshotContext` explicitly projects project ID/name/revision, sequence ID/dimensions/rate/duration, selected clip/layer IDs, media metadata, transcript summaries, masks and effects. It excludes native paths, media contents, credential values and transcript text. The snapshot is deeply frozen. CompositionContextAdapter defines the active-composition extension. Captions currently target the main sequence; entering AI Studio returns to it.
+`snapshotContext` explicitly projects project ID/name/revision, sequence ID/dimensions/rate/duration, selected clip/layer IDs, media metadata, transcript summaries, masks and effects. It excludes native paths, media contents, credential values and transcript text. The snapshot is deeply frozen. CompositionContextAdapter defines the active-composition extension. Source caption and revision commands target the active sequence; AI Studio retains that sequence.
 
 Flow: command input → allowlisted intent → typed operation/source digest → background job → validated result → preview → explicit Apply → one ordinary History Edit → save/reopen/export.
 
@@ -74,7 +74,23 @@ This frontend gate is not an OS security boundary. A future native transport mus
 
 NativeCredentialStore is an opaque-handle interface only. Implement setup/access in the native host with Windows Credential Manager, macOS Keychain or Linux Secret Service before adding external execution. The webview receives only configured state and references. Never store keys in frontend source, browser storage, project files, logs, presets or job payloads. No credentials or insecure fallback store are introduced here.
 
+## Aesthetic editing and source-time model (in development)
+
+Seven gym profiles feed evidence ranking, ranked hooks, bounded shot scheduling, measured onset/energy events and editable effects. `rough-cut/service.ts` orchestrates cached vision/music analysis, initial source-bound planning, separate five-frame RGB shot matching and dense person-aware camera planning in one shared background job. `sample_color` is LOCAL, reads only session-authorized media, checks source stability and stores small fingerprint/mtime/range-keyed results without invalidating expensive vision/transcript caches. Low-chroma RGB cast is a white-balance proxy, not skin isolation or a measured color temperature; conservative global corrections take precedence when evidence is weak.
+
+Schema v10 adds optional positive speed curves, analytically integrated into source time. All normal edits and silence/caption mappings use this source-time mapping. Native audio resampling follows it; pitch changes with speed. Slow motion repeats decoded frames. No optical flow, synthesized frames or pitch-preserving processing is claimed. The model bounds remapped clips to five minutes and 128 keys. A future pitch-preserving audio stage must be a separate validated runtime.
+
+Framing remains the base clip camera animation. `sequence.punchIn` adds an ordinary null parent/controller, leaving the clip's camera keys intact and exposing independent easing/scale/position/timing through normal editing. All generated operations use the allowlisted command registry and the same atomic preview/History boundary. Review rebuilding is asynchronous and disables Apply until a complete current preview exists.
+
+Ordered finishing effects include deterministic monochrome grain with size/softness, restrained vignette, neighbor-clamped sharpening, signed temperature and endpoint-preserving tonal contrast, with matching native persistence and CPU/GPU render paths. These are real graph data, not flattened AI assets. Speech-aware mix, captions and audio revisions have passed native acceptance. Full aesthetic transitions, remaining revision intents and complete one-prompt acceptance remain open.
+
 ## Future runtime
+
+Speech-aware finishing uses real cached Whisper transcription plus classical silence/energy analysis. Word timestamps remain approximate and are intersected with measured non-silence for ducking; bracket-only non-verbal annotations produce a structured no-speech result. Spoken source ranges retain normal speed. Music-led non-speech source audio is suppressed through editable gain. Normalization is bounded active-RMS gain, not certified LUFS mastering. Gain/fades/ducking are normal keyframes; captions are ordinary text clips. No chat text substitutes for media or timeline state.
+
+The audio channel uses the shared animation contract and history guards. Native export evaluates envelopes on timeline time while resampling source time, then applies static ancestor/clip gain exactly once. Decode-before-trim avoids AAC priming loss from input seeking. Playback uses a hard peak guard; export uses FFmpeg lookahead limiting without automatic makeup. Their peak behavior is deliberately not described as sample-identical. Pitch-preserving time stretch remains a separate future runtime.
+
+Bounded `ai.generated` treatment snapshots record generated gain/scale/speed/effects. They contain no executable commands. Revision planners compare these to current values and retain manual key changes; the baseline is updated only with the next generated proposal, so a manual edit is not silently reclassified as AI-owned. Every revision previews and applies an allowlisted normal History command. The current five audio intents operate on the active sequence and reuse source caches. The newer Universal Reel Engine roadmap continues through typography, reference characterization and sound/tracking/masks; these are not yet advertised as implemented.
 
 Inference belongs in bounded native workers off the UI thread. Explicit model installation must disclose size/license/source, verify a trusted manifest and digest, support cancellation and atomically publish installation state. Distinguish advertised acceleration from a successful runtime probe. Providers must declare supported tasks/memory, validate result artifacts and preserve provenance. Build compositor masks/layers/effect commands before enabling AI tasks that require them. There is no automatic installation path.
 
@@ -89,3 +105,9 @@ The precise LOCAL interpreter handles effect/move/trim requests. “Set contrast
 Context now also includes selected layer timing and the requested frame. AI Studio displays the plan, a rendered preview, Create edit, normal Undo and actual job state. The original SRT caption workflow remains functional. The full autonomous-editor acceptance scenario in docs/AUTONOMOUS_AI_EDITOR.md remains open.
 
 The native MediaAnalysisService now executes real speech/audio/video analysis; the model registry receives actual installation and download events from the native host. The original generic provider/credential contracts remain available for future runtimes. No cloud transport exists.
+
+## Accepted speech-aware audio boundary
+
+Speech-aware audio acceptance PASSED on 3 November 2026. Full native Preview → Apply → Undo → Redo → Save → complete process exit → relaunch/reopen → resave → Deliver export. All compositions/transcripts survived exactly. Five captions, one transcript, eleven music gain keys and manual frame-90 −17.25 dB key remain. Ducking was removed and restored around three measured speech regions. Actual UI export test-results/audio-mix/render.mp4 (copied to NATIVE_AUDIO.mp4) has 300 frames/10s, H.264/AAC, zero black frames, channel peak 0.96236. Its decoded stereo audio is byte-identical to the independently verified timeline mix. Early and late source-only speech have zero lag and >0.99999 correlation. No tolerance relaxation or hardcoded offset. See scripts/verify-native-audio.mjs and test-results/audio-mix/native-verification.json. No pitch-preserving time stretching is claimed.
+
+Active-RMS normalization and peak protection are bounded editing tools, not LUFS mastering certification. Next subsystem: kinetic typography must use ordinary editable layers/animation and guarded History commands, timing from actual transcripts or measured musical events, and explicit social-safe bounds. Background text placement does not imply segmentation or text behind a person. Native rendered animation and full close/reopen are required for acceptance.

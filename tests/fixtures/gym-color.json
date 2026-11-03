@@ -1,0 +1,104 @@
+[
+  {
+    "assetId": "gym-fixture-bench",
+    "fingerprint": "\\\\?\\C:\\Users\\wwwab\\Documents\\Codex\\2026-10-19\\files-pasted-by-the-user-supp\\outputs\\supp-edit\\work\\gym\\bench.webm:389315:1793354702",
+    "cacheKey": "1999483010f83b4fa2e88fb463638d8e050f65cbc069f7ca254d8b5afae6115a",
+    "algorithm": "color-samples-1",
+    "processing": "LOCAL",
+    "range": {
+      "startMs": 0,
+      "endMs": 3000
+    },
+    "meanLuma": 0.3521017417392962,
+    "contrastStd": 0.17446729421309326,
+    "meanSaturation": 0.22417625633087837,
+    "neutralTemperature": 0.05586422901274898,
+    "neutralFraction": 0.31882716049382714,
+    "sampleCount": 5
+  },
+  {
+    "assetId": "gym-fixture-deadlift",
+    "fingerprint": "\\\\?\\C:\\Users\\wwwab\\Documents\\Codex\\2026-10-19\\files-pasted-by-the-user-supp\\outputs\\supp-edit\\work\\gym\\deadlift.webm:446868:1793354702",
+    "cacheKey": "c3a5cb719719053c94cce76344988d15e90a025feb7ecb196d95ea717b44b520",
+    "algorithm": "color-samples-1",
+    "processing": "LOCAL",
+    "range": {
+      "startMs": 0,
+      "endMs": 3000
+    },
+    "meanLuma": 0.35217330422416643,
+    "contrastStd": 0.1733375514634726,
+    "meanSaturation": 0.22899481109379052,
+    "neutralTemperature": 0.058495505233075826,
+    "neutralFraction": 0.3508101851851852,
+    "sampleCount": 5
+  },
+  {
+    "assetId": "gym-fixture-incline",
+    "fingerprint": "\\\\?\\C:\\Users\\wwwab\\Documents\\Codex\\2026-10-19\\files-pasted-by-the-user-supp\\outputs\\supp-edit\\work\\gym\\incline.webm:442648:1793354703",
+    "cacheKey": "e1f7a03819b0c92cab91be90b77c061b2b35333b9e4f0ed301b334fac96559be",
+    "algorithm": "color-samples-1",
+    "processing": "LOCAL",
+    "range": {
+      "startMs": 0,
+      "endMs": 3000
+    },
+    "meanLuma": 0.3236879475913695,
+    "contrastStd": 0.1896724080213563,
+    "meanSaturation": 0.24027377632284885,
+    "neutralTemperature": 0.06067277192791364,
+    "neutralFraction": 0.3005787037037037,
+    "sampleCount": 5
+  },
+  {
+    "assetId": "gym-fixture-row",
+    "fingerprint": "\\\\?\\C:\\Users\\wwwab\\Documents\\Codex\\2026-10-19\\files-pasted-by-the-user-supp\\outputs\\supp-edit\\work\\gym\\row.webm:376097:1793354704",
+    "cacheKey": "82666c7c1e4f627b5643ca42ed51eb5db005f13f769173577359d5a2631a9e81",
+    "algorithm": "color-samples-1",
+    "processing": "LOCAL",
+    "range": {
+      "startMs": 0,
+      "endMs": 3000
+    },
+    "meanLuma": 0.36256425254177166,
+    "contrastStd": 0.16760152432963585,
+    "meanSaturation": 0.204313773822349,
+    "neutralTemperature": 0.053662293810773073,
+    "neutralFraction": 0.38549382716049385,
+    "sampleCount": 5
+  },
+  {
+    "assetId": "gym-fixture-squat",
+    "fingerprint": "\\\\?\\C:\\Users\\wwwab\\Documents\\Codex\\2026-10-19\\files-pasted-by-the-user-supp\\outputs\\supp-edit\\work\\vision\\squat.webm:2255213:1793288283",
+    "cacheKey": "7c853bab56b8291a54ff1e51c364b7e6272d95e7156be769a1bc67ce986755de",
+    "algorithm": "color-samples-1",
+    "processing": "LOCAL",
+    "range": {
+      "startMs": 0,
+      "endMs": 3000
+    },
+    "meanLuma": 0.43703072606510585,
+    "contrastStd": 0.26922312397627074,
+    "meanSaturation": 0.31348897603407977,
+    "neutralTemperature": -0.005976076694799008,
+    "neutralFraction": 0.07797067901234568,
+    "sampleCount": 5
+  },
+  {
+    "assetId": "non-gym-flower",
+    "fingerprint": "\\\\?\\C:\\Users\\wwwab\\Documents\\Codex\\2026-10-19\\files-pasted-by-the-user-supp\\outputs\\supp-edit\\work\\flower.mp4:1128375:1792521147",
+    "cacheKey": "7296dbc3ee2d8fdfaeb083212c149a99833bda3bb44ea27a5c49da2f54cb6145",
+    "algorithm": "color-samples-1",
+    "processing": "LOCAL",
+    "range": {
+      "startMs": 0,
+      "endMs": 3000
+    },
+    "meanLuma": 0.3854964877753624,
+    "contrastStd": 0.18235185466996146,
+    "meanSaturation": 0.5238790045387202,
+    "neutralTemperature": 0.05853509901277979,
+    "neutralFraction": 0.055324074074074074,
+    "sampleCount": 5
+  }
+]
