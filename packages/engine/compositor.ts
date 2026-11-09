@@ -1,3 +1,5 @@
+import {textSurface} from "./text-surface";
+import {LruCache} from "./lru";
 import { type Project, type Clip } from "../project-schema";
 import { resolveClip, propertyValue } from "../animation";
 import { canvasMatrix, type Affine } from "../animation/affine";
@@ -16,6 +18,7 @@ import { canvasBlend, type BlendMode } from "../compositing/model";
 import { resolvedEffects } from "../effects/evaluate";
 import { colorEffect } from "./effects-cpu";
 export class Compositor {
+  private textSurfaces=new LruCache<string,ReturnType<typeof textSurface>>(32*1024*1024,24);
   readonly pool: ResourcePool;
   private gpu: GpuRenderer | null = null;
   private cancelled = false;
@@ -455,14 +458,10 @@ export class Compositor {
       ctx.clip();
     }
     if (c.kind === "text") {
-      ctx.font = `${c.text.weight} ${c.text.size}px ${c.text.font}`;
-      ctx.fillStyle = c.text.color;
-      ctx.textAlign = c.text.align;
-      ctx.textBaseline = "middle";
-      const lines = c.text.content.split("\n");
-      lines.forEach((line, i) =>
-        ctx.fillText(line, 0, (i - (lines.length - 1) / 2) * c.text.size * 1.2),
-      );
+      const key=JSON.stringify([c.text,resolution]);
+      let surface=this.textSurfaces.get(key);
+      if(!surface){surface=textSurface(c.text,resolution);this.textSurfaces.set(key,surface,surface.canvas.width*surface.canvas.height*4);}
+      ctx.drawImage(surface.canvas,surface.left,surface.top,surface.width,surface.height);
     } else if (c.kind === "shape") {
       ctx.fillStyle = c.shape.color;
       ctx.beginPath();
@@ -511,6 +510,7 @@ export class Compositor {
     ctx.restore();
   }
   dispose() {
+    this.textSurfaces.clear();
     for (const c of this.matteSurfaces.values()) c.width = c.height = 0;
     this.matteSurfaces.clear();
     this.matteCoverage.dispose();

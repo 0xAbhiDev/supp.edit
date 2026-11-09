@@ -1,3 +1,9 @@
+# Editable kinetic typography
+
+The local typography planner intersects source-fingerprinted transcript or music events with source trim and the inverse speed curve. Timing can also come from cut boundaries, speed keys and the opening shot. The planner scores safe bands against transformed, sampled person boxes and weights the upper 35 percent of each box as a conservative head-region estimate. A review flags residual overlap. Transcript words retain their local frame offsets when changing presets.
+
+The text.create command authors standard text clips. Layout, active-word emphasis, rounded background, stroke and shadow share a glyph surface across Canvas and WebGL. Twenty treatments use ordinary editable animation channels. Preview is revision-guarded. Apply, manual edits and Undo use project history, and Rust project IO persists the same text fields and curves. The reference engine should reuse these commands for editable generated text.
+
 # AI Studio foundation
 
 ## Editable portrait reframing

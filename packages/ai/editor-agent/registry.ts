@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {typographyCommandSchema,createTypography} from "../../typography/commands";
 import {
   type Project,
   type AnimatedProperty,
@@ -48,6 +49,7 @@ const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  typographyCommandSchema,
   z.object({ tool: z.literal("sequence.remember"), sequenceId: id }).strict(),
   treatmentRevisionSchema
     .extend({ tool: z.literal("sequence.treatment") })
@@ -326,6 +328,7 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
+  if(call.tool === "text.create") return createTypography(call);
   if (call.tool === "sequence.punchIn")
     return inComposition(
       call.sequenceId,

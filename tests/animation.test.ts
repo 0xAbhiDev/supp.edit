@@ -139,7 +139,7 @@ describe("shared animation engine", () => {
     expect(() =>
       h.execute(p, "invalid audio", enableAnimation(id, "gain", true, 0)),
     ).toThrow(/media clip/);
-    for (const key of propertyNames.filter((k) => k !== "gain")) {
+    for (const key of propertyNames.filter((k) => !["gain","tracking","reveal","highlight"].includes(k))) {
       p = h.execute(p, "enable", enableAnimation(id, key, true, 0));
       p = h.execute(p, "set", setProperty(id, key, 0.5, 50));
       expect(p.clips[0].keyframes[key]).toHaveLength(2);

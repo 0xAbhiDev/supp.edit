@@ -4,12 +4,15 @@ export const properties: Record<
   AnimatedProperty,
   {
     label: string;
-    group: "transform" | "effects" | "crop" | "audio";
+    group: "transform" | "effects" | "crop" | "text" | "audio";
     min: number;
     max: number;
     step: number;
   }
 > = {
+  tracking: {label:"Tracking",group:"text",min:-10,max:100,step:0.5},
+  reveal: {label:"Text reveal",group:"text",min:0,max:1,step:0.01},
+  highlight: {label:"Highlighted word",group:"text",min:-1,max:10000,step:1},
   gain: { label: "Gain (dB)", group: "audio", min: -60, max: 12, step: 0.5 },
   x: {
     label: "Position X",
@@ -103,7 +106,7 @@ export function clampValue(key: AnimatedProperty, value: number) {
 export function baseValue(clip: Clip, key: AnimatedProperty): number {
   if (key === "gain") return clip.gain;
   const group = clip[
-    properties[key].group as "transform" | "effects" | "crop"
+    properties[key].group as "transform" | "effects" | "crop" | "text"
   ] as Record<string, number>;
   return group?.[key] ?? (key.startsWith("scale") ? 1 : 0);
 }
@@ -113,7 +116,7 @@ export function writeBase(clip: Clip, key: AnimatedProperty, value: number) {
     return;
   }
   (
-    clip[properties[key].group as "transform" | "effects" | "crop"] as Record<
+    clip[properties[key].group as "transform" | "effects" | "crop" | "text"] as Record<
       string,
       number
     >
@@ -266,6 +269,7 @@ export function resolveClip(clip: Clip, frame: number): Clip {
     transform: { ...clip.transform },
     effects: { ...clip.effects },
     crop: { ...clip.crop },
+    text: { ...clip.text },
   };
   for (const key of propertyNames)
     writeBase(resolved, key, propertyValue(clip, key, frame));

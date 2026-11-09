@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {typographyRequest} from "../../../packages/typography/planner";
+import {typographyService} from "../../../packages/typography/service";
+import {SequencePreview} from "./SequencePreview";
 import { useEditor } from "../../../packages/editor-state";
 import { aiEditorAgent } from "../../../packages/ai/editor-agent/agent";
 import {
@@ -89,6 +92,15 @@ export function AIEditBox() {
             "The latest project edit is not an AI revision; use normal Undo to review intervening edits",
           );
         s.undo();
+        return;
+      }
+      if (typographyRequest.test(request)) {
+        const handle=typographyService.plan(request,project,revision,scope);
+        setJobId(handle.id);
+        const outcome=await handle.finished;
+        if(token!==generation.current)return;
+        if(outcome.state==="Completed")setPreview(outcome.result);
+        else if(outcome.state==="Failed")setError(outcome.error);
         return;
       }
       if (reframeRequest.test(request)) {
@@ -262,7 +274,7 @@ export function AIEditBox() {
                   <li key={i}>
                     {c.tool === "sequence.revise"
                       ? `${c.changes.length} layer ranges changed · ${c.remove.length} layers removed · ${(c.duration / (project.compositions.find((s) => s.id === c.sequenceId)!.settings.fps.num / project.compositions.find((s) => s.id === c.sequenceId)!.settings.fps.den)).toFixed(2)} seconds`
-                      : c.tool}
+                      : c.tool === "text.create" ? `${c.content} · ${c.treatment} · ${c.timing} · frame ${c.start}` : c.tool}
                     {"clipId" in c ? ` · ${c.clipId}` : ""}
                   </li>
                 ))}
@@ -286,13 +298,13 @@ export function AIEditBox() {
                 <p>Project changed. Preview again before applying.</p>
               )}
             </div>
-            <figure>
+            {preview.plan.commands.some(c=>c.tool==="text.create") ? <SequencePreview project={compositionView(preview.project,preview.plan.compositionId)} /> : <figure>
               <canvas ref={canvas} aria-label="Proposed edit preview" />
               <figcaption>
                 Proposed project frame · original project remains unchanged
                 until Create edit
               </figcaption>
-            </figure>
+            </figure>}
           </div>
         )
       )}

@@ -14,6 +14,7 @@ pub mod effect_stack;
 pub mod generated;
 pub mod masks;
 pub mod time_remap;
+mod typography;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -265,6 +266,8 @@ pub struct Mask {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Text {
+    #[serde(flatten)]
+    pub typography: typography::Typography,
     pub content: String,
     pub size: f64,
     pub color: String,
@@ -648,6 +651,9 @@ impl Project {
                         [
                             "rotation",
                             "gain",
+                            "tracking",
+                            "reveal",
+                            "highlight",
                             "scaleX",
                             "scaleY",
                             "anchorX",
@@ -798,6 +804,7 @@ impl Project {
                         "Invalid mask",
                     )?;
                 }
+                typography::validate(&c.text)?;
                 ensure(
                     c.text.content.len() <= 40000
                         && range(c.text.size, 6., 1000.)
@@ -808,8 +815,17 @@ impl Project {
                 ensure(
                     color(&c.text.color)
                         && color(&c.shape.color)
-                        && ["sans-serif", "serif", "monospace"].contains(&c.text.font.as_str())
-                        && ["normal", "bold"].contains(&c.text.weight.as_str())
+                        && !c.text.font.is_empty()
+                        && c.text.font.len() <= 512
+                        && c.text
+                            .font
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || " _,-".contains(c))
+                        && [
+                            "normal", "bold", "100", "200", "300", "400", "500", "600", "700",
+                            "800", "900",
+                        ]
+                        .contains(&c.text.weight.as_str())
                         && ["left", "center", "right"].contains(&c.text.align.as_str())
                         && ["rectangle", "ellipse"].contains(&c.shape.kind.as_str()),
                     "Invalid typography or shape style",

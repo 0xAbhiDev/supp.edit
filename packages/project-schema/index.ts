@@ -1,3 +1,4 @@
+import { textSchema } from "../typography/model";
 import { blendModes, matteSchema, assertMattes } from "../compositing/model";
 import { z } from "zod";
 import { transcriptSchema } from "../ai/transcript";
@@ -86,6 +87,9 @@ export const clipSchema = z.object({
     scale: z.array(keyframeSchema).max(10000),
     opacity: z.array(keyframeSchema).max(10000),
     gain: channel(),
+    tracking: channel(),
+    reveal: channel(),
+    highlight: channel(),
     rotation: channel(),
     scaleX: channel(),
     scaleY: channel(),
@@ -111,14 +115,7 @@ export const clipSchema = z.object({
       height: finite.min(0.001).max(1),
     })
     .nullable(),
-  text: z.object({
-    content: z.string().max(10000),
-    size: finite.min(6).max(1000),
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-    font: z.enum(["sans-serif", "serif", "monospace"]),
-    weight: z.enum(["normal", "bold"]),
-    align: z.enum(["left", "center", "right"]),
-  }),
+  text: textSchema,
   shape: z.object({
     type: z.enum(["rectangle", "ellipse"]),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
@@ -425,6 +422,14 @@ export function newTrack(kind: Track["kind"], index: number): Track {
     solo: false,
   };
 }
+const defaultText=textSchema.parse({
+      content: "Your title",
+      size: 96,
+      color: "#ffffff",
+      font: "sans-serif",
+      weight: "bold",
+      align: "center",
+});
 export function newClip(
   trackId: string,
   start: number,
@@ -462,14 +467,7 @@ export function newClip(
     }),
     masks: [],
     mask: null,
-    text: {
-      content: "Your title",
-      size: 96,
-      color: "#ffffff",
-      font: "sans-serif",
-      weight: "bold",
-      align: "center",
-    },
+    text: {...defaultText,emphasis:[]},
     shape: { type: "rectangle", color: "#c3f96b", width: 480, height: 270 },
   };
 }

@@ -1,3 +1,12 @@
+# Current state — native kinetic typography accepted
+
+Native kinetic typography acceptance passed on the corrected 1080×1920, 12-second Reel. The 360-frame H.264/AAC file decodes with mono RMS 0.19034. Four text layers remain editable. Native Preview, Apply, Undo/Redo, manual 68.5 px size and 0.845 entrance scale, full process exit and reopen were exercised. After the first export exposed face overlap, the planner weighted upper-body overlap and refit the existing titles through ordinary commands, preserving their other edits. A freshly launched native app reopened and resaved the corrected project exactly and exported it. Twelve decoded samples average 3.13/255 error relative to the text compositor and 119.58/255 against the same frames with text removed. The row title clears the athlete’s face. See test-results/typography-reviewed/render.mp4, NATIVE.supp, contact.png, native-verification.json and scripts/verify-native-typography.mjs.
+
+All twenty treatments passed native decoded-frame verification in the 600-frame showcase. CPU/GPU parity covered 120 samples, maximum per-channel mean absolute error 0.363/255. Recorded-speech karaoke was rendered separately with transcript word timestamps. The gym source clips in the combined Reel contain no speech. Audio checkpoint 87541c2 remains accepted.
+
+Next: the Reference-to-Edit attachment 4d8c8375-f3c7-47ba-a500-b793ef50341f governs the flagship workflow. Use separate reference and raw inputs, extract measured editing characteristics, and apply them to the raw sources through normal project commands. Validate each genre through native export.
+
+## Earlier checkpoints
 # Current state — speech-aware audio acceptance complete
 
 Latest current-tree audio-export follow-up governs. Portrait, profile and speed checkpoints remain accepted. Next is actual editable kinetic typography through native export and full app close/reopen. Full aesthetic/universal acceptance remains open.

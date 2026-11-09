@@ -1,3 +1,4 @@
+import {textSurface} from "./text-surface";
 import type { Clip, Project } from "../project-schema";
 import { resolveClip } from "../animation";
 import {
@@ -295,31 +296,17 @@ export class GpuRenderer {
     ]);
     const cached = this.generators.get(key);
     if (cached) return cached;
+    if(c.kind==="text"){
+      const value=textSurface(c.text,this.width/p.settings.width);
+      this.generators.set(key,value,value.canvas.width*value.canvas.height*4);
+      return value;
+    }
     const canvas = document.createElement("canvas"),
       ctx = canvas.getContext("2d")!;
     let width = c.shape.width,
       height = c.shape.height,
       left = -width / 2,
       top = -height / 2;
-    if (c.kind === "text") {
-      ctx.font = `${c.text.weight} ${c.text.size}px ${c.text.font}`;
-      width =
-        Math.max(
-          1,
-          ...c.text.content
-            .split("\n")
-            .map((line) => ctx.measureText(line).width),
-        ) + 8;
-      height =
-        Math.max(1, c.text.content.split("\n").length) * c.text.size * 1.2 + 8;
-      left =
-        c.text.align === "left"
-          ? -4
-          : c.text.align === "right"
-            ? -width + 4
-            : -width / 2;
-      top = -height / 2;
-    }
     const scale = Math.min(
       1,
       4096 / width,
@@ -330,16 +317,7 @@ export class GpuRenderer {
     canvas.height = Math.max(1, Math.ceil(height * scale));
     ctx.scale(scale, scale);
     ctx.translate(-left, -top);
-    if (c.kind === "text") {
-      ctx.font = `${c.text.weight} ${c.text.size}px ${c.text.font}`;
-      ctx.fillStyle = c.text.color;
-      ctx.textAlign = c.text.align;
-      ctx.textBaseline = "middle";
-      const lines = c.text.content.split("\n");
-      lines.forEach((line, i) =>
-        ctx.fillText(line, 0, (i - (lines.length - 1) / 2) * c.text.size * 1.2),
-      );
-    } else {
+    {
       ctx.fillStyle = c.shape.color;
       ctx.beginPath();
       if (c.shape.type === "ellipse")

@@ -365,13 +365,13 @@ function Curves({ clip }: { clip: Clip }) {
       }}
     >
       <div className="animation-properties">
-        {(["transform", "effects", "crop", "audio"] as const)
+        {(["transform", "effects", "crop", "audio", "text"] as const)
           .filter((group) => group !== "audio" || clip.kind === "media")
           .map((group) => (
             <details key={group} open={group === "transform"}>
               <summary>{group}</summary>
               {propertyNames
-                .filter((p) => properties[p].group === group)
+                .filter((p) => properties[p].group === group && (group !== "text" || clip.kind === "text"))
                 .map((p) => (
                   <div
                     key={p}

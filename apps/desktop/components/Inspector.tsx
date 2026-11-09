@@ -1,4 +1,5 @@
 import { propertyValue } from "../../../packages/animation";
+import {TypographyControls} from "./TypographyControls";
 import { useState } from "react";
 import {
   parentCandidates,
@@ -217,6 +218,7 @@ export function Inspector() {
           )}
           {clip.kind === "text" && (
             <Section title="Typography">
+              <TypographyControls key={clip.id} clip={clip}/>
               <textarea
                 aria-label="Title text"
                 value={clip.text.content}
@@ -242,6 +244,7 @@ export function Inspector() {
                     <option value="sans-serif">Sans serif</option>
                     <option value="serif">Serif</option>
                     <option value="monospace">Monospace</option>
+                    {["Arial", "Arial Black", "Impact", "Georgia", "Segoe UI", "Times New Roman"].map(f=><option key={f}>{f}</option>)}
                   </select>
                 </label>
                 <label>
@@ -257,6 +260,7 @@ export function Inspector() {
                   >
                     <option value="bold">Bold</option>
                     <option value="normal">Regular</option>
+                    {["100","200","300","400","500","600","700","800","900"].map(w=><option key={w}>{w}</option>)}
                   </select>
                 </label>
               </div>
