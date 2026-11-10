@@ -276,3 +276,45 @@ pub async fn sample_color(
     finish(&app, &id);
     result?
 }
+#[tauri::command]
+pub async fn reference_motion(
+    app: AppHandle,
+    id: String,
+    path: String,
+    on_progress: Channel<Progress>,
+) -> Result<Vec<supp_media::analysis::reference::Motion>, String> {
+    let source = app
+        .state::<Session>()
+        .require(std::path::Path::new(&path))?;
+    let cancel = start(&app, &id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::analysis::reference::run(&source, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+#[tauri::command]
+pub async fn reference_text(
+    app: AppHandle,
+    id: String,
+    path: String,
+    on_progress: Channel<Progress>,
+) -> Result<Vec<supp_media::analysis::reference_text::TextAppearance>, String> {
+    let source = app
+        .state::<Session>()
+        .require(std::path::Path::new(&path))?;
+    let cancel = start(&app, &id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::analysis::reference_text::run(&source, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}

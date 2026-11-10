@@ -16,9 +16,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if asset.kind != "video" {
             continue;
         }
+        let max_seconds = if args.get(3).map(String::as_str) == Some("--reference") {
+            300.
+        } else {
+            3.
+        };
         let range = supp_media::analysis::Range {
             start_ms: 0,
-            end_ms: (asset.duration.min(3.) * 1000.).floor() as u32,
+            end_ms: (asset.duration.min(max_seconds) * 1000.).floor() as u32,
         };
         results.push(supp_media::analysis::color::run(
             &root.join("color-cache"),

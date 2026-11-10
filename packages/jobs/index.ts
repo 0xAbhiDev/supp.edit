@@ -4,6 +4,7 @@ export interface JobProgress {
   completed: number;
   total: number;
   unit: string;
+  detail?: string;
 }
 export interface JobSnapshot {
   readonly id: string;

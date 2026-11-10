@@ -95,8 +95,10 @@ impl AiEditMetadata {
             crate::generated::validate(values)?;
         }
         ensure(
-            self.planner_version == "rough-cut-1"
-                && (20..=40).contains(&self.created_at.len())
+            matches!(
+                self.planner_version.as_str(),
+                "rough-cut-1" | "reference-edit-1"
+            ) && (20..=40).contains(&self.created_at.len())
                 && self.created_at.contains('T')
                 && self.created_at.ends_with('Z'),
             "Invalid creative plan provenance",

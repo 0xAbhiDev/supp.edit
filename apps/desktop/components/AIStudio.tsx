@@ -9,6 +9,7 @@ import { MAX_SRT_BYTES } from "../../../packages/ai/srt";
 import "./ai-studio.css";
 import { AIEditBox } from "./AIEditBox";
 import { MediaAnalysisPanel } from "./MediaAnalysisPanel";
+import { ReferenceEditor } from "./ReferenceEditor";
 
 export function AIStudio() {
   const project = useEditor((s) => s.project),
@@ -84,6 +85,7 @@ export function AIStudio() {
         </div>
         <span className="ai-local">LOCAL · No media upload</span>
       </header>
+      <ReferenceEditor key={project.id}/>
       <AIEditBox />
       {!!sequence?.revisions?.length && (
         <details>

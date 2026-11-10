@@ -1,3 +1,9 @@
+# Reference-to-Edit
+
+The local reference service schedules evidence extraction and source matching. A stage count stays monotonic while its detail identifies the actual operation. Style DNA stores shot timing, measured luma and color, framing, motion, cadence holds, OCR geometry and music evidence. Reference media is a read-only analysis input. The matcher allocates disjoint source windows inside real raw scenes. It scores visibility, local motion, subject/framing compatibility, timing and continuity. Smart Adaptation varies holds with measured relative motion. Creative Remix changes rhythmic contrast and favors visible action. Plans insert only selected raw and audio assets into an independently editable composition through guarded editor commands.
+
+The matching engine, compositor and native encoder can be tested independently. `scripts/capture-reference-analysis.mjs` measures local files, `tests/e2e/reference-edit.spec.ts` exercises the UI, and `scripts/render-reference-sequence.mjs` round-trips a project through native storage before exporting it. `scripts/compare-reference-edit.mjs` decodes frames and maps them to corresponding reference times. Exact original time-remap curves, fonts, proprietary graphic assets and unobserved transitions cannot be recovered from these measurements.
+
 # Editable kinetic typography
 
 The local typography planner intersects source-fingerprinted transcript or music events with source trim and the inverse speed curve. Timing can also come from cut boundaries, speed keys and the opening shot. The planner scores safe bands against transformed, sampled person boxes and weights the upper 35 percent of each box as a conservative head-region estimate. A review flags residual overlap. Transcript words retain their local frame offsets when changing presets.

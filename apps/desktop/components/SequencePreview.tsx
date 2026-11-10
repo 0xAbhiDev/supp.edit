@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { type Project, fps, duration } from "../../../packages/project-schema";
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock } from "../../../packages/engine/clock";
-export function SequencePreview({ project }: { project: Project }) {
+export function SequencePreview({ project, onFrame }: { project: Project; onFrame?: (frame:number)=>void }) {
   const canvas = useRef<HTMLCanvasElement>(null),
     position = useRef(0);
   const [frame, setFrame] = useState(0),
@@ -12,6 +12,7 @@ export function SequencePreview({ project }: { project: Project }) {
     rate = fps(project),
     end = duration(project);
   position.current = frame;
+  useEffect(()=>{onFrame?.(frame)},[frame,onFrame]);
   useEffect(() => {
     if (!canvas.current || !end) return;
     let disposed = false;

@@ -28,7 +28,7 @@ export function musicRequested(request: string) {
   return ["music-event", "energy-change"].includes(timingMode(request));
 }
 /** Choose an uncluttered top/bottom safe band using cached, transformed person boxes. */
-function placement(
+export function placement(
   p: Project,
   start: number,
   end: number,

@@ -30,6 +30,7 @@ export const typographyCommandSchema = z
       "manual",
     ]),
     cueFrame: frame.optional(),
+    maxFontSize: z.number().finite().min(6).max(1000).optional(),
     y: z.number().finite().min(-32768).max(32768).optional(),
   })
   .strict();
@@ -67,6 +68,7 @@ export function createTypography(
       p.settings.height,
       call.treatment,
     );
+    if (call.maxFontSize !== undefined) c.text.size=Math.min(c.text.size,call.maxFontSize);
     if (call.y !== undefined) c.transform.y = call.y;
     fitTextVertically(c, p.settings.width, p.settings.height);
     animateText(c, call.treatment, fps(p), call.wordStarts);

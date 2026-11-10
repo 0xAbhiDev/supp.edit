@@ -60,6 +60,8 @@ fn main() {
             analysis::embed_vision_query,
             analysis::sample_subjects,
             analysis::sample_color,
+            analysis::reference_motion,
+            analysis::reference_text,
             render::begin_export,
             render::write_frame,
             render::finish_export,

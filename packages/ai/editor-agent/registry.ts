@@ -5,6 +5,7 @@ import {
   type AnimatedProperty,
   interpolationModes,
   settingsSchema,
+  newTrack,
 } from "../../project-schema";
 import { type Edit, moveClip, trimClip, deleteClip } from "../../commands";
 import {
@@ -50,6 +51,8 @@ const id = z.string().min(1).max(128),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
   typographyCommandSchema,
+  typographyCommandSchema.extend({tool:z.literal("sequence.text"),sequenceId:id}).strict(),
+  z.object({tool:z.literal("sequence.audioTrack"),sequenceId:id,trackId:id,name:z.string().min(1).max(64)}).strict(),
   z.object({ tool: z.literal("sequence.remember"), sequenceId: id }).strict(),
   treatmentRevisionSchema
     .extend({ tool: z.literal("sequence.treatment") })
@@ -125,7 +128,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       tool: z.literal("sequence.keyframe"),
       sequenceId: id,
       clipId: id,
-      property: z.enum(["x", "y", "scale", "gain"]),
+      property: z.enum(["x", "y", "scale", "gain", "opacity"]),
       value,
       frame,
       easing: z.enum(interpolationModes),
@@ -328,6 +331,10 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
+  if(call.tool==="sequence.text") {
+    const {sequenceId,...text}=call;
+    return inComposition(sequenceId,createTypography({...text,tool:"text.create"}));
+  }
   if(call.tool === "text.create") return createTypography(call);
   if (call.tool === "sequence.punchIn")
     return inComposition(
@@ -372,6 +379,13 @@ export function toolEdit(input: unknown): Edit {
     }
     if (call.tool === "sequence.create") {
       createSequence(call)(p);
+      return;
+    }
+    if(call.tool==="sequence.audioTrack"){
+      inComposition(call.sequenceId,draft=>{
+        if(draft.tracks.some(t=>t.id===call.trackId))throw Error("Track already exists");
+        draft.tracks.push({...newTrack("audio",draft.tracks.length+1),id:call.trackId,name:call.name});
+      })(p);
       return;
     }
     if (call.tool === "sequence.insert") {

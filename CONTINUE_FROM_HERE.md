@@ -1,4 +1,8 @@
-# Continue from Reference-to-Edit
+# Continue the native Reference-to-Edit workflow
+
+Use the current working tree. Three distinct editable squat sequences and decoded MP4s exist under `test-results/reference-gym/verified`. All three passed the real browser preview/history/save/reopen test and native serialization. The native job progress failure is fixed. Resume native file import, generation, manual revision, full exit/reopen and Deliver export with the corrected build. Check title size against the reference and finish configurable source wording. Travel, talking-head/lifestyle and unsupported-reference acceptance are outstanding.
+
+## Prior handoff
 
 Native kinetic typography acceptance passed on the corrected 1080×1920, 12-second Reel. The 360-frame H.264/AAC file decodes with mono RMS 0.19034. Four text layers remain editable. Native Preview, Apply, Undo/Redo, manual 68.5 px size and 0.845 entrance scale, full process exit and reopen were exercised. After the first export exposed face overlap, the planner weighted upper-body overlap and refit the existing titles through ordinary commands, preserving their other edits. A freshly launched native app reopened and resaved the corrected project exactly and exported it. Twelve decoded samples average 3.13/255 error relative to the text compositor and 119.58/255 against the same frames with text removed. The row title clears the athlete’s face. See test-results/typography-reviewed/render.mp4, NATIVE.supp, contact.png, native-verification.json and scripts/verify-native-typography.mjs.
 

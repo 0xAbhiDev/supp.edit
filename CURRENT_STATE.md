@@ -1,4 +1,10 @@
-# Current state — native kinetic typography accepted
+# Reference-to-Edit three-mode checkpoint
+
+The 12-second finished gym reference and independent 15.555-second squat take exercised all three recreation modes. A residual cut at 2.00 s complements the 5.50 s and 9.00 s scene boundaries. The 30 Hz center-frame cadence check finds one exceptional repeated-frame hold at 1.50 s. The planner maps it to a bounded five-key editable ramp. Windows OCR measured four transient text intervals. Each composition has four independent source trims, original editable titles, subject-aware framing, four color adjustments per shot and a supplied soundtrack.
+
+The production compositor and native encoder produced 1080×1920 H.264/AAC exports of 360, 388 and 337 frames for Close Match, Smart Adaptation and Creative Remix. See `test-results/reference-gym/verified/<mode>/render.mp4`, `editable.supp`, `verification.json` and `comparison.png`. Browser UI acceptance passed for generation, synchronized scrubbing, Apply, Undo, Redo, Save and reopen for all three modes. The native serializer round-tripped all three projects. Native tests passed (24 project, 11 media and 4 export). The first native UI run exposed changing progress units. Generation now uses one monotonic stage count and a separate description. Desktop UI acceptance of the corrected build and the reduced OCR-derived title size is pending.
+
+## Validated kinetic typography checkpoint 6706330
 
 Native kinetic typography acceptance passed on the corrected 1080×1920, 12-second Reel. The 360-frame H.264/AAC file decodes with mono RMS 0.19034. Four text layers remain editable. Native Preview, Apply, Undo/Redo, manual 68.5 px size and 0.845 entrance scale, full process exit and reopen were exercised. After the first export exposed face overlap, the planner weighted upper-body overlap and refit the existing titles through ordinary commands, preserving their other edits. A freshly launched native app reopened and resaved the corrected project exactly and exported it. Twelve decoded samples average 3.13/255 error relative to the text compositor and 119.58/255 against the same frames with text removed. The row title clears the athlete’s face. See test-results/typography-reviewed/render.mp4, NATIVE.supp, contact.png, native-verification.json and scripts/verify-native-typography.mjs.
 

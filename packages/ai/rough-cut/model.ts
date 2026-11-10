@@ -30,7 +30,7 @@ export const briefSchema = z
 export type EditBrief = z.infer<typeof briefSchema>;
 export const aiEditMetadataSchema = z
   .object({
-    plannerVersion: z.literal("rough-cut-1"),
+    plannerVersion: z.enum(["rough-cut-1", "reference-edit-1"]),
     createdAt: z.string().datetime(),
     brief: briefSchema,
     evidence: z
