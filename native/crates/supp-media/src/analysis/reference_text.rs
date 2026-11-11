@@ -1,4 +1,4 @@
-//! Extract the geometry and timing of transient text. Recognition strings never leave the worker.
+//! Measure transient text and its foreground treatment on the local device.
 use crate::models::Progress;
 use serde::Serialize;
 use std::{path::Path, sync::atomic::AtomicBool};
@@ -12,6 +12,13 @@ pub struct TextAppearance {
     width: f32,
     height: f32,
     words: u32,
+    content: String,
+    foreground: String,
+    accent: Option<String>,
+    accent_word: Option<u32>,
+    reveal_offset_ms: Option<u32>,
+    width_change: f32,
+    vertical_change: f32,
 }
 #[cfg(windows)]
 pub fn run(
@@ -63,23 +70,31 @@ pub fn run(
                     "-vf",
                     &format!("fps={hz},scale={w}:{h}"),
                     "-pix_fmt",
-                    "gray",
+                    "rgb24",
                     "-f",
                     "rawvideo",
                     "pipe:1",
                 ]),
             cancel,
-            w * h * (4 * hz + 1),
+            w * h * 3 * (4 * hz + 1),
         )?;
-        for (i, frame) in frames.chunks_exact(w * h).enumerate() {
+        for (i, frame) in frames.chunks_exact(w * h * 3).enumerate() {
             super::check(cancel)?;
             let at = (start * 1000) as u32 + i as u32 * step_ms;
             let mut recognize = || -> windows::core::Result<()> {
                 let writer = DataWriter::new()?;
                 // Isolate bright overlay glyphs from textured video before recognition.
                 let ink: Vec<_> = frame
-                    .iter()
-                    .map(|&v| if v >= 192 { 0 } else { 255 })
+                    .chunks_exact(3)
+                    .map(|rgb| {
+                        if 54 * u32::from(rgb[0]) + 183 * u32::from(rgb[1]) + 19 * u32::from(rgb[2])
+                            >= 192 * 256
+                        {
+                            0
+                        } else {
+                            255
+                        }
+                    })
                     .collect();
                 writer.WriteBytes(&ink)?;
                 let bitmap = SoftwareBitmap::CreateCopyFromBuffer(
@@ -96,14 +111,58 @@ pub fn run(
                         continue;
                     }
                     let (mut x, mut y, mut r, mut b) = (w as f32, h as f32, 0f32, 0f32);
-                    for word in words {
+                    let mut neutral = [0u64; 3];
+                    let mut neutral_count = 0u64;
+                    let mut strongest: Option<(usize, f32, [u64; 3], u64)> = None;
+                    for (index, word) in words.into_iter().enumerate() {
                         let rect = word.BoundingRect()?;
+                        let mut accent = [0u64; 3];
+                        let mut n = 0u64;
+                        let mut bright = 0u64;
+                        for yy in (rect.Y.max(0.) as usize)
+                            ..((rect.Y + rect.Height).ceil() as usize).min(h)
+                        {
+                            for xx in (rect.X.max(0.) as usize)
+                                ..((rect.X + rect.Width).ceil() as usize).min(w)
+                            {
+                                let off = yy * w + xx;
+                                if ink[off] != 0 {
+                                    continue;
+                                }
+                                bright += 1;
+                                let p = &frame[off * 3..off * 3 + 3];
+                                if p.iter().max().unwrap() - p.iter().min().unwrap() > 48 {
+                                    for k in 0..3 {
+                                        accent[k] += u64::from(p[k]);
+                                    }
+                                    n += 1;
+                                } else {
+                                    for k in 0..3 {
+                                        neutral[k] += u64::from(p[k]);
+                                    }
+                                    neutral_count += 1;
+                                }
+                            }
+                        }
+                        let fraction = n as f32 / bright.max(1) as f32;
+                        if n >= 8
+                            && fraction > 0.22
+                            && strongest.as_ref().is_none_or(|s| fraction > s.1)
+                        {
+                            strongest = Some((index, fraction, accent, n));
+                        }
                         x = x.min(rect.X);
                         y = y.min(rect.Y);
                         r = r.max(rect.X + rect.Width);
                         b = b.max(rect.Y + rect.Height);
                     }
-                    let name = line.Text()?.to_string().to_lowercase();
+                    let name = line.Text()?.to_string();
+                    if name.trim().is_empty() || name.chars().count() > 120 {
+                        continue;
+                    }
+                    let hex = |p: [u64; 3], n: u64| {
+                        format!("#{:02X}{:02X}{:02X}", p[0] / n, p[1] / n, p[2] / n)
+                    };
                     let metric = TextAppearance {
                         start_ms: at,
                         end_ms: at + step_ms,
@@ -112,14 +171,40 @@ pub fn run(
                         width: (r - x) / w as f32,
                         height: (b - y) / h as f32,
                         words: count,
+                        content: name.clone(),
+                        foreground: if neutral_count > 0 {
+                            hex(neutral, neutral_count)
+                        } else {
+                            String::from("#FFFFFF")
+                        },
+                        accent: strongest.map(|(_, _, p, n)| hex(p, n)),
+                        accent_word: strongest.map(|s| s.0 as u32),
+                        reveal_offset_ms: None,
+                        width_change: 0.,
+                        vertical_change: 0.,
                     };
                     if metric.width < 0.08 || metric.height < 0.011 || metric.height > 0.25 {
                         continue;
                     }
-                    if let Some((_, old)) = runs.iter_mut().rev().find(|(s, t)| {
-                        *s == name && t.end_ms == at && (metric.y - t.y).abs() < 0.12
+                    if let Some((prior, old)) = runs.iter_mut().rev().find(|(s, t)| {
+                        t.end_ms == at
+                            && (metric.y - t.y).abs() < 0.06
+                            && (*s == name
+                                || name
+                                    .strip_prefix(s.as_str())
+                                    .is_some_and(|tail| tail.starts_with(' ')))
                     }) {
-                        old.end_ms = at + step_ms
+                        if prior != &name {
+                            old.reveal_offset_ms = Some(at - old.start_ms);
+                            prior.clone_from(&name);
+                            old.content.clone_from(&name);
+                            old.words = count;
+                            old.accent = metric.accent;
+                            old.accent_word = metric.accent_word;
+                        }
+                        old.end_ms = at + step_ms;
+                        old.width_change = (metric.width / old.width - 1.).clamp(-1., 2.);
+                        old.vertical_change = metric.y - old.y;
                     } else {
                         runs.push((name, metric))
                     }

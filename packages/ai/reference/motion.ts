@@ -20,7 +20,7 @@ export const sampleSchema = z
   .strict();
 import { appearanceSchema } from "./appearance";
 export async function referenceText(a: Asset, job: JobContext) {
-  const key = "reference-text-v1:" + a.id + ":" + a.fingerprint,
+  const key = "reference-text-v2:" + a.id + ":" + a.fingerprint,
     validate = z.array(appearanceSchema).max(512);
   const cached = validate.safeParse(await readDerived(key));
   if (cached.success) return cached.data;

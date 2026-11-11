@@ -18,6 +18,7 @@ export interface SourceEvidence {
 }
 export interface Controls {
   mode: RecreationMode;
+  wording: "adapt" | "original" | "omit";
   pace: number;
   color: number;
   beat: number;
@@ -25,6 +26,7 @@ export interface Controls {
 }
 export const defaults: Controls = {
   mode: "Smart Adaptation",
+  wording: "adapt",
   pace: 1,
   color: 0.75,
   beat: 0.65,
@@ -464,7 +466,11 @@ export function buildRecreation(
   let priorEnd = 0,
     omitted = 0;
   const graphics = uid();
-  for (const appearance of dna.text ?? []) {
+  if (controls.wording === "original" && !dna.text?.some((t) => t.content))
+    warnings.push("No readable reference words were recognized.");
+  for (const appearance of controls.wording === "omit"
+    ? []
+    : (dna.text ?? [])) {
     if (command.length >= 508) break;
     const match = matches.find(
       (m) =>
@@ -493,11 +499,34 @@ export function buildRecreation(
           Math.abs(a.timeMs - sourceTime) - Math.abs(b.timeMs - sourceTime),
       )[0];
     const label = sample?.labels[0];
-    const content =
-      copy.shift() ??
-      (label && label.relativeConfidence >= 0.45 && !seen.has(label.label)
-        ? label.label.toUpperCase()
+    const transcript =
+      source.speech?.transcript ??
+      p.transcripts.find(
+        (t) =>
+          t.assetId === source.asset.id &&
+          t.sourceFingerprint === source.asset.fingerprint,
+      );
+    const spoken = transcript?.segments.find(
+      (t) => t.startMs <= sourceTime && sourceTime < t.endMs,
+    );
+    const words = spoken?.words
+      ?.filter((w) => w.endMs > sourceTime)
+      .slice(0, appearance.words)
+      .map((w) => w.text)
+      .join(" ");
+    const sourceCopy =
+      words ||
+      (spoken && !spoken.words?.length
+        ? spoken.text.trim().split(/\s+/).slice(0, appearance.words).join(" ")
         : undefined);
+    const content =
+      controls.wording === "original"
+        ? appearance.content
+        : (copy.shift() ??
+          sourceCopy ??
+          (label && label.relativeConfidence >= 0.45 && !seen.has(label.label)
+            ? label.label.toUpperCase()
+            : undefined));
     if (!content) {
       omitted++;
       continue;
@@ -519,9 +548,56 @@ export function buildRecreation(
       start,
       duration: end - start,
       style: appearance.height > 0.024 ? "Bold" : "Minimal",
-      treatment: end - start < rate * 0.65 ? "Pop" : "Fade",
+      treatment:
+        appearance.revealOffsetMs != null
+          ? "Word Build"
+          : Math.abs(appearance.verticalChange ?? 0) > 0.025
+            ? "Slide"
+            : Math.abs(appearance.widthChange ?? 0) > 0.025
+              ? "Scale In"
+              : end - start < rate * 0.65
+                ? "Pop"
+                : "Fade",
+      ...(appearance.foreground
+        ? {
+            ink: {
+              foreground: appearance.foreground,
+              accent: appearance.accent ?? null,
+              word: Math.round(
+                ((appearance.accentWord ?? appearance.words - 1) /
+                  Math.max(1, appearance.words - 1)) *
+                  (content.trim().split(/\s+/).length - 1),
+              ),
+            },
+          }
+        : {}),
+      ...(appearance.revealOffsetMs != null &&
+      content.trim().split(/\s+/).length > 1
+        ? {
+            wordStarts: content
+              .trim()
+              .split(/\s+/)
+              .map((_, i, a) =>
+                Math.round(
+                  (i *
+                    Math.max(
+                      a.length - 1,
+                      Math.min(
+                        end - start - 1,
+                        (appearance.revealOffsetMs! * rate) / 1000,
+                      ),
+                    )) /
+                    (a.length - 1),
+                ),
+              ),
+          }
+        : {}),
       timing: "manual",
-      maxFontSize: clamp(appearance.height*layout.settings.height/0.78,6,1000),
+      maxFontSize: clamp(
+        (appearance.height * layout.settings.height) / 0.78,
+        6,
+        1000,
+      ),
       y: band.y,
     });
     priorEnd = end;

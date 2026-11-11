@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { newProject, newClip, parseProject } from "../packages/project-schema";
 import { History, moveClip } from "../packages/commands";
+import { createComposition } from "../packages/commands/compositions";
 import { snapshotContext } from "../packages/ai/context";
 import { JobScheduler } from "../packages/jobs";
 import {
@@ -127,6 +128,65 @@ describe("AI editor command boundary", () => {
       ),
     ).rejects.toThrow(/not installed/);
     expect(edited.clips[0].effectStack).toHaveLength(1);
+  });
+  it("revises an active composition through preview, history and serialization", async () => {
+    const { p, c } = fixture(),
+      h = new History(p);
+    const withComposition = h.execute(
+      p,
+      "sequence",
+      createComposition("Generated", 90, "generated"),
+    );
+    const scoped = h.execute(withComposition, "layer", (draft) => {
+      draft.compositions[0].layers.push({
+        ...newClip(draft.compositions[0].tracks[0].id, 0, 90, "shape"),
+        id: "scoped",
+      });
+    });
+    const agent = new AIEditorAgent(
+      {
+        ...localCommandInterpreter,
+        async interpret(request, context) {
+          expect(context.projectName).toBe(p.name);
+          expect(context.sequence.id).toBe("generated");
+          expect(context.sequence.name).toBe("Generated");
+          return localCommandInterpreter.interpret(request, context);
+        },
+      },
+      new JobScheduler(),
+    );
+    const outcome = await agent.plan("Set brightness to 0.91", scoped, 2, {
+      activeCompositionId: "generated",
+      selectedLayerId: "scoped",
+    }).finished;
+    expect(outcome.state).toBe("Completed");
+    if (outcome.state !== "Completed") throw Error("No scoped preview");
+    expect(outcome.result.plan.compositionId).toBe("generated");
+    expect(scoped.compositions[0].layers[0].effectStack).toHaveLength(0);
+    const edited = h.execute(
+      scoped,
+      "AI revision",
+      applyEditPreview(outcome.result, scoped, 2),
+    );
+    expect(edited.clips).toEqual(scoped.clips);
+    expect(edited.compositions[0].layers[0].effectStack[0].value).toBe(0.91);
+    const undone = h.undo(edited);
+    expect(undone.compositions).toEqual(scoped.compositions);
+    expect(h.redo(undone).compositions).toEqual(edited.compositions);
+    expect(
+      parseProject(JSON.parse(JSON.stringify(edited))).compositions,
+    ).toEqual(edited.compositions);
+    expect(() =>
+      agent.plan("Set brightness to 0.91", scoped, 2, {
+        activeCompositionId: "missing",
+        selectedLayerId: c.id,
+      }),
+    ).toThrow(/no longer exists/);
+    const outside = await agent.plan("Set brightness to 0.91", scoped, 2, {
+      activeCompositionId: "generated",
+      selectedLayerId: c.id,
+    }).finished;
+    expect(outside.state).toBe("Failed");
   });
   it("validates trim/delete tools and leaves the source unchanged on a later failure", () => {
     const { p, c, plan } = fixture();

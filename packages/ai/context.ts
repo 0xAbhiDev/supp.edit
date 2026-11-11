@@ -37,7 +37,7 @@ export interface AIProjectContext {
   readonly revision: number;
   readonly sequence: {
     readonly id: string;
-    readonly name: "Main sequence";
+    readonly name: string;
     readonly durationFrames: number;
     readonly width: number;
     readonly height: number;
@@ -144,12 +144,17 @@ export function snapshotContext(
     projectName: project.name,
     revision,
     sequence: {
-      id: `${project.id}:main`,
-      name: "Main sequence",
-      durationFrames: project.clips.reduce(
-        (end, c) => Math.max(end, c.start + c.duration),
-        0,
-      ),
+      id: composition?.id ?? `${project.id}:main`,
+      name: composition
+        ? (project.compositions.find((c) => c.id === composition.id)?.name ??
+          "Composition")
+        : "Main sequence",
+      durationFrames:
+        composition?.durationFrames ??
+        project.clips.reduce(
+          (end, c) => Math.max(end, c.start + c.duration),
+          0,
+        ),
       width: project.settings.width,
       height: project.settings.height,
       fps: { num: project.settings.fps.num, den: project.settings.fps.den },

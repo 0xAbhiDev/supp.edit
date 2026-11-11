@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { compositionView } from "../../commands/compositions";
 import { type Project, uid } from "../../project-schema";
 import { backgroundJobs, type JobScheduler } from "../../jobs";
 import {
@@ -101,12 +102,29 @@ export class AIEditorAgent {
     revision: number,
     selection: ContextSelection = {},
   ) {
-    // The current resolver targets the main sequence. Reject unsupported scope instead of guessing.
-    if (selection.activeCompositionId)
-      throw new Error(
-        "Return to the main sequence before planning this command.",
-      );
-    const context = snapshotContext(project, revision, selection);
+    const scope = selection.activeCompositionId ?? null;
+    const comp = scope
+      ? project.compositions.find((c) => c.id === scope)
+      : null;
+    if (scope && !comp) throw Error("The selected sequence no longer exists");
+    const view = compositionView(project, scope);
+    const context = snapshotContext(
+      { ...view, name: project.name },
+      revision,
+      selection,
+      {
+        snapshot: () =>
+          comp
+            ? {
+                id: comp.id,
+                width: comp.settings.width,
+                height: comp.settings.height,
+                durationFrames: comp.duration,
+                layerIds: comp.layers.map((c) => c.id),
+              }
+            : null,
+      },
+    );
     return this.jobs.enqueue({
       label: "Plan project edit",
       scope: project.id,
@@ -119,7 +137,7 @@ export class AIEditorAgent {
           id: uid(),
           projectId: project.id,
           revision,
-          compositionId: null,
+          compositionId: scope,
           summary: intent.summary,
           processing: "LOCAL",
           commands: intent.commands,

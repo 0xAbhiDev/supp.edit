@@ -1,6 +1,14 @@
-# Continue the native Reference-to-Edit workflow
+# Continue Reference-to-Edit after Windows acceptance
 
-Use the current working tree. Three distinct editable squat sequences and decoded MP4s exist under `test-results/reference-gym/verified`. All three passed the real browser preview/history/save/reopen test and native serialization. The native job progress failure is fixed. Resume native file import, generation, manual revision, full exit/reopen and Deliver export with the corrected build. Check title size against the reference and finish configurable source wording. Travel, talking-head/lifestyle and unsupported-reference acceptance are outstanding.
+Use the current repository and working tree. Windows native reference import, raw/music import, four-shot generation, preview, Apply, Undo/Redo, manual brightness revision to 0.91, full exit/reopen and MP4 export have passed. All three modes have separate actual desktop exports. CURRENT_STATE.md records artifacts, measurements and limits. The accepted audio and typography checkpoints remain 87541c2 and 6706330.
+
+Read the current Reference-to-Edit section before running further acceptance. Final desktop artifacts live under test-results/reference-gym/desktop and desktop-modes. The earlier verified directory contains superseded title sizing. The final directory contains independently rendered three-mode comparisons and the browser-generated projects.
+
+Next implement and validate the remaining reference requirements. Prioritize transcript-grounded automatic wording with source-time remapping, unsupported-transition reporting from measured evidence, stronger shot-specific color/camera treatment, and a comparison UI showing actual timing/event distances. Continue real travel, talking-head/lifestyle and five-input acceptance. Current adaptation acceptance uses user-supplied replacement phrases. Current transition acceptance uses hard cuts. Keep those limits explicit.
+
+The three-mode project is test-results/reference-gym/desktop-modes/Three-modes.supp. The independently imported native project with the manual revision is test-results/reference-gym/desktop/Desktop-recreation.supp. Select the generated composition after reopening because the default main sequence is empty. scripts/verify-native-reference.mjs verifies native persistence, the 0.91 edit, raw-only rendering, title animation, cut boundaries, speed keys and decoded audio. scripts/compare-reference-edit.mjs checks corresponding reference/output frames, black frames and soundtrack lag. scripts/verify-render.mjs compares exported frames with retained compositor PNGs.
+
+When validating new genres, use separate authorized raw footage. Keep source words editable and source media out of generated sequences. Reference speed curves and fonts remain estimates. Caption adaptation needs transcript/action evidence or supplied wording. Continue through real native exports and commit each validated milestone.
 
 ## Prior handoff
 

@@ -22,7 +22,10 @@ const run = (file, args) =>
 const saved = path.join(dir, "editable.supp");
 run(exe("verify"), [input, saved]);
 const project = JSON.parse(await fs.readFile(saved, "utf8"));
-const sequence = project.compositions.at(-1);
+const sequence = process.argv[4]
+  ? project.compositions.find((c) => c.name === process.argv[4])
+  : project.compositions.at(-1);
+if (!sequence) throw Error("Choose an existing composition");
 const server = await createServer({
   server: {
     host: "127.0.0.1",

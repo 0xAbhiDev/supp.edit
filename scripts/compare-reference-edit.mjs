@@ -12,7 +12,14 @@ const json = (dir, name) =>
 const { assets } = json(inventory, "assets.json"),
   dna = json(inventory, "dna.json"),
   project = json(directory, "editable.supp"),
-  seq = project.compositions.at(-1);
+  seq = fs.existsSync(path.join(directory, "project.supp"))
+    ? project.compositions.find(
+        (c) => c.id === json(directory, "project.supp").clips[0].compositionId,
+      )
+    : project.compositions.length === 1
+      ? project.compositions[0]
+      : undefined;
+assert(seq, "Exported sequence missing");
 const rate = seq.settings.fps.num / seq.settings.fps.den;
 const movie = path.join(directory, "render.mp4"),
   env = mediaEnvironment();
@@ -29,7 +36,18 @@ const shots = seq.layers.filter(
 );
 assert(
   shots.length === dna.shots.length &&
-    shots.every((c) => assets.slice(1).some((a) => a.id === c.assetId)),
+    shots.every((c) =>
+      assets
+        .slice(1)
+        .some(
+          (a) =>
+            path.resolve(a.path) ===
+            path.resolve(
+              project.assets.find((source) => source.id === c.assetId)?.path ??
+                "",
+            ),
+        ),
+    ),
 );
 const titles = seq.layers.filter((c) => c.kind === "text");
 const samples = shots.map((c, i) => {
@@ -109,7 +127,75 @@ const offsets = samples
       Math.min(...beats.map((ms) => Math.abs(ms - (s.cut * 1000) / rate))),
     ),
   );
+const audioRate = 8000;
+const pcm = (file) => {
+  const bytes = ff([
+    "-i",
+    file,
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    String(audioRate),
+    "-f",
+    "f32le",
+    "pipe:1",
+  ]);
+  return Float32Array.from({ length: bytes.length / 4 }, (_, i) =>
+    bytes.readFloatLE(i * 4),
+  );
+};
+const suppliedMusic = project.assets.find(
+  (a) => a.kind === "audio" && seq.layers.some((c) => c.assetId === a.id),
+);
+const audioChecks = [];
+if (suppliedMusic) {
+  const actual = pcm(movie),
+    source = pcm(suppliedMusic.path),
+    count = Math.min(source.length, actual.length);
+  const window = Math.min(8000, Math.floor(count / 5));
+  for (const fraction of [0.08, 0.43, 0.8]) {
+    const start = Math.min(
+      count - window - 641,
+      Math.max(641, Math.round(count * fraction)),
+    );
+    if (start < 641 || window < 256) continue;
+    let best = { lagSamples: 0, correlation: 0 };
+    for (let lag = -640; lag <= 640; lag++) {
+      let xx = 0,
+        yy = 0,
+        xy = 0;
+      for (let i = start; i < start + window; i += 2) {
+        const x = source[i],
+          y = actual[i + lag];
+        xx += x * x;
+        yy += y * y;
+        xy += x * y;
+      }
+      const correlation = xy / Math.max(1e-12, Math.sqrt(xx * yy));
+      if (correlation > best.correlation)
+        best = { lagSamples: lag, correlation };
+    }
+    audioChecks.push({
+      atSeconds: start / audioRate,
+      lagMs: (best.lagSamples * 1000) / audioRate,
+      correlation: best.correlation,
+    });
+  }
+}
+assert.equal(
+  audioChecks.length,
+  3,
+  "Expected supplied music at three timeline positions",
+);
+assert(
+  audioChecks.every(
+    (c) => Math.abs(c.lagMs) < 1000 / audioRate && c.correlation > 0.98,
+  ),
+  "Supplied music drift or mismatch",
+);
 const report = {
+  audioChecks,
   sequence: seq.name,
   frames: seq.duration,
   blackFrames: black,

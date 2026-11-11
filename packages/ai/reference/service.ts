@@ -109,7 +109,10 @@ export function recreate(
           text,
         );
       }
-      const dna = profile ?? (await measureReference());
+      const dna =
+        profile && controls.wording !== "original"
+          ? profile
+          : await measureReference();
       stage(1, "Extracted Style DNA");
       const sources: SourceEvidence[] = [];
       for (const a of raw) {
@@ -117,7 +120,10 @@ export function recreate(
         const evidence: SourceEvidence = await visuals(a);
         if (
           a.hasAudio &&
-          /caption|speech|talking.head/i.test(controls.instructions) &&
+          (/caption|speech|talking.head/i.test(controls.instructions) ||
+            (controls.wording === "adapt" &&
+              !!dna.text?.length &&
+              !/["“]/.test(controls.instructions))) &&
           caps.model?.installed
         )
           evidence.speech = await run(a, "speech");

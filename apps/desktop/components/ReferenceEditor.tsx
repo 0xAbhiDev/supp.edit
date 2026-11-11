@@ -217,7 +217,13 @@ export function ReferenceEditor() {
     if (!result) return;
     try {
       const next = [
-        result.dna,
+        {
+          ...result.dna,
+          text:
+            result.dna.text?.map(
+              ({ content: _content, ...geometry }) => geometry,
+            ) ?? null,
+        },
         ...profiles.filter((p) => p.name !== result.dna.name),
       ].slice(0, 24);
       await writeLocal("state", "style-dna-v1", next);
@@ -357,7 +363,26 @@ export function ReferenceEditor() {
               ))}
             </select>
           </label>
-          {profiles.length > 0 && (
+          <label>
+            Reference text
+            <select
+              aria-label="Reference text"
+              value={controls.wording}
+              onChange={(e) =>
+                update({ wording: e.target.value as Controls["wording"] })
+              }
+            >
+              <option value="adapt">Adapt to my footage</option>
+              <option value="original">Preserve original words</option>
+              <option value="omit">Omit reference titles</option>
+            </select>
+          </label>
+          {controls.wording === "original" && (
+            <p>
+              Review the locally recognized words in Preview before applying.
+            </p>
+          )}
+          {profiles.length > 0 && controls.wording !== "original" && (
             <label>
               Style profile
               <select
@@ -462,6 +487,18 @@ export function ReferenceEditor() {
               </tbody>
             </table>
           </details>
+          {view.clips.some((c) => c.kind === "text") && (
+            <details>
+              <summary>Review title wording</summary>
+              <ol>
+                {view.clips
+                  .filter((c) => c.kind === "text")
+                  .map((c) => (
+                    <li key={c.id}>{c.text.content}</li>
+                  ))}
+              </ol>
+            </details>
+          )}
           <button onClick={() => void saveDNA()}>Save Style DNA</button> {saved}
           <div className="reference-compare">
             <figure>

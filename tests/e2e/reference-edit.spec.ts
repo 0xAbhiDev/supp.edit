@@ -69,7 +69,7 @@ test("three editable recreations from independent footage with local captured an
     ]);
   for (const [prefix, file] of [
     ["reference-blocks-v2", "motion.json"],
-    ["reference-text-v1", "text.json"],
+    ["reference-text-v2", "text.json"],
   ])
     entries.push([
       [prefix, reference.id, reference.fingerprint].join(":"),
@@ -102,6 +102,9 @@ test("three editable recreations from independent footage with local captured an
     await panel
       .getByRole("combobox", { name: "Recreation mode", exact: true })
       .selectOption(mode);
+    await panel
+      .getByLabel("Reference text", { exact: true })
+      .selectOption(mode === "Close Match" ? "original" : "adapt");
     await panel.getByRole("button", { name: "Recreate This Style" }).click();
     await expect(
       panel.getByRole("button", { name: "Apply recreation" }),
@@ -134,7 +137,18 @@ test("three editable recreations from independent footage with local captured an
     expect(generated.layers.filter((c: any) => c.kind === "text")).toHaveLength(
       4,
     );
-    expect(ranges.some((c: any) => c.timeRemap)).toBe(true);
+    const titles = generated.layers.filter((c: any) => c.kind === "text");
+    expect(titles.map((c: any) => c.text.content)).toEqual(
+      mode === "Close Match"
+        ? ["STAY FOCUSED", "BUILD STRENGTH", "ONE MORE REP", "EARN IT"]
+        : ["BRACE", "SIT BACK", "DRIVE UP", "RESET"],
+    );
+    const detected = await json("text.json");
+    for (const [i, c] of titles.entries()) {
+      expect(c.text.color).toBe(detected[i].foreground);
+      expect(c.text.emphasis[0]?.color).toBe(detected[i].accent);
+    }
+    expect(ranges.filter((c: any) => c.timeRemap)).toHaveLength(1);
     timelines.push(
       JSON.stringify(ranges.map((c: any) => [c.sourceIn, c.duration])),
     );

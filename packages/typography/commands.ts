@@ -30,6 +30,17 @@ export const typographyCommandSchema = z
       "manual",
     ]),
     cueFrame: frame.optional(),
+    ink: z
+      .object({
+        foreground: z.string().regex(/^#[0-9a-f]{6}$/i),
+        accent: z
+          .string()
+          .regex(/^#[0-9a-f]{6}$/i)
+          .nullable(),
+        word: z.number().int().nonnegative().max(499),
+      })
+      .strict()
+      .optional(),
     maxFontSize: z.number().finite().min(6).max(1000).optional(),
     y: z.number().finite().min(-32768).max(32768).optional(),
   })
@@ -68,7 +79,25 @@ export function createTypography(
       p.settings.height,
       call.treatment,
     );
-    if (call.maxFontSize !== undefined) c.text.size=Math.min(c.text.size,call.maxFontSize);
+    if (call.ink) {
+      c.text.color = call.ink.foreground;
+      c.text.emphasis = call.ink.accent
+        ? [
+            {
+              word: Math.min(
+                call.ink.word,
+                c.text.content.split(/\s+/).length - 1,
+              ),
+              color: call.ink.accent,
+              scale: 1.15,
+              weight: "900",
+            },
+          ]
+        : [];
+      c.text.highlightColor = call.ink.accent ?? call.ink.foreground;
+    }
+    if (call.maxFontSize !== undefined)
+      c.text.size = Math.min(c.text.size, call.maxFontSize);
     if (call.y !== undefined) c.transform.y = call.y;
     fitTextVertically(c, p.settings.width, p.settings.height);
     animateText(c, call.treatment, fps(p), call.wordStarts);
