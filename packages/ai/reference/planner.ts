@@ -1,3 +1,4 @@
+import { measuredColor, type VisualFrame } from "./visual";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
 import type { EditorToolCall } from "../editor-agent/registry";
@@ -15,6 +16,7 @@ export interface SourceEvidence {
   analysis: MediaAnalysis;
   color?: ColorStats;
   speech?: MediaAnalysis;
+  visual?: VisualFrame[];
 }
 export interface Controls {
   mode: RecreationMode;
@@ -34,6 +36,18 @@ export const defaults: Controls = {
 };
 const clamp = (n: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, n)) || 0;
+// Use a bounded gain. The floor limits amplification of compression noise
+// when a nearly neutral clip is matched to a strongly colored reference.
+export function referenceGain(
+  source: number,
+  target: number,
+  mix: number,
+  floor: number,
+  limit: number,
+) {
+  const ratio = (target + floor) / (source + floor);
+  return Math.pow(clamp(ratio, 1 / limit, limit), clamp(mix, 0, 1));
+}
 export function buildRecreation(
   p: Project,
   revision: number,
@@ -54,6 +68,7 @@ export function buildRecreation(
     warnings: string[] = [],
     matches: {
       source: string;
+      clipId: string;
       sourceIn: number;
       start: number;
       duration: number;
@@ -86,6 +101,10 @@ export function buildRecreation(
       /caption|talking.head|speech|voiceover/i.test(controls.instructions) ||
       !!voice;
   let cursor = 0;
+  const protection: {
+    clipId: string;
+    bounds: { x: number; y: number; width: number; height: number };
+  }[] = [];
   const effect = (
     clipId: string,
     type:
@@ -125,6 +144,16 @@ export function buildRecreation(
     });
   }
   const referenceShots = dna.shots;
+  const longestLater: number[] = [];
+  let longest = 0;
+  for (let i = referenceShots.length - 1; i >= 0; i--) {
+    longestLater[i] = longest;
+    const shot = referenceShots[i];
+    longest = Math.max(
+      longest,
+      Math.round(((shot.endMs - shot.startMs) * rate) / (1000 * pace)),
+    );
+  }
   for (const [index, ref] of referenceShots.entries()) {
     // Bound the edit before hitting the normal editor's command budget.
     if (command.length > 460 || cursor >= rate * 300) {
@@ -146,6 +175,7 @@ export function buildRecreation(
       matches.at(-1),
       nextRef ? ((nextRef.endMs - nextRef.startMs) * rate) / (1000 * pace) : 0,
       captions,
+      close ? longestLater[index] : 0,
     );
     if (!candidate) {
       warnings.push(
@@ -179,7 +209,7 @@ export function buildRecreation(
     }
     const clipId = uid(),
       asset = s.source.asset;
-    if (duration < requested * 0.75)
+    if (close ? duration < requested : duration < requested * 0.75)
       warnings.push(
         "Shot " +
           (index + 1) +
@@ -197,30 +227,54 @@ export function buildRecreation(
       duration,
       gain: voice ? -60 : music ? -20 : 0,
     });
-    if (dna.color && s.source.color && !keepColor && controls.color > 0) {
+    const sourceColor = measuredColor(
+      s.source.visual ?? [],
+      (sourceIn * 1000) / rate,
+      ((sourceIn + duration) * 1000) / rate,
+    );
+    const targetColor = ref.color ?? dna.color;
+    if (targetColor && s.source.color && !keepColor && controls.color > 0) {
       const from = s.source.color,
-        to = dna.color,
+        to = targetColor,
         k = controls.color;
       effect(
         clipId,
         "brightness",
-        clamp(1 + (to.luma - from.meanLuma) * k, 0.7, 1.3),
+        referenceGain(
+          sourceColor?.luma ?? from.meanLuma,
+          to.luma,
+          k,
+          0.06,
+          1.8,
+        ),
       );
       effect(
         clipId,
         "tonalContrast",
-        clamp(1 + (to.contrast - from.contrastStd) * k, 0.8, 1.25),
+        clamp(
+          1 + (to.contrast - (sourceColor?.contrast ?? from.contrastStd)) * k,
+          0.8,
+          1.25,
+        ),
       );
       effect(
         clipId,
         "saturation",
-        clamp(1 + (to.saturation - from.meanSaturation) * k, 0.7, 1.3),
+        referenceGain(
+          sourceColor?.saturation ?? from.meanSaturation,
+          to.saturation,
+          k,
+          0.12,
+          1.6,
+        ),
       );
-      if (to.temperature !== null && from.neutralTemperature !== null)
+      const sourceTemperature =
+        sourceColor?.temperature ?? from.neutralTemperature;
+      if (to.temperature !== null && sourceTemperature !== null)
         effect(
           clipId,
           "temperature",
-          clamp((to.temperature - from.neutralTemperature) * k, -0.4, 0.4),
+          clamp((to.temperature - sourceTemperature) * k, -0.4, 0.4),
         );
     }
     const key = (local: number, value: number) =>
@@ -252,15 +306,62 @@ export function buildRecreation(
     const observations =
       s.source.analysis.vision?.frames.filter(
         (f) =>
-          f.sceneStartMs === s.shot.startMs &&
-          f.subject &&
-          f.subject.confidence >= 0.5,
+          f.timeMs >= (sourceIn * 1000) / rate &&
+          f.timeMs <= ((sourceIn + duration) * 1000) / rate,
       ) ?? [];
-    const centerMs = ((sourceIn + duration / 2) * 1000) / rate;
-    const box = observations.sort(
-      (a, b) => Math.abs(a.timeMs - centerMs) - Math.abs(b.timeMs - centerMs),
-    )[0]?.subject?.bounds;
+    const closest = s.source.analysis.vision?.frames
+      .filter((f) => f.sceneStartMs === s.shot.startMs)
+      .sort(
+        (a, b) =>
+          Math.abs(a.timeMs - ((sourceIn + duration / 2) * 1000) / rate) -
+          Math.abs(b.timeMs - ((sourceIn + duration / 2) * 1000) / rate),
+      )[0];
+    const frames = observations.length
+      ? observations
+      : closest
+        ? [closest]
+        : [];
+    const boxes = frames.flatMap((f) =>
+      f.detections
+        .filter(
+          (d) =>
+            d.confidence >= 0.5 &&
+            (d.label === "person" || d.bounds.width * d.bounds.height >= 0.005),
+        )
+        .map((d) => d.bounds),
+    );
+    const box = boxes.length
+      ? {
+          x: Math.min(...boxes.map((b) => b.x)),
+          y: Math.min(...boxes.map((b) => b.y)),
+          width:
+            Math.max(...boxes.map((b) => b.x + b.width)) -
+            Math.min(...boxes.map((b) => b.x)),
+          height:
+            Math.max(...boxes.map((b) => b.y + b.height)) -
+            Math.min(...boxes.map((b) => b.y)),
+        }
+      : undefined;
+    if (box) protection.push({ clipId, bounds: box });
     let baseScale = 1;
+    let safeScale = 10;
+    if (!box && ref.layout && !ref.subject && (camera?.letterbox ?? 0) < 0.03) {
+      const fit = Math.min(width / asset.width, height / asset.height);
+      baseScale = clamp(
+        Math.max(width / (asset.width * fit), height / (asset.height * fit)),
+        1,
+        10,
+      );
+      command.push({
+        tool: "sequence.keyframe",
+        sequenceId: id,
+        clipId,
+        property: "scale",
+        frame: cursor,
+        value: baseScale,
+        easing: "linear",
+      });
+    }
     if (box) {
       const fit = Math.min(width / asset.width, height / asset.height),
         sw = asset.width * fit,
@@ -275,24 +376,34 @@ export function buildRecreation(
         1,
         10,
       );
+      const x = clamp(
+        (0.5 - box.x - box.width / 2) * baseScale * sw,
+        -Math.max(0, (baseScale * sw - width) / 2),
+        Math.max(0, (baseScale * sw - width) / 2),
+      );
+      const y = clamp(
+        (0.5 - box.y - box.height / 2) * baseScale * sh,
+        -Math.max(0, (baseScale * sh - height) / 2),
+        Math.max(0, (baseScale * sh - height) / 2),
+      );
+      // Zoom keys animate around the same fixed offset as the base frame.
+      // Bound both corners of the union of all observed subjects.
+      for (const [coord, offset, extent] of [
+        [(box.x - 0.5) * sw, x, width],
+        [(box.x + box.width - 0.5) * sw, x, width],
+        [(box.y - 0.5) * sh, y, height],
+        [(box.y + box.height - 0.5) * sh, y, height],
+      ]) {
+        if (Math.abs(coord) > 1e-6)
+          safeScale = Math.min(
+            safeScale,
+            (extent / 2 - Math.sign(coord) * offset) / Math.abs(coord),
+          );
+      }
       for (const [property, value] of [
         ["scale", baseScale],
-        [
-          "x",
-          clamp(
-            (0.5 - box.x - box.width / 2) * baseScale * sw,
-            -Math.max(0, (baseScale * sw - width) / 2),
-            Math.max(0, (baseScale * sw - width) / 2),
-          ),
-        ],
-        [
-          "y",
-          clamp(
-            (0.5 - box.y - box.height / 2) * baseScale * sh,
-            -Math.max(0, (baseScale * sh - height) / 2),
-            Math.max(0, (baseScale * sh - height) / 2),
-          ),
-        ],
+        ["x", x],
+        ["y", y],
       ] as const)
         command.push({
           tool: "sequence.keyframe",
@@ -317,7 +428,7 @@ export function buildRecreation(
             clipId,
             property: "scale",
             frame: cursor + local,
-            value: Math.min(10, baseScale * value),
+            value: Math.max(baseScale, Math.min(safeScale, baseScale * value)),
             easing: "ease-in-out",
           });
       }
@@ -373,6 +484,7 @@ export function buildRecreation(
       addCaptions(clipId, transcript);
     matches.push({
       source: asset.id,
+      clipId,
       sourceIn,
       start: cursor,
       duration,
@@ -383,6 +495,101 @@ export function buildRecreation(
     consumeRange(pool, s, sourceIn, duration);
   }
   if (!cursor) throw Error("The selected footage has no usable video ranges");
+  const transitionTrack = uid();
+  for (let i = 1; i < matches.length; i++) {
+    const left = matches[i - 1],
+      right = matches[i];
+    const measured = dna.transitions.find(
+      (t) => Math.abs(t.cutMs - right.referenceMs) < 1,
+    );
+    if (!measured || measured.kind === "cut") continue;
+    if (
+      !["flash", "blur", "zoom", "whip", "motion"].includes(measured.kind) ||
+      measured.confidence < 0.65
+    ) {
+      warnings.push(
+        "Shot " +
+          (i + 1) +
+          ": " +
+          measured.kind +
+          " evidence is uncertain or unsupported; retained a cut.",
+      );
+      continue;
+    }
+    const before = Math.min(
+      left.duration,
+      120,
+      Math.max(
+        1,
+        Math.round(
+          ((measured.cutMs - measured.startMs) * left.duration) /
+            (left.referenceEndMs - left.referenceMs),
+        ),
+      ),
+    );
+    const after = Math.min(
+      right.duration,
+      120,
+      Math.max(
+        2,
+        Math.round(
+          ((measured.endMs - measured.cutMs) * right.duration) /
+            (right.referenceEndMs - right.referenceMs),
+        ),
+      ),
+    );
+    if (after < 2 || command.length >= 500) continue;
+    command.push({
+      tool: "sequence.transition",
+      sequenceId: id,
+      id: uid(),
+      trackId: transitionTrack,
+      leftId: left.clipId,
+      rightId: right.clipId,
+      kind: measured.kind as "flash" | "blur" | "zoom" | "whip" | "motion",
+      ...(measured.direction ? { direction: measured.direction } : {}),
+      ...(measured.zoomDirection
+        ? { zoomDirection: measured.zoomDirection }
+        : {}),
+      protection: protection.filter(
+        (r) => r.clipId === left.clipId || r.clipId === right.clipId,
+      ),
+      before,
+      after,
+      strength: clamp(measured.strength, 0.05, 1),
+    });
+  }
+  const pulseTrack = uid();
+  for (const pulse of dna.colorPulses ?? []) {
+    if (keepColor || controls.color <= 0) break;
+    const shot = matches.find(
+      (m) => pulse.startMs >= m.referenceMs && pulse.endMs <= m.referenceEndMs,
+    );
+    if (!shot) continue;
+    if (!pulse.palette || command.length >= 500) {
+      warnings.push(
+        "A measured color pulse was omitted because palette evidence or edit capacity was unavailable.",
+      );
+      continue;
+    }
+    const at = (ms: number) =>
+      shot.start +
+      Math.round(
+        ((ms - shot.referenceMs) * shot.duration) /
+          (shot.referenceEndMs - shot.referenceMs),
+      );
+    const start = Math.min(shot.start + shot.duration - 1, at(pulse.startMs));
+    command.push({
+      tool: "sequence.colorPulse",
+      sequenceId: id,
+      id: uid(),
+      sourceId: shot.clipId,
+      trackId: pulseTrack,
+      start,
+      duration: Math.max(1, at(pulse.endMs) - start),
+      ...pulse.palette,
+    });
+  }
   for (const asset of [music, voice]) {
     if (!asset) continue;
     const trackId = asset === voice && music ? uid() : audio;
@@ -426,10 +633,14 @@ export function buildRecreation(
   );
   const scale = Math.min(1, 1920 / Math.max(dna.width, dna.height)),
     dim = (n: number) => Math.max(64, 2 * Math.round((n * scale) / 2));
+  const baseName = "Recreation · " + controls.mode;
+  let name = baseName;
+  for (let take = 2; p.compositions.some((c) => c.name === name); take++)
+    name = baseName + " (" + take + ")";
   command.unshift({
     tool: "sequence.create",
     id,
-    name: "Recreation · " + controls.mode,
+    name,
     settings: { ...p.settings, width: dim(dna.width), height: dim(dna.height) },
     duration: cursor,
     videoTrackId: video,
@@ -457,20 +668,40 @@ export function buildRecreation(
     commands: command,
   };
   let preview = previewEditPlan(plan, p, revision);
+  const initialSequence = compositionView(preview.project, id);
+  for (const c of command) {
+    if (
+      c.tool !== "sequence.transition" ||
+      !["zoom", "whip", "motion"].includes(c.kind)
+    )
+      continue;
+    if (!initialSequence.clips.some((l) => l.id === c.id + "-left")) {
+      warnings.push(
+        c.kind +
+          " transition used editable blur to preserve source coverage and protected subjects.",
+      );
+    }
+  }
   const layout = compositionView(preview.project, id);
   const copy = Array.from(
     controls.instructions.matchAll(/["“]([^"”]{1,120})["”]/g),
     (m) => m[1].trim(),
   ).filter(Boolean);
   const seen = new Set<string>();
-  let priorEnd = 0,
-    omitted = 0;
+  let omitted = 0;
   const graphics = uid();
+  const overlays =
+    dna.text?.filter((t) => t.role === "persistent-overlay").length ?? 0;
+  if (overlays && controls.wording !== "omit")
+    warnings.push(
+      `${overlays} recurring edge-label intervals were excluded from caption recreation. Review recognized words before applying.`,
+    );
   if (controls.wording === "original" && !dna.text?.some((t) => t.content))
     warnings.push("No readable reference words were recognized.");
   for (const appearance of controls.wording === "omit"
     ? []
     : (dna.text ?? [])) {
+    if (appearance.role === "persistent-overlay") continue;
     if (command.length >= 508) break;
     const match = matches.find(
       (m) =>
@@ -484,21 +715,30 @@ export function buildRecreation(
         ((ms - match.referenceMs) * match.duration) /
           (match.referenceEndMs - match.referenceMs),
       );
-    const start = Math.max(priorEnd, relative(appearance.startMs));
+    const start = relative(appearance.startMs);
     const end = Math.min(
       match.start + match.duration,
-      Math.max(start + Math.round(rate * 0.65), relative(appearance.endMs)),
+      Math.max(start + 4, relative(appearance.endMs)),
     );
     if (end - start < 4) continue;
     const source = sources.find((s) => s.asset.id === match.source)!;
-    const sourceTime = ((match.sourceIn + start - match.start) * 1000) / rate;
+    const sourceClip = layout.clips.find((c) => c.id === match.clipId)!;
+    const sourceTime =
+      (sourceFrameAt(sourceClip, start - match.start) * 1000) / rate;
     const sample = source.analysis.vision?.frames
       .filter((f) => sourceTime >= f.sceneStartMs && sourceTime < f.sceneEndMs)
       .sort(
         (a, b) =>
           Math.abs(a.timeMs - sourceTime) - Math.abs(b.timeMs - sourceTime),
       )[0];
-    const label = sample?.labels[0];
+    const strongest = sample?.labels[0];
+    const label =
+      strongest &&
+      strongest.similarity >= 0.22 &&
+      strongest.relativeConfidence >= 0.45 &&
+      strongest.similarity - (sample?.labels[1]?.similarity ?? 0) >= 0.015
+        ? strongest
+        : undefined;
     const transcript =
       source.speech?.transcript ??
       p.transcripts.find(
@@ -538,6 +778,7 @@ export function buildRecreation(
       end,
       sources.map((s) => s.analysis),
       appearance.y + appearance.height / 2,
+      appearance,
     );
     command.push({
       tool: "sequence.text",
@@ -599,15 +840,15 @@ export function buildRecreation(
         1000,
       ),
       y: band.y,
+      layout: { x: band.x, width: band.width },
     });
-    priorEnd = end;
   }
   if (omitted)
     warnings.push(
       omitted +
         " detected text intervals had no original copy. Supply quoted titles to fill them.",
     );
-  if (command.length !== preview.plan.commands.length)
+  if (command.length !== preview.plan.commands.length || warnings.length)
     preview = previewEditPlan(plan, p, revision);
   return { matches, warnings, preview };
 }

@@ -69,7 +69,11 @@ pub fn analyze(
         total: 2,
         unit: "stages",
     });
-    let rms: Vec<f64> = bytes
+    // AAC decoding can return trailing encoder padding beyond the presentation
+    // duration. Exclude it before deriving silence, energy and beat timestamps.
+    let presentation_samples = (asset.duration * RATE as f64).round() as usize;
+    let pcm = &bytes[..bytes.len().min(presentation_samples.saturating_mul(2))];
+    let rms: Vec<f64> = pcm
         .chunks(HOP * 2)
         .map(|chunk| {
             let sum = chunk
@@ -79,7 +83,9 @@ pub fn analyze(
             (sum / (chunk.len() / 2).max(1) as f64).sqrt()
         })
         .collect();
-    let duration = (bytes.len() as f64 / 2. / RATE as f64 * 1000.).round() as u32;
+    let duration = ((pcm.len() / 2) as f64 * 1000. / RATE as f64)
+        .round()
+        .min((asset.duration * 1000.).round()) as u32;
     drop(bytes);
     let result = rms_analysis(&rms, duration, settings, cancel)?;
     report(Progress {

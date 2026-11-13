@@ -17,7 +17,7 @@ export const effectInfo = {
   blur: { label: "Gaussian blur", min: 0, max: 100, step: 0.5, initial: 4 },
   brightness: { label: "Brightness", min: 0, max: 3, step: 0.05, initial: 1 },
   contrast: { label: "Contrast", min: 0, max: 3, step: 0.05, initial: 1 },
-  saturation: { label: "Saturation", min: 0, max: 3, step: 0.05, initial: 1 },
+  saturation: { label: "Saturation", min: 0, max: 8, step: 0.05, initial: 1 },
   tonalContrast: {
     label: "Tonal contrast",
     min: 0.5,

@@ -62,6 +62,7 @@ fn main() {
             analysis::sample_color,
             analysis::reference_motion,
             analysis::reference_text,
+            analysis::reference_visual,
             render::begin_export,
             render::write_frame,
             render::finish_export,

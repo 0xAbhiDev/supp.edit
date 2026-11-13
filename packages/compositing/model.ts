@@ -29,6 +29,7 @@ export const matteModes = [
 export const matteSchema = z.object({
   layerId: z.string().min(1).max(128),
   mode: z.enum(matteModes),
+  keepSourceVisible: z.boolean().optional(),
 });
 export type Matte = z.infer<typeof matteSchema>;
 /** A matte samples another visual layer in the same scope, independently of stack position. */

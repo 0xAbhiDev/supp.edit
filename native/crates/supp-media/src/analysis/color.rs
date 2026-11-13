@@ -20,7 +20,7 @@ pub struct ColorStats {
     pub neutral_fraction: f64,
     pub sample_count: u32,
 }
-fn measure(bytes: &[u8]) -> (f64, f64, f64, Option<f64>, f64) {
+pub(crate) fn measure(bytes: &[u8]) -> (f64, f64, f64, Option<f64>, f64) {
     let (mut sum, mut square, mut sat, mut temperature, mut neutrals) = (0., 0., 0., 0., 0.);
     let count = (bytes.len() / 3) as f64;
     for p in bytes.chunks_exact(3) {

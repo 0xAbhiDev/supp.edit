@@ -10,11 +10,11 @@ const N: usize = W * H;
 #[serde(rename_all = "camelCase")]
 pub struct Motion {
     time_ms: u32,
-    pan_x: f64,
-    pan_y: f64,
-    expansion: f64,
+    pub(crate) pan_x: f64,
+    pub(crate) pan_y: f64,
+    pub(crate) expansion: f64,
     intensity: f64,
-    confidence: f64,
+    pub(crate) confidence: f64,
     freeze: bool,
     edge_darkening: f64,
     black_bars: bool,
@@ -24,7 +24,7 @@ fn median(mut x: Vec<f64>) -> f64 {
     x.sort_by(f64::total_cmp);
     x.get(x.len() / 2).copied().unwrap_or(0.)
 }
-fn describe(a: &[u8], b: &[u8], time_ms: u32) -> Motion {
+pub(crate) fn describe(a: &[u8], b: &[u8], time_ms: u32) -> Motion {
     let mut vectors = vec![];
     for y in (8..H - 8).step_by(8) {
         for x in (8..W - 8).step_by(10) {

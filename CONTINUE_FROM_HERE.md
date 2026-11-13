@@ -1,3 +1,11 @@
+# Continue from the advanced reference checkpoint
+
+The three final coastal Windows exports and their comparison reports are in test-results/reference-coastal/final. Use the saved project in reviewed/Three-modes.supp. The old reviewed movies predate the HLG color correction. The accepted audio and typography commits remain 87541c2 and 6706330.
+
+For the two supplied gym references, use the existing independently measured five-take inventories in test-results/reference-user54/multi-raw and reference-user55/multi-raw. The current editable projects are in reserved/Three-modes.supp and validated/Three-modes.supp respectively. Their Close Match sequences cover 506 and 392 frames. The latter has two editable timed duotones, driven by the raw clip's luminance. Ignore the superseded single-take and pulse/ experiments for acceptance.
+
+Next address the visual failures visible in the reference/output contact sheets. Priorities are stable caption recognition and editable review of uncertain words, recognition of text spanning cuts and creator end cards, textured lettering and text behind an athlete. Test with additional unrelated natural references for motion transitions, music synchronization and speed curves. Refer to docs/REFERENCE_STYLE_CAPABILITIES.md for the limits of each real footage test.
+
 # Continue Reference-to-Edit after Windows acceptance
 
 Use the current repository and working tree. Windows native reference import, raw/music import, four-shot generation, preview, Apply, Undo/Redo, manual brightness revision to 0.91, full exit/reopen and MP4 export have passed. All three modes have separate actual desktop exports. CURRENT_STATE.md records artifacts, measurements and limits. The accepted audio and typography checkpoints remain 87541c2 and 6706330.

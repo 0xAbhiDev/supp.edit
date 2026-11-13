@@ -399,7 +399,7 @@ export class GpuRenderer {
     const stamp =
       input instanceof HTMLVideoElement
         ? input.currentTime
-        : input instanceof ImageBitmap
+        : input instanceof ImageBitmap || input instanceof HTMLCanvasElement
           ? frame
           : 0;
     if (

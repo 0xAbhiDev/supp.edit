@@ -1,3 +1,19 @@
+# Advanced reference checkpoint — 13 November 2026
+
+The restarted Windows desktop app exported all three coastal compositions from the saved project. The eight-shot sequences use two independent coastal sources. Every H.264/AAC frame decoded, all three audio streams contain signal, and the full-frame scans found zero black frames and zero dark side bars. The saved Smart Adaptation brightness edit of 0.96 survived reopening. The reference remains available for comparison in the library and is absent from the rendered graph.
+
+| Windows Deliver output | Frames at 30 fps | Duration | Largest mean RGB error among first, middle and last frames |
+| --- | ---: | ---: | ---: |
+| Close Match | 528 | 17.600 s | 2.34/255 |
+| Smart Adaptation | 591 | 19.700 s | 2.44/255 |
+| Creative Remix | 491 | 16.367 s | 2.22/255 |
+
+Evidence lives under test-results/reference-coastal/final in each mode directory. The editable project is test-results/reference-coastal/reviewed/Three-modes.supp. Close Match cut starts differ by at most 16.34 ms. The coastal reference uses hard cuts and contains no lyric typography or supplied music. Comparisons show matching shot timing and materially different scenery and camera viewpoints. Natural sound, typography and musical beat accuracy require separate cases.
+
+Controlled tests on real footage recover flash, blur, zoom, whip and motion signatures. The generated motion-controller peaks visibly change the export, though their strength can be too low for the detector to recognize again. Shared sRGB decode resolves the HLG preview/export mismatch. See docs/REFERENCE_STYLE_CAPABILITIES.md for boundaries.
+
+Both supplied WhatsApp videos were used as finished references with independent exercise footage and a separate music track. The first Close Match edit has eight intervals, 506 frames and 16.867 s of actual video. The second has four shots, 392 frames, and two editable negative duotone pulses. Its original words, font treatment, text behind the athlete and end card still differ substantially. Technical acceptance applies to the measured features. The previous gym, audio and typography acceptance records follow.
+
 # Reference-to-Edit Windows acceptance checkpoint
 
 Validated on 11 November 2026, building on reference checkpoint 09e863f and typography checkpoint 6706330. The 12-second finished fitness reference and separate 15.555-second squat take produce four independently trimmed shots in each of three modes. Detection recovers boundaries at 2.00, 5.50 and 9.00 seconds. A measured cadence hold at 1.50 seconds drives one bounded editable speed curve.

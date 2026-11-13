@@ -461,6 +461,25 @@ export function ReferenceEditor() {
               : "Color measurements unavailable"}{" "}
             · {result.matches.length} matched source ranges
           </p>
+          {!!result.dna.transitions.length && (
+            <details>
+              <summary>Transition evidence</summary>
+              <p>
+                Evidence strength is a rule score, not a calibrated probability.
+                Uncertain or unsupported effects retain a cut.
+              </p>
+              <ul>
+                {result.dna.transitions.map((t) => (
+                  <li key={t.cutMs}>
+                    {(t.cutMs / 1000).toFixed(2)}s · {t.kind} · evidence{" "}
+                    {Math.round(t.confidence * 100)}/100
+                    {" · "}
+                    {t.evidence.join(" ")}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           <details>
             <summary>Compare shot timing</summary>
             <table>

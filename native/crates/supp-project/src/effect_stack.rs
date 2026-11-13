@@ -50,6 +50,7 @@ pub fn validate(stack: &[Effect], visual: bool) -> Result<(), Error> {
             "sharpen" => (0., 1.),
             "temperature" => (-1., 1.),
             "tonalContrast" => (0.5, 1.5),
+            "saturation" => (0., 8.),
             _ => (0., 3.),
         };
         ensure(range(e.value, min, max), "Invalid effect value")?;

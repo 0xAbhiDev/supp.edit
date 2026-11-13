@@ -43,6 +43,13 @@ export const typographyCommandSchema = z
       .optional(),
     maxFontSize: z.number().finite().min(6).max(1000).optional(),
     y: z.number().finite().min(-32768).max(32768).optional(),
+    layout: z
+      .object({
+        x: z.number().finite().min(-32768).max(32768),
+        width: z.number().finite().min(6).max(32768),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export function createTypography(
@@ -99,6 +106,21 @@ export function createTypography(
     if (call.maxFontSize !== undefined)
       c.text.size = Math.min(c.text.size, call.maxFontSize);
     if (call.y !== undefined) c.transform.y = call.y;
+    if (call.layout) {
+      c.transform.x = call.layout.x;
+      c.text.maxWidth = call.layout.width;
+      const longest = Math.max(
+        ...c.text.content.split("\n").map((s) => s.length),
+      );
+      c.text.size = Math.max(
+        6,
+        Math.min(
+          c.text.size,
+          (call.layout.width - 2 * c.text.padding) /
+            (Math.max(1, longest) * 0.78 * 1.25),
+        ),
+      );
+    }
     fitTextVertically(c, p.settings.width, p.settings.height);
     animateText(c, call.treatment, fps(p), call.wordStarts);
     if (call.cueFrame !== undefined) {

@@ -53,8 +53,11 @@ describe("timeline index and history identity", () => {
   });
   it("handles 100,000 clips without a whole-array viewport scan", () => {
     const p = newProject();
+    // This benchmarks the index, not 100,000 schema/default allocations.
+    // Each clip retains an independent identity and timeline interval.
+    const template = newClip(p.tracks[0].id, 0, 5, "shape");
     p.clips = Array.from({ length: 100000 }, (_, i) =>
-      newClip(p.tracks[0].id, i * 10, 5, "shape"),
+      ({ ...template, id: `index-fixture-${i}`, start: i * 10 }),
     );
     const index = new ClipIndex(p.clips);
     const started = performance.now();

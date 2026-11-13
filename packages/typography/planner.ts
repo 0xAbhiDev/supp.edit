@@ -34,11 +34,41 @@ export function placement(
   end: number,
   analyses: readonly MediaAnalysis[],
   preferred: number,
+  referenceBox?: { x: number; width: number; height: number },
 ) {
   const { width: w, height: h } = p.settings,
     safe = socialSafeArea(w, h),
-    band = h * 0.13;
-  const candidates = [safe.top + band / 2, safe.bottom - band / 2];
+    band = Math.min(
+      safe.bottom - safe.top,
+      h * Math.max(0.13, referenceBox?.height ?? 0),
+    ),
+    textWidth = referenceBox
+      ? Math.min(
+          safe.right - safe.left,
+          Math.max(w * 0.12, referenceBox.width * w + w * 0.04),
+        )
+      : safe.right - safe.left,
+    centerX = referenceBox
+      ? Math.max(
+          safe.left + textWidth / 2,
+          Math.min(
+            safe.right - textWidth / 2,
+            (referenceBox.x + referenceBox.width / 2) * w,
+          ),
+        )
+      : (safe.left + safe.right) / 2;
+  const candidates = [
+    ...(referenceBox
+      ? [
+          Math.max(
+            safe.top + band / 2,
+            Math.min(safe.bottom - band / 2, preferred * h),
+          ),
+        ]
+      : []),
+    safe.top + band / 2,
+    safe.bottom - band / 2,
+  ];
   const scores = candidates.map(() => 0);
   let evidence = 0;
   for (const frame of [start, Math.round((start + end) / 2), end - 1])
@@ -80,7 +110,8 @@ export function placement(
           bottom = Math.max(...pts.map((p) => p.y));
         const coveredWidth = Math.max(
           0,
-          Math.min(r, safe.right) - Math.max(l, safe.left),
+          Math.min(r, centerX + textWidth / 2) -
+            Math.max(l, centerX - textWidth / 2),
         );
         // Protect the upper body when both bands intersect a tall person.
         // This is a conservative head-region estimate from the detection box.
@@ -97,15 +128,18 @@ export function placement(
         });
       }
     }
-  const chosen =
-    scores[1] < scores[0] ||
-    (scores[1] === scores[0] &&
-      Math.abs(candidates[1] / h - preferred) <
-        Math.abs(candidates[0] / h - preferred))
-      ? 1
-      : 0;
+  const chosen = candidates
+    .map((_, i) => i)
+    .sort(
+      (a, b) =>
+        scores[a] - scores[b] ||
+        Math.abs(candidates[a] / h - preferred) -
+          Math.abs(candidates[b] / h - preferred),
+    )[0];
   return {
     y: candidates[chosen] - h / 2,
+    x: centerX - w / 2,
+    width: textWidth,
     evidence,
     overlap: scores[chosen] > 0,
   };

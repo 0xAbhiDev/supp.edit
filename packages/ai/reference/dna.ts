@@ -1,9 +1,25 @@
 import { z } from "zod";
+import {
+  characterizeTransitions,
+  refineFlashBoundaries,
+  separateColorPulses,
+  measuredLayout,
+  averageEmbedding,
+  measuredColor,
+  measuredColorSchema,
+  pulsePaletteSchema,
+  transitionSchema,
+  type VisualFrame,
+} from "./visual";
 import type { Asset } from "../../project-schema";
 import type { MediaAnalysis, BeatMap } from "../media-analysis/model";
 import type { ColorStats } from "../rough-cut/matching";
 import { strongEvents } from "../rough-cut/beats";
-import { appearanceSchema, type TextAppearance } from "./appearance";
+import {
+  appearanceSchema,
+  classifyTextOverlays,
+  type TextAppearance,
+} from "./appearance";
 import type { MotionSample } from "./motion";
 
 const unit = z.number().finite().min(0).max(1);
@@ -23,6 +39,13 @@ export const dnaSchema = z
       .array(
         z
           .object({
+            color: measuredColorSchema.nullable().optional(),
+            layout: z.array(unit).length(16).nullable().optional(),
+            embedding: z
+              .array(z.number().finite().min(-1).max(1))
+              .length(512)
+              .nullable()
+              .optional(),
             startMs: z.number().nonnegative(),
             endMs: z.number().positive(),
             motion: unit.nullable(),
@@ -49,6 +72,21 @@ export const dnaSchema = z
       )
       .min(1)
       .max(2000),
+    transitions: z.array(transitionSchema).max(1999).default([]),
+    colorPulses: z
+      .array(
+        z
+          .object({
+            startMs: z.number().nonnegative(),
+            endMs: z.number().positive(),
+            confidence: unit,
+            palette: pulsePaletteSchema.optional(),
+          })
+          .strict()
+          .refine((v) => v.endMs > v.startMs),
+      )
+      .max(1000)
+      .default([]),
     text: z.array(appearanceSchema).max(512).nullable().default(null),
     color: z
       .object({
@@ -116,6 +154,7 @@ export function extractDNA(
   color?: ColorStats,
   motion: readonly MotionSample[] = [],
   text: TextAppearance[] | null = null,
+  visual: readonly VisualFrame[] = [],
 ): StyleDNA {
   const shots = describeShots(asset, analysis),
     events = map && strongEvents(map),
@@ -154,6 +193,8 @@ export function extractDNA(
       { ...old, startMs: s.timeMs, fadeIn: false, boundaryConfidence: null },
     );
   }
+  const colorPulses = separateColorPulses(shots, visual);
+  refineFlashBoundaries(shots, visual);
   const cuts = shots.slice(1);
   for (const shot of shots) {
     // A residual split changes which frames describe each side of the boundary.
@@ -171,6 +212,15 @@ export function extractDNA(
         changes.reduce((n, f) => n + f.frameDifference, 0) / changes.length;
     shot.framing = vision?.[0]?.shotScale ?? null;
     shot.subject = vision?.[0]?.subject?.label ?? null;
+    if (visual.length) {
+      shot.embedding = averageEmbedding(vision?.map((f) => f.embedding) ?? []);
+      shot.color = measuredColor(visual, shot.startMs, shot.endMs);
+      shot.layout = measuredLayout(
+        visual,
+        shot.startMs + 100,
+        shot.endMs - 100,
+      );
+    }
     const samples = motion.filter(
       (m) => m.timeMs > shot.startMs + 125 && m.timeMs < shot.endMs,
     );
@@ -205,7 +255,9 @@ export function extractDNA(
     width: asset.width,
     height: asset.height,
     shots,
-    text,
+    transitions: characterizeTransitions(shots, visual, motion),
+    colorPulses,
+    text: text && classifyTextOverlays(text, asset.duration * 1000),
     bpm: map?.bpm ?? null,
     alignedCuts:
       events?.length && cuts.length

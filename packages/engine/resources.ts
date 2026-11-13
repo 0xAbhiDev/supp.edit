@@ -6,6 +6,7 @@ export interface Resource {
   element: HTMLImageElement | HTMLVideoElement | HTMLAudioElement;
   gain?: GainNode;
   source?: MediaElementAudioSourceNode;
+  colorSurface?: HTMLCanvasElement;
 }
 interface Entry {
   clipId: string;
@@ -46,6 +47,7 @@ export class ResourcePool {
     this.active = active;
   }
   private release(r: Resource) {
+    if (r.colorSurface) r.colorSurface.width = r.colorSurface.height = 0;
     r.source?.disconnect();
     r.gain?.disconnect();
     if (r.element instanceof HTMLMediaElement) {
@@ -177,14 +179,32 @@ export class ResourcePool {
   ): Promise<CanvasImageSource> {
     if (r.element instanceof HTMLAudioElement)
       throw new Error("Audio has no visual frame");
-    if (!(r.element instanceof HTMLVideoElement) || playing) return r.element;
+    if (!(r.element instanceof HTMLVideoElement)) return r.element;
     const key = this.key(clip, asset, p, frame),
       cached = this.frames.get(key);
-    if (cached) {
+    if (cached && !playing) {
       this.borrowed.add(cached);
       return cached;
     }
-    const bitmap = await createImageBitmap(r.element);
+    // Resolve video color into the project's sRGB working surface before either
+    // renderer reads it. Uploading an HDR ImageBitmap directly to WebGL can
+    // bypass the conversion that Canvas2D performs, producing different grades.
+    const surface = (r.colorSurface ??= document.createElement("canvas"));
+    if (
+      surface.width !== r.element.videoWidth ||
+      surface.height !== r.element.videoHeight
+    ) {
+      surface.width = r.element.videoWidth;
+      surface.height = r.element.videoHeight;
+    }
+    const context = surface.getContext("2d", {
+      colorSpace: "srgb",
+      alpha: true,
+    })!;
+    context.globalCompositeOperation = "copy";
+    context.drawImage(r.element, 0, 0);
+    if (playing) return surface;
+    const bitmap = await createImageBitmap(surface);
     this.borrowed.add(bitmap);
     this.frames.set(key, bitmap, bitmap.width * bitmap.height * 4);
     return bitmap;

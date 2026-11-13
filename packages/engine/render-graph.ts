@@ -59,7 +59,9 @@ export function buildRenderGraph(
       visualSolo = p.tracks.some((t) => t.kind === "video" && t.solo),
       layers: RenderLayer[] = [];
     const consumed = new Set(
-      p.clips.flatMap((c) => (c.matte ? [c.matte.layerId] : [])),
+      p.clips.flatMap((c) =>
+        c.matte && !c.matte.keepSourceVisible ? [c.matte.layerId] : [],
+      ),
     );
     const added = new Set<string>(),
       activeById = new Map(active.map((c) => [c.id, c]));
@@ -114,7 +116,9 @@ export function buildRenderGraph(
       }
     }
     surfaceBytes +=
-      layers.filter((l) => consumed.has(l.clip.id)).length *
+      new Set(
+        layers.flatMap((l) => (l.clip.matte ? [l.clip.matte.layerId] : [])),
+      ).size *
       Math.round(p.settings.width * scale) *
       Math.round(p.settings.height * scale) *
       4;

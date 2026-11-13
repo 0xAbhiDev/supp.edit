@@ -53,6 +53,7 @@ export function CompositingControls({ clip }: { clip: Clip }) {
                     ? {
                         layerId: e.target.value,
                         mode: clip.matte?.mode ?? "alpha",
+                        keepSourceVisible: clip.matte?.keepSourceVisible,
                       }
                     : undefined,
                 ),
@@ -69,6 +70,22 @@ export function CompositingControls({ clip }: { clip: Clip }) {
         </label>
         {clip.matte && (
           <>
+            <label>
+              <span>Show matte source</span>
+              <input
+                type="checkbox"
+                checked={!!clip.matte.keepSourceVisible}
+                onChange={(e) =>
+                  execute(
+                    "Set matte source visibility",
+                    setMatte(clip.id, {
+                      ...clip.matte!,
+                      keepSourceVisible: e.target.checked,
+                    }),
+                  )
+                }
+              />
+            </label>
             <label>
               <span>Use</span>
               <select
@@ -105,9 +122,10 @@ export function CompositingControls({ clip }: { clip: Clip }) {
         )}
         {users.length > 0 && (
           <p role="status" className="field-hint">
-            Used as a matte by {users.map((c) => c.name).join(", ")}. This layer
-            is excluded from direct image output while referenced; its audio
-            follows track controls.
+            Used as a matte by {users.map((c) => c.name).join(", ")}.{" "}
+            {users.every(c => c.matte?.keepSourceVisible)
+              ? "Its picture follows track visibility."
+              : "A matte hides its direct picture."} Its audio follows track controls.
           </p>
         )}
       </div>

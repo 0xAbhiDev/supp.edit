@@ -231,7 +231,7 @@ export function snapshotContext(
     compositing: selected.map((c) => ({
       layerId: c.id,
       blendMode: c.blendMode,
-      matte: c.matte ? { layerId: c.matte.layerId, mode: c.matte.mode } : null,
+      matte: c.matte ? { ...c.matte } : null,
     })),
     effectStacks: selected.map((c) => ({
       layerId: c.id,

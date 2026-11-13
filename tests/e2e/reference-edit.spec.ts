@@ -69,7 +69,7 @@ test("three editable recreations from independent footage with local captured an
     ]);
   for (const [prefix, file] of [
     ["reference-blocks-v2", "motion.json"],
-    ["reference-text-v2", "text.json"],
+    ["reference-text-v3", "text.json"],
   ])
     entries.push([
       [prefix, reference.id, reference.fingerprint].join(":"),

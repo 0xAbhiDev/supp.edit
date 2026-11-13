@@ -1,4 +1,10 @@
 import type { Shot, RecreationMode } from "./dna";
+import {
+  averageEmbedding,
+  embeddingSimilarity,
+  measuredLayout,
+  layoutSimilarity,
+} from "./visual";
 import type { SourceEvidence } from "./planner";
 import { describeShots } from "./dna";
 
@@ -33,6 +39,7 @@ export function matchRange(
   previous: { source: string; sourceIn: number; duration: number } | undefined,
   nextWanted: number,
   chronological: boolean,
+  longestLater = 0,
 ) {
   let best:
     | {
@@ -40,11 +47,28 @@ export function matchRange(
         first: number;
         length: number;
         score: number;
+        timingCoverage: number;
         motion: number | null;
       }
     | undefined;
+  // An early trim can split the only take long enough for a later hold.
+  let largest: Range | undefined,
+    secondCapacity = 0;
+  if (longestLater > 0) {
+    for (const range of pool) {
+      const capacity = range.end - range.first;
+      if (!largest || capacity > largest.end - largest.first) {
+        secondCapacity = largest ? largest.end - largest.first : 0;
+        largest = range;
+      } else secondCapacity = Math.max(secondCapacity, capacity);
+    }
+  }
   for (const range of pool) {
     const { source, shot, first, end } = range;
+    const otherCapacity =
+      largest && largest !== range
+        ? largest.end - largest.first
+        : secondCapacity;
     const relativeMotion =
       ref.motion !== null && shot.motion !== null
         ? bound(
@@ -93,6 +117,15 @@ export function matchRange(
         source.analysis.vision?.frames.filter(
           (f) => f.timeMs >= t0 && f.timeMs < t1,
         ) ?? [];
+      const comparable = observations.length
+        ? observations
+        : (source.analysis.vision?.frames.filter(
+            (f) => f.sceneStartMs === shot.startMs,
+          ) ?? []);
+      const visualFit = embeddingSimilarity(
+        ref.embedding,
+        averageEmbedding(comparable.map((f) => f.embedding)),
+      );
       const framing = observations[0]?.shotScale ?? shot.framing;
       const motionFit =
         motion !== null && ref.motion !== null
@@ -106,13 +139,24 @@ export function matchRange(
         repeat &&
         Math.abs(start - (previous.sourceIn + previous.duration)) < rate * 0.24;
       const remaining = Math.max(start - first, end - start - length);
+      const timingCoverage =
+        mode === "Close Match"
+          ? length + Math.min(longestLater, Math.max(otherCapacity, remaining))
+          : 0;
       const reserve = nextWanted > 0 ? Math.min(1, remaining / nextWanted) : 1;
       const sameSubject =
         ref.subject &&
         observations.some((f) => f.subject?.label === ref.subject);
+      const compositionFit = layoutSimilarity(
+        ref.layout,
+        measuredLayout(source.visual ?? [], t0, t1),
+      );
       const score =
         (4 * length) / target +
         visibility * 0.8 +
+        (visualFit === null ? 0.5 : (visualFit + 1) / 2) *
+          (mode === "Creative Remix" ? 0.3 : 1.2) +
+        (compositionFit ?? 0.5) * (mode === "Creative Remix" ? 0.25 : 0.8) +
         (framing && ref.framing === framing ? 0.55 : 0) +
         (sameSubject ? 0.3 : 0) +
         motionFit * (mode === "Creative Remix" ? 0.2 : 0.9) +
@@ -120,8 +164,12 @@ export function matchRange(
         reserve * 0.8 -
         (repeat ? 0.42 : 0) -
         (continuous && !chronological ? 0.8 : 0);
-      if (!best || score > best.score)
-        best = { range, first: start, length, score, motion };
+      if (
+        !best ||
+        timingCoverage > best.timingCoverage ||
+        (timingCoverage === best.timingCoverage && score > best.score)
+      )
+        best = { range, first: start, length, score, timingCoverage, motion };
     }
   }
   return best;

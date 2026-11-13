@@ -28,6 +28,8 @@ pub fn normal() -> String {
 pub struct Matte {
     pub layer_id: String,
     pub mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keep_source_visible: Option<bool>,
 }
 pub fn validate(clips: &[Clip], tracks: &HashMap<&str, &Track>) -> Result<(), Error> {
     let by_id: HashMap<&str, &Clip> = clips.iter().map(|c| (c.id.as_str(), c)).collect();
@@ -82,6 +84,7 @@ mod tests {
         p.clips[0].matte = Some(Matte {
             layer_id: p.clips[1].id.clone(),
             mode: "luma-inverted".into(),
+            keep_source_visible: Some(true),
         });
         p.clips[0].blend_mode = "soft-light".into();
         p
@@ -97,6 +100,7 @@ mod tests {
         assert_eq!(read.schema_version, 10);
         assert_eq!(read.clips[0].blend_mode, "soft-light");
         assert_eq!(read.clips[0].matte.as_ref().unwrap().mode, "luma-inverted");
+        assert_eq!(read.clips[0].matte.as_ref().unwrap().keep_source_visible, Some(true));
         for mode in BLEND_MODES {
             let mut p = p.clone();
             p.clips[0].blend_mode = mode.into();
@@ -112,6 +116,7 @@ mod tests {
         p.clips[1].matte = Some(Matte {
             layer_id: p.clips[0].id.clone(),
             mode: "alpha".into(),
+            keep_source_visible: None,
         });
         assert!(p
             .validate()

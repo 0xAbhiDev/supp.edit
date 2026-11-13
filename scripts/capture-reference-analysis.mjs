@@ -1,14 +1,14 @@
 // Capture local analysis for repeatable reference recreation tests.
-// Usage: node scripts/capture-reference-analysis.mjs DIRECTORY REFERENCE RAW MUSIC
+// Usage: node scripts/capture-reference-analysis.mjs DIRECTORY REFERENCE RAW [RAW... MUSIC]
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createServer } from "vite";
 import { mediaEnvironment } from "./runtime.mjs";
 const [dir, ...files] = process.argv.slice(2);
-if (files.length !== 3)
+if (!dir || files.length < 2)
   throw Error(
-    "Supply an output directory, reference, raw video and music file",
+    "Supply an output directory, reference and independent raw media",
   );
 fs.mkdirSync(dir, { recursive: true });
 const env = mediaEnvironment(),
@@ -31,6 +31,8 @@ const assets = JSON.parse(
 );
 write("assets.json", JSON.stringify({ assets }));
 for (const [i, a] of assets.entries()) {
+  if (a.kind === "video")
+    write(i + "-visual.json", run("reference_visual", [a.path]));
   const tasks = [
     ...(a.kind === "video" ? ["vision"] : []),
     ...(a.hasAudio ? ["audio"] : []),

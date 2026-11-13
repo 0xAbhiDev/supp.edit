@@ -117,6 +117,20 @@ describe("Track mattes and blends", () => {
       "consumer",
     ]);
   });
+  it("keeps a visible source on screen before, during and after a short luma pulse", () => {
+    const { p, a, b } = fixture();
+    a.start = 10;
+    a.duration = 2;
+    a.matte = { layerId: b.id, mode: "luma", keepSourceVisible: true };
+    const restored = parseProject(JSON.parse(JSON.stringify(p)));
+    for (const frame of [9, 10, 11, 12]) {
+      const layers = buildRenderGraph(restored, frame).layers;
+      expect(layers.find((l) => l.clip.id === b.id)?.output).toBe(true);
+      expect(layers.some((l) => l.clip.id === a.id && l.output)).toBe(
+        frame === 10 || frame === 11,
+      );
+    }
+  });
   it("rejects missing, audio, Null, excessive depth and invalid blend modes", () => {
     const { p, a, b } = fixture();
     a.matte = { layerId: "missing", mode: "alpha" };

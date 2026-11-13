@@ -1,3 +1,4 @@
+import { referenceVisual } from "./visual-source";
 import type { Project, Asset } from "../../project-schema";
 import { referenceMotion, referenceText } from "./motion";
 import { mediaAnalysis } from "../media-analysis/service";
@@ -79,7 +80,8 @@ export function recreate(
           },
           { ...job, report: () => {} },
         );
-        return { asset: a, analysis, color };
+        const visual = await referenceVisual(a, { ...job, report: () => {} });
+        return { asset: a, analysis, color, visual };
       };
       const total = raw.length + 3;
       const stage = (completed: number, detail: string) =>
@@ -107,6 +109,7 @@ export function recreate(
           measured.color,
           await referenceMotion(reference, quiet),
           text,
+          measured.visual,
         );
       }
       const dna =

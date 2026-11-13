@@ -1,5 +1,13 @@
 import { z } from "zod";
-import {typographyCommandSchema,createTypography} from "../../typography/commands";
+import { addColorPulse, colorPulseSchema } from "../../commands/color-pulse";
+import {
+  referenceTransitionSchema,
+  addReferenceTransition,
+} from "../../commands/reference-transition";
+import {
+  typographyCommandSchema,
+  createTypography,
+} from "../../typography/commands";
 import {
   type Project,
   type AnimatedProperty,
@@ -50,9 +58,20 @@ const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  colorPulseSchema,
   typographyCommandSchema,
-  typographyCommandSchema.extend({tool:z.literal("sequence.text"),sequenceId:id}).strict(),
-  z.object({tool:z.literal("sequence.audioTrack"),sequenceId:id,trackId:id,name:z.string().min(1).max(64)}).strict(),
+  referenceTransitionSchema,
+  typographyCommandSchema
+    .extend({ tool: z.literal("sequence.text"), sequenceId: id })
+    .strict(),
+  z
+    .object({
+      tool: z.literal("sequence.audioTrack"),
+      sequenceId: id,
+      trackId: id,
+      name: z.string().min(1).max(64),
+    })
+    .strict(),
   z.object({ tool: z.literal("sequence.remember"), sequenceId: id }).strict(),
   treatmentRevisionSchema
     .extend({ tool: z.literal("sequence.treatment") })
@@ -229,6 +248,12 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
 export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
+  { name: "sequence.colorPulse", description: "Create an editable negative duotone pulse from a raw clip's luminance" },
+  {
+    name: "sequence.transition",
+    description:
+      "Create an editable exposure flash or animated blur between adjacent video clips",
+  },
   {
     name: "sequence.punchIn",
     description:
@@ -331,11 +356,18 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
-  if(call.tool==="sequence.text") {
-    const {sequenceId,...text}=call;
-    return inComposition(sequenceId,createTypography({...text,tool:"text.create"}));
+  if (call.tool === "sequence.colorPulse")
+    return inComposition(call.sequenceId, addColorPulse(call));
+  if (call.tool === "sequence.transition")
+    return inComposition(call.sequenceId, addReferenceTransition(call));
+  if (call.tool === "sequence.text") {
+    const { sequenceId, ...text } = call;
+    return inComposition(
+      sequenceId,
+      createTypography({ ...text, tool: "text.create" }),
+    );
   }
-  if(call.tool === "text.create") return createTypography(call);
+  if (call.tool === "text.create") return createTypography(call);
   if (call.tool === "sequence.punchIn")
     return inComposition(
       call.sequenceId,
@@ -381,10 +413,15 @@ export function toolEdit(input: unknown): Edit {
       createSequence(call)(p);
       return;
     }
-    if(call.tool==="sequence.audioTrack"){
-      inComposition(call.sequenceId,draft=>{
-        if(draft.tracks.some(t=>t.id===call.trackId))throw Error("Track already exists");
-        draft.tracks.push({...newTrack("audio",draft.tracks.length+1),id:call.trackId,name:call.name});
+    if (call.tool === "sequence.audioTrack") {
+      inComposition(call.sequenceId, (draft) => {
+        if (draft.tracks.some((t) => t.id === call.trackId))
+          throw Error("Track already exists");
+        draft.tracks.push({
+          ...newTrack("audio", draft.tracks.length + 1),
+          id: call.trackId,
+          name: call.name,
+        });
       })(p);
       return;
     }
