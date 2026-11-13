@@ -4,6 +4,8 @@ import path from "node:path";
 import { mediaEnvironment } from "./runtime.mjs";
 const file = process.platform === "win32" ? "supp-edit.exe" : "supp-edit";
 const candidate = [
+  path.resolve("bin", file),
+  path.resolve("target/release", file),
   ...(process.platform === "win32"
     ? [
         path.resolve("bin", "supp-edit-compositor.exe"),
@@ -12,14 +14,15 @@ const candidate = [
         path.resolve("bin", "supp-edit-gpu.exe"),
       ]
     : []),
-  ...["bin", "target/release", "target/debug"].map((dir) =>
-    path.resolve(dir, file),
-  ),
+  path.resolve("target/debug", file),
 ].find(existsSync);
 if (!candidate)
   throw new Error("Build the desktop application first: npm run build:desktop");
+const env = mediaEnvironment();
+const models = path.resolve("work/ai-models");
+if (!env.SUPP_AI_MODELS && existsSync(models)) env.SUPP_AI_MODELS = models;
 const child = spawn(candidate, [], {
-  env: mediaEnvironment(),
+  env,
   stdio: "ignore",
   detached: true,
   windowsHide: true,

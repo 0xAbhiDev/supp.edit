@@ -2,6 +2,8 @@
 
 Coastal rendering and the two supplied gym references are recorded at `8a64f95`. Reference Editor now permits corrections and omissions in Review title wording before applying the generated sequence.
 
+The reviewed-wording change is `0bb6c96`. Run `npm run launch` from this checkout to start the verified local build in `bin/supp-edit.exe` with the installed media tools and local analysis models. This executable was built with the debug Cargo profile and embedded production frontend assets.
+
 The restarted Windows desktop app exported all three coastal compositions from the saved project. The eight-shot sequences use two independent coastal sources. Every H.264/AAC frame decoded, all three audio streams contain signal, and the full-frame scans found zero black frames and zero dark side bars. The saved Smart Adaptation brightness edit of 0.96 survived reopening. The reference remains available for comparison in the library and is absent from the rendered graph.
 
 | Windows Deliver output | Frames at 30 fps | Duration | Largest mean RGB error among first, middle and last frames |
