@@ -4,7 +4,7 @@ The three final coastal Windows exports and their comparison reports are in test
 
 For the two supplied gym references, use the existing independently measured five-take inventories in test-results/reference-user54/multi-raw and reference-user55/multi-raw. The current editable projects are in reserved/Three-modes.supp and validated/Three-modes.supp respectively. Their Close Match sequences cover 506 and 392 frames. The latter has two editable timed duotones, driven by the raw clip's luminance. Ignore the superseded single-take and pulse/ experiments for acceptance.
 
-Next address the visual failures visible in the reference/output contact sheets. Priorities are stable caption recognition and editable review of uncertain words, recognition of text spanning cuts and creator end cards, textured lettering and text behind an athlete. Test with additional unrelated natural references for motion transitions, music synchronization and speed curves. Refer to docs/REFERENCE_STYLE_CAPABILITIES.md for the limits of each real footage test.
+The coastal and negative-duotone checkpoint is `8a64f95`. In Reference Editor, expand Review title wording to correct or omit generated titles, then choose Update title preview. The next automatic recognition work should target the misreads and missed words in the comparison sheets, captions spanning cuts, creator end cards, textured lettering and text behind an athlete. Test with additional unrelated natural references for motion transitions, music synchronization and speed curves. Refer to docs/REFERENCE_STYLE_CAPABILITIES.md for the limits of each real footage test.
 
 # Continue Reference-to-Edit after Windows acceptance
 

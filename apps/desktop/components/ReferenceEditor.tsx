@@ -19,6 +19,7 @@ import { backgroundJobs } from "../../../packages/jobs";
 import {
   applyEditPreview,
   isEditPreviewCurrent,
+  previewEditPlan,
 } from "../../../packages/ai/editor-agent/execution";
 import {
   defaults,
@@ -69,6 +70,7 @@ export function ReferenceEditor() {
     [voice, setVoice] = useState(""),
     [controls, setControls] = useState<Controls>(defaults),
     [result, setResult] = useState<Result | null>(null),
+    [titleChanges, setTitleChanges] = useState<Record<string, string>>({}),
     [jobId, setJob] = useState(""),
     [error, setError] = useState(""),
     [profiles, setProfiles] = useState<StyleDNA[]>([]),
@@ -119,8 +121,35 @@ export function ReferenceEditor() {
   );
   function invalidate() {
     setResult(null);
+    setTitleChanges({});
     setSaved("");
     setError("");
+  }
+  function updateTitlePreview() {
+    if (!result || !canApply) return;
+    try {
+      const plan = result.preview.plan;
+      const commands = plan.commands.flatMap((call): typeof plan.commands => {
+        if (
+          call.tool !== "sequence.text" ||
+          !Object.hasOwn(titleChanges, call.id)
+        )
+          return [call];
+        const content = titleChanges[call.id].trim();
+        if (!content) return [];
+        const words = content.split(/\s+/).length;
+        // Refit word animation for changed wording. Preserve measured onsets for equal word counts.
+        const wordStarts =
+          words === call.wordStarts?.length ? call.wordStarts : undefined;
+        return [{ ...call, content, wordStarts }];
+      });
+      const preview = previewEditPlan({ ...plan, commands }, project, revision);
+      setResult({ ...result, preview });
+      setTitleChanges({});
+      setError("");
+    } catch (e) {
+      setError(String(e));
+    }
   }
   function pick(role: "reference" | "raw", ids: string[]) {
     invalidate();
@@ -512,10 +541,47 @@ export function ReferenceEditor() {
               <ol>
                 {view.clips
                   .filter((c) => c.kind === "text")
-                  .map((c) => (
-                    <li key={c.id}>{c.text.content}</li>
+                  .map((c, i) => (
+                    <li key={c.id}>
+                      {result.preview.plan.commands.some(
+                        (call) =>
+                          call.tool === "sequence.text" && call.id === c.id,
+                      ) ? (
+                        <label>
+                          Title {i + 1} · {(c.start / fps(view)).toFixed(2)} s
+                          <input
+                            aria-label={`Title ${i + 1} wording`}
+                            maxLength={500}
+                            disabled={!canApply || busy}
+                            value={titleChanges[c.id] ?? c.text.content}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setTitleChanges((previous) => {
+                                const next = { ...previous };
+                                if (value === c.text.content) delete next[c.id];
+                                else next[c.id] = value;
+                                return next;
+                              });
+                            }}
+                          />
+                        </label>
+                      ) : (
+                        c.text.content
+                      )}
+                    </li>
                   ))}
               </ol>
+              {Object.keys(titleChanges).length > 0 && (
+                <>
+                  <p>Empty titles will be removed from the preview.</p>
+                  <button
+                    disabled={!canApply || busy}
+                    onClick={updateTitlePreview}
+                  >
+                    Update title preview
+                  </button>
+                </>
+              )}
             </details>
           )}
           <button onClick={() => void saveDNA()}>Save Style DNA</button> {saved}
@@ -565,7 +631,7 @@ export function ReferenceEditor() {
             <p key={w}>{w}</p>
           ))}
           <button
-            disabled={!canApply}
+            disabled={!canApply || Object.keys(titleChanges).length > 0}
             onClick={() => {
               try {
                 const s = state();

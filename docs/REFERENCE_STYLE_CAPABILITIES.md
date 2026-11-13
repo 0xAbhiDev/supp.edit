@@ -41,4 +41,8 @@ The five independent raw takes include squat, bench, incline, deadlift and row. 
 
 ## Next acceptance cases
 
-Improve uncertain-word review and recognition of text spanning cuts. Test foreground masks and text occlusion on independent moving subjects. Compare unrelated natural travel, lifestyle, talking-head and cinematic references through the complete native workflow. Track color error, layout agreement and cut timing separately. The current confidence values measure rule evidence and have no calibrated overall style score.
+Each supplied reference now has three separate, decoded H.264/AAC exports. In Close Match, Smart Adaptation and Creative Remix order, the first sequence lengths are 506, 514 and 436 frames. The second lengths are 392, 410 and 384. These six outputs used the production compositor and native encoder. The separate Windows Deliver run for the second Close Match is in `validated/Desktop`. Each comparison sheet shows reference shots above the generated shots. The first reference's gym clips retain narrow side borders on several shots, including 194 frames in Close Match. Side-bar acceptance applies to the coastal case.
+
+Review title wording now allows the user to correct or remove individual recognized titles before Apply. Updating the preview preserves the source trim, styling and title interval. Browser acceptance changed a two-word title to three words and verified Apply, Undo, Redo, save and reopen. This addresses correction of proposed wording. Automatic recognition of missed lettering still needs work.
+
+Improve recognition of uncertain words and text spanning cuts. Test foreground masks and text occlusion on independent moving subjects. Compare unrelated natural travel, lifestyle, talking-head and cinematic references through the complete native workflow. Track color error, layout agreement and cut timing separately. The current confidence values measure rule evidence and have no calibrated overall style score.

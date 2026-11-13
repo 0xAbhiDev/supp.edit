@@ -128,6 +128,8 @@ The native MediaAnalysisService now executes real speech/audio/video analysis; t
 
 ## Advanced reference evidence and editable reconstruction
 
+Reference Editor can revise proposed title wording before Apply. Updating the preview replaces or removes the affected `sequence.text` commands in the plan and revalidates it against the same project and revision. Equal-length word lists keep their individual cue times. Changes in word count use the treatment's built-in timing within the same title interval. The live project receives one history transaction when the user applies the reviewed result.
+
 Reference analysis now joins 30 Hz color/detail/spatial-luminance/block-flow measurements with scene boundaries, sparse semantic embeddings, local OCR and audio events. Evidence is fingerprint-bound and local. CLIP similarity and spatial layout are separate matching signals; neither establishes identity or guarantees an aesthetically equivalent shot. The planner uses only explicitly selected independent raw assets. The exporter verification recursively checks nested source references against the permitted inventory.
 
 Flash and blur become ordinary animated shapes/effect stacks. Zoom, whip and motion bridges become editable null controllers; subject bounds limit displacement/scale and unsafe motion falls back to animated blur. These controllers do not bake or copy reference frames. Color gain is bounded with a neutral-chroma floor to avoid amplifying compression artifacts. Duplicate generated names receive a suffix while composition IDs remain authoritative.

@@ -111,6 +111,20 @@ test("three editable recreations from independent footage with local captured an
     ).toBeEnabled({ timeout: 45000 });
     expect((await model(page)).compositions).toHaveLength(count);
     await expect(panel.getByText(/4 measured shots/)).toBeVisible();
+    if (mode === "Close Match") {
+      await panel.getByText("Review title wording", { exact: true }).click();
+      const first = panel.getByRole("textbox", {
+        name: "Title 1 wording",
+        exact: true,
+      });
+      await first.fill("KEEP YOUR FOCUS");
+      await expect(
+        panel.getByRole("button", { name: "Apply recreation" }),
+      ).toBeDisabled();
+      await panel.getByRole("button", { name: "Update title preview" }).click();
+      await expect(first).toHaveValue("KEEP YOUR FOCUS");
+      expect((await model(page)).compositions).toHaveLength(count);
+    }
     const scrub = panel.getByLabel("Revision preview frame");
     await scrub.focus();
     await scrub.press("End");
@@ -140,7 +154,7 @@ test("three editable recreations from independent footage with local captured an
     const titles = generated.layers.filter((c: any) => c.kind === "text");
     expect(titles.map((c: any) => c.text.content)).toEqual(
       mode === "Close Match"
-        ? ["STAY FOCUSED", "BUILD STRENGTH", "ONE MORE REP", "EARN IT"]
+        ? ["KEEP YOUR FOCUS", "BUILD STRENGTH", "ONE MORE REP", "EARN IT"]
         : ["BRACE", "SIT BACK", "DRIVE UP", "RESET"],
     );
     const detected = await json("text.json");
@@ -163,7 +177,7 @@ test("three editable recreations from independent footage with local captured an
     page.waitForEvent("download"),
     page.getByRole("button", { name: "Save project", exact: true }).click(),
   ]);
-  const output = path.join(dir, "Three-modes.supp");
+  const output = test.info().outputPath("reviewed-wording.supp");
   await download.saveAs(output);
   const previous = await model(page);
   await page.close();
