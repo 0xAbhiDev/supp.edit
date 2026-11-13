@@ -1,3 +1,11 @@
+# Visual Fidelity 2.0 — active work, not accepted
+
+Starting checkpoint: `7be9d83`. The existing audio, typography and coastal acceptance remains valid. The new vertical gym workflow is **partially complete**; six final native exports and independent non-gym acceptance are still outstanding.
+
+Dense animated-mask projects exposed unbuffered native JSON file reads. A buffered reader preserves the same validation and 64 MiB limit. Native read/save/read of the actual three-mode 18.9 MB project completed in 6.10 seconds with identical project data; the unbuffered run had exceeded 120 CPU seconds. All 24 project tests pass. This is a persistence performance fix, not visual-fidelity acceptance.
+
+Current evidence is under `test-results/fidelity2`. Native Preview/Apply/Undo/Redo and Save completed for the first layered gym reconstruction in `54/project.supp`; the application was fully closed. That saved project predates the final aperture fix and is not a final visual acceptance artifact. Continue with the current framing implementation and full reopen/export checks.
+
 # Advanced reference checkpoint — 13 November 2026
 
 Coastal rendering and the two supplied gym references are recorded at `8a64f95`. Reference Editor now permits corrections and omissions in Review title wording before applying the generated sequence.

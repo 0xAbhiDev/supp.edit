@@ -1,3 +1,11 @@
+# Resume Visual Fidelity 2.0 in the current tree
+
+Preserve `7be9d83` and all current changes. The latest user brief is attachment `2ed66c5d-db87-4fe8-99e8-eb6e3ac5b9e5/Pasted text.txt`. Continue automated Windows testing; the user explicitly authorized it.
+
+Active artifacts: `test-results/fidelity2/54` and `55`. `54/project.supp` was saved through the native app after actual Preview/Apply/Undo/Redo, then full process close. It has 16 editable titles and five animated person-mask copies, but predates the final framing correction. Reopen and verify editability, then regenerate using the current planner before final export. `54/aperture-v2/Three-modes.supp` exercises the latest framing through the production planning/history path with captured native evidence.
+
+Do not claim Visual Fidelity 2.0 complete. Ornate text in reference 55 is still withheld as uncertain, and PP-HumanSeg misses limbs or includes equipment in bench/deadlift shots. Accurate ornate lettering, reliable segmentation, six final native gym exports and independent non-gym acceptance remain open. Preserve the pre-existing formatting-only change in `native/crates/supp-project/src/typography.rs`.
+
 # Continue from the advanced reference checkpoint
 
 The three final coastal Windows exports and their comparison reports are in test-results/reference-coastal/final. Use the saved project in reviewed/Three-modes.supp. The old reviewed movies predate the HLG color correction. The accepted audio and typography commits remain 87541c2 and 6706330.

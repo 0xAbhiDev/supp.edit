@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs,
-    io::Write,
+    io::{BufReader, Write},
     path::Path,
 };
 use thiserror::Error;
@@ -854,7 +854,8 @@ pub fn read(path: &Path) -> Result<Project, Error> {
         fs::metadata(path)?.len() <= 64 * 1024 * 1024,
         "Project exceeds 64 MiB limit",
     )?;
-    let mut p: Project = serde_json::from_reader(fs::File::open(path)?)?;
+    // serde_json reads small chunks; buffer disk I/O for dense animated-mask projects.
+    let mut p: Project = serde_json::from_reader(BufReader::new(fs::File::open(path)?))?;
     p.validate()?;
     p.schema_version = 10;
     Ok(p)
