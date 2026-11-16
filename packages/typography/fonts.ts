@@ -1,0 +1,20 @@
+/** System font candidates shared by reference analysis and the editable inspector. */
+export const fontFamilies = [
+  "Arial",
+  "Arial Black",
+  "Arial Narrow",
+  "Impact",
+  "Segoe UI",
+  "Georgia",
+  "Times New Roman",
+  "Cambria",
+  "Palatino Linotype",
+  "Constantia",
+  "Segoe Script",
+  "Gabriola",
+  "Brush Script MT",
+  "Monotype Corsiva",
+  "Edwardian Script ITC",
+  "French Script MT",
+  "Courier New",
+] as const;

@@ -2,6 +2,7 @@ import { type Asset, type Clip, type Project, fps } from "../project-schema";
 import { sourceUrl, waitEvent } from "../platform";
 import { LruCache } from "./lru";
 import { sourceFrameAt, speedAt } from "../time-remap/model";
+import { seekMedia } from "./seek-media";
 export interface Resource {
   element: HTMLImageElement | HTMLVideoElement | HTMLAudioElement;
   gain?: GainNode;
@@ -153,9 +154,7 @@ export class ResourcePool {
           ) &&
           Math.abs(media.currentTime - time) > 0.0001
         ) {
-          const ready = waitEvent(media, "seeked");
-          media.currentTime = time;
-          await ready;
+          await seekMedia(media, time, asset.fps || fps(p));
         }
       } else {
         if (Math.abs(media.currentTime - time) > 0.12) media.currentTime = time;

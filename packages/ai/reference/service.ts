@@ -1,4 +1,7 @@
 import { referenceVisual } from "./visual-source";
+import { personMasks } from "./subject-mask";
+import { measureTextDepth } from "./text-depth";
+import { sourceAperture } from "./aperture";
 import type { Project, Asset } from "../../project-schema";
 import { referenceMotion, referenceText } from "./motion";
 import { mediaAnalysis } from "../media-analysis/service";
@@ -93,6 +96,22 @@ export function recreate(
         let text = null;
         try {
           text = await referenceText(reference, quiet);
+          if (
+            text?.length &&
+            controls.subjectLayering === "reference" &&
+            caps.personModel?.installed
+          ) {
+            try {
+              const masks = await personMasks(reference, quiet);
+              text = text.map((line) => measureTextDepth(line, masks));
+            } catch (e) {
+              await job.checkpoint();
+              warnings.push(
+                "Reference depth could not be measured; unresolved text stays in front: " +
+                  String(e).slice(0, 160),
+              );
+            }
+          }
         } catch (e) {
           await job.checkpoint();
           warnings.push(
@@ -102,6 +121,27 @@ export function recreate(
         const refMusic = reference.hasAudio
           ? (await run(reference, "audio")).audio?.beatMap
           : undefined;
+        let transcript = project.transcripts.find(
+          (t) =>
+            t.assetId === reference.id &&
+            t.sourceFingerprint === reference.fingerprint,
+        );
+        if (
+          !transcript &&
+          reference.hasAudio &&
+          text?.length &&
+          caps.model?.installed
+        ) {
+          try {
+            transcript =
+              (await run(reference, "speech")).transcript ?? undefined;
+          } catch (e) {
+            await job.checkpoint();
+            warnings.push(
+              "Reference vocal timing unavailable: " + String(e).slice(0, 160),
+            );
+          }
+        }
         return extractDNA(
           reference,
           measured.analysis,
@@ -110,6 +150,7 @@ export function recreate(
           await referenceMotion(reference, quiet),
           text,
           measured.visual,
+          transcript,
         );
       }
       const dna =
@@ -121,6 +162,26 @@ export function recreate(
       for (const a of raw) {
         stage(1 + sources.length, "Understanding " + a.name);
         const evidence: SourceEvidence = await visuals(a);
+        if (controls.format === "vertical")
+          evidence.aperture = await sourceAperture(a, quiet);
+        if (
+          controls.subjectLayering === "behind-people" ||
+          (controls.subjectLayering === "reference" &&
+            dna.text?.some(
+              (l) =>
+                l.depth?.relation === "behind" &&
+                l.evidence?.status !== "uncertain",
+            ))
+        ) {
+          try {
+            evidence.people = await personMasks(a, quiet);
+          } catch (e) {
+            await job.checkpoint();
+            warnings.push(
+              "Person segmentation unavailable: " + String(e).slice(0, 180),
+            );
+          }
+        }
         if (
           a.hasAudio &&
           (/caption|speech|talking.head/i.test(controls.instructions) ||

@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { assessReferenceText } from "./text-evidence";
+import type { Transcript } from "../transcript";
 import {
   characterizeTransitions,
   refineFlashBoundaries,
@@ -155,6 +157,7 @@ export function extractDNA(
   motion: readonly MotionSample[] = [],
   text: TextAppearance[] | null = null,
   visual: readonly VisualFrame[] = [],
+  transcript?: Transcript,
 ): StyleDNA {
   const shots = describeShots(asset, analysis),
     events = map && strongEvents(map),
@@ -257,7 +260,13 @@ export function extractDNA(
     shots,
     transitions: characterizeTransitions(shots, visual, motion),
     colorPulses,
-    text: text && classifyTextOverlays(text, asset.duration * 1000),
+    text:
+      text &&
+      assessReferenceText(
+        classifyTextOverlays(text, asset.duration * 1000),
+        transcript,
+        map,
+      ),
     bpm: map?.bpm ?? null,
     alignedCuts:
       events?.length && cuts.length

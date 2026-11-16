@@ -2,7 +2,11 @@ import { z } from "zod";
 import { original } from "immer";
 import { type Project, projectSchema } from "../../project-schema";
 import { History, type Edit } from "../../commands";
-import { inComposition, compositionView } from "../../commands/compositions";
+import {
+  inComposition,
+  compositionView,
+  batchCompositionEdits,
+} from "../../commands/compositions";
 import { freezeSnapshot } from "../context";
 import { toolCallSchema, toolEdit } from "./registry";
 export const editPlanSchema = z
@@ -31,9 +35,11 @@ const origins = new WeakMap<
   { project: Project; revision: number }
 >();
 function planEdit(plan: EditorPlan): Edit {
-  return inComposition(plan.compositionId, (p) => {
-    for (const call of plan.commands) toolEdit(call)(p);
-  });
+  return batchCompositionEdits(
+    inComposition(plan.compositionId, (p) => {
+      for (const call of plan.commands) toolEdit(call)(p);
+    }),
+  );
 }
 export function previewEditPlan(
   input: unknown,
@@ -53,9 +59,13 @@ export function previewEditPlan(
   projectSchema.parse(result);
   if (result === project)
     throw new Error("The plan produces no project changes");
-  const resultScope=plan.resultCompositionId ?? plan.compositionId;
-  if(resultScope && !result.compositions.some(c=>c.id===resultScope))throw new Error("The planned preview sequence does not exist");
-  const before = resultScope && !project.compositions.some(c=>c.id===resultScope) ? {clips:[]} : compositionView(project, resultScope),
+  const resultScope = plan.resultCompositionId ?? plan.compositionId;
+  if (resultScope && !result.compositions.some((c) => c.id === resultScope))
+    throw new Error("The planned preview sequence does not exist");
+  const before =
+      resultScope && !project.compositions.some((c) => c.id === resultScope)
+        ? { clips: [] }
+        : compositionView(project, resultScope),
     after = compositionView(result, resultScope);
   const preview = freezeSnapshot({
     frame: (() => {

@@ -42,6 +42,38 @@ export const typographyCommandSchema = z
       .strict()
       .optional(),
     maxFontSize: z.number().finite().min(6).max(1000).optional(),
+    // Captured ink centers in composition pixels. Materialize ordinary editable
+    // transform keys once so rendering does not depend on the analysis cache.
+    measuredInk: z
+      .object({
+        widthEm: z.number().positive().max(256),
+        heightEm: z.number().positive().max(4),
+        centerXEm: z.number().finite().min(-4).max(4),
+        centerYEm: z.number().finite().min(-4).max(4),
+        samples: z
+          .array(
+            z
+              .object({
+                frame,
+                x: z.number().finite().min(-32768).max(32768),
+                y: z.number().finite().min(-32768).max(32768),
+                width: z.number().positive().max(32768),
+                height: z.number().positive().max(32768),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(129),
+      })
+      .strict()
+      .optional(),
+    face: z
+      .object({
+        family: z.string().regex(/^[a-zA-Z0-9 ,-]{1,128}$/),
+        weight: z.enum(["400", "700", "900"]),
+      })
+      .strict()
+      .optional(),
     y: z.number().finite().min(-32768).max(32768).optional(),
     layout: z
       .object({
@@ -105,6 +137,10 @@ export function createTypography(
     }
     if (call.maxFontSize !== undefined)
       c.text.size = Math.min(c.text.size, call.maxFontSize);
+    if (call.face) {
+      c.text.font = call.face.family;
+      c.text.weight = call.face.weight;
+    }
     if (call.y !== undefined) c.transform.y = call.y;
     if (call.layout) {
       c.transform.x = call.layout.x;
@@ -123,6 +159,82 @@ export function createTypography(
     }
     fitTextVertically(c, p.settings.width, p.settings.height);
     animateText(c, call.treatment, fps(p), call.wordStarts);
+    if (call.measuredInk) {
+      const { samples, widthEm, heightEm, centerXEm, centerYEm } =
+        call.measuredInk;
+      if (
+        samples.some(
+          (s, i) =>
+            s.frame >= call.duration ||
+            (i === 0 ? s.frame !== 0 : s.frame <= samples[i - 1].frame),
+        )
+      )
+        throw Error("Invalid captured ink timing");
+      c.text.size = Math.max(6, Math.min(1000, samples[0].height / heightEm));
+      c.text.padding = 0;
+      c.text.maxWidth = 0;
+      c.text.tracking = 0;
+      c.text.shadowY = 0;
+      c.text.shadowBlur = 0;
+      c.text.strokeWidth = 0;
+      c.text.emphasis =
+        call.ink?.accent && c.text.content.trim().split(/\s+/).length > 1
+          ? [
+              {
+                word: Math.min(
+                  call.ink.word,
+                  c.text.content.trim().split(/\s+/).length - 1,
+                ),
+                color: call.ink.accent,
+                scale: 1,
+                weight: c.text.weight === "400" ? "normal" : "bold",
+              },
+            ]
+          : [];
+      if (call.ink?.accent && c.text.content.trim().split(/\s+/).length === 1)
+        c.text.color = call.ink.accent;
+      for (const prop of [
+        "opacity",
+        "scale",
+        "x",
+        "y",
+        "scaleX",
+        "scaleY",
+      ] as const)
+        c.keyframes[prop] = [];
+      const poses = samples.map((s) => {
+        const scaleX = Math.max(
+          0.01,
+          Math.min(10, s.width / (widthEm * c.text.size)),
+        );
+        const scaleY = Math.max(
+          0.01,
+          Math.min(10, s.height / (heightEm * c.text.size)),
+        );
+        return {
+          frame: s.frame,
+          x: s.x - centerXEm * c.text.size * scaleX,
+          y: s.y - centerYEm * c.text.size * scaleY,
+          scaleX,
+          scaleY,
+        };
+      });
+      for (const prop of ["x", "y", "scaleX", "scaleY"] as const) {
+        c.transform[prop] = poses[0][prop];
+        if (
+          poses.some(
+            (v) =>
+              Math.abs(v[prop] - poses[0][prop]) >
+              (prop === "x" || prop === "y" ? 1 : 0.015),
+          )
+        )
+          c.keyframes[prop] = poses.map((v) => ({
+            frame: v.frame,
+            value: v[prop],
+            easing: "linear",
+          }));
+      }
+    }
     if (call.cueFrame !== undefined) {
       if (call.cueFrame >= c.duration)
         throw new Error("Text cue is outside the layer");

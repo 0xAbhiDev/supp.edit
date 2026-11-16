@@ -76,6 +76,28 @@ pub async fn vision_model_status(app: AppHandle) -> Result<ModelStatus, String> 
     Ok(supp_media::vision_models::status(&model_root(&app)?))
 }
 #[tauri::command]
+pub async fn person_model_status(app: AppHandle) -> Result<ModelStatus, String> {
+    Ok(supp_media::person_model::status(&model_root(&app)?))
+}
+#[tauri::command]
+pub async fn install_person_model(
+    app: AppHandle,
+    id: String,
+    on_progress: Channel<Progress>,
+) -> Result<ModelStatus, String> {
+    let cancel = start(&app, &id)?;
+    let worker = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::person_model::install(&model_root(&worker)?, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+#[tauri::command]
 pub async fn install_vision_model(
     app: AppHandle,
     id: String,
@@ -106,6 +128,7 @@ pub fn remove_ai_model(app: AppHandle, model_id: String) -> Result<(), String> {
     let target = match model_id.as_str() {
         supp_media::models::MODEL_ID => supp_media::models::location(&root),
         supp_media::vision_models::MODEL_ID => supp_media::vision_models::location(&root),
+        supp_media::person_model::MODEL_ID => supp_media::person_model::location(&root),
         _ => return Err("Unknown installed model".into()),
     };
     if target.exists() {
@@ -319,6 +342,49 @@ pub async fn reference_text(
     result?
 }
 
+#[tauri::command]
+pub async fn person_mask(
+    app: AppHandle,
+    id: String,
+    path: String,
+    on_progress: Channel<Progress>,
+) -> Result<Vec<supp_media::analysis::person_mask::MaskSample>, String> {
+    let source = app
+        .state::<Session>()
+        .require(std::path::Path::new(&path))?;
+    let root = model_root(&app)?;
+    let cancel = start(&app, &id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::analysis::person_mask::run(&root, &source, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+#[tauri::command]
+pub async fn source_aperture(
+    app: AppHandle,
+    id: String,
+    path: String,
+    on_progress: Channel<Progress>,
+) -> Result<supp_media::analysis::aperture::Aperture, String> {
+    let source = app
+        .state::<Session>()
+        .require(std::path::Path::new(&path))?;
+    let cancel = start(&app, &id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::analysis::aperture::run(&source, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
 #[tauri::command]
 pub async fn reference_visual(
     app: AppHandle,

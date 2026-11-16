@@ -1,15 +1,89 @@
 import { z } from "zod";
 const unit = z.number().finite().min(0).max(1);
+const glyph = z.array(z.number().int().min(0).max(0xffffffff)).length(16);
 export const appearanceSchema = z
   .object({
     startMs: z.number().int().nonnegative(),
+    templateRows: glyph.optional(),
+    depth: z
+      .object({
+        relation: z.enum(["front", "behind", "unknown"]),
+        observations: z
+          .array(
+            z
+              .object({
+                timeMs: z.number().int().nonnegative(),
+                insideRetention: unit,
+                outsideRetention: unit,
+              })
+              .strict(),
+          )
+          .max(128),
+      })
+      .strict()
+      .optional(),
     endMs: z.number().int().positive(),
     x: unit,
     y: unit,
     width: unit,
     height: unit,
+    geometry: z
+      .array(
+        z
+          .object({
+            timeMs: z.number().int().nonnegative(),
+            rows: glyph.optional(),
+            x: unit,
+            y: unit,
+            width: unit,
+            height: unit,
+          })
+          .strict(),
+      )
+      .max(128)
+      .optional(),
+    inkMetrics: z
+      .object({
+        family: z.string().regex(/^[a-zA-Z0-9 ,-]{1,128}$/),
+        weight: z.enum(["400", "700", "900"]),
+        widthEm: z.number().positive().max(256),
+        heightEm: z.number().positive().max(4),
+        centerXEm: z.number().finite().min(-4).max(4),
+        centerYEm: z.number().finite().min(-4).max(4),
+      })
+      .strict()
+      .optional(),
     content: z.string().min(1).max(120).optional(),
     role: z.enum(["caption", "persistent-overlay"]).optional(),
+    observations: z.number().int().positive().optional(),
+    passAgreements: z.number().int().nonnegative().optional(),
+    glyphRows: z
+      .array(z.number().int().min(0).max(0xffffffff))
+      .length(16)
+      .optional(),
+    evidence: z
+      .object({
+        status: z.enum(["audio-visual", "visual-consensus", "uncertain"]),
+        kind: z.enum([
+          "captioned-lyrics",
+          "captioned-speech",
+          "title",
+          "label",
+          "unresolved",
+        ]),
+        wordStartsMs: z.array(z.number().nonnegative()).max(20),
+        beatDistanceMs: z.number().nonnegative().nullable(),
+      })
+      .strict()
+      .optional(),
+    face: z
+      .object({
+        family: z.string().regex(/^[a-zA-Z0-9 ,-]{1,128}$/),
+        weight: z.enum(["400", "700", "900"]),
+        fit: unit,
+      })
+      .strict()
+      .optional(),
     foreground: z
       .string()
       .regex(/^#[0-9A-F]{6}$/i)

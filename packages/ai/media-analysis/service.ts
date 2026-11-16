@@ -71,6 +71,19 @@ export interface AnalysisBackend {
     job: JobContext,
   ): Promise<MediaAnalysis>;
 }
+export const personModel: AIModel = {
+  id: "pphumanseg-2023mar",
+  name: "PP-HumanSeg · people",
+  task: "SegmentSubject",
+  providerId: "onnx-local-vision",
+  sizeBytes: 6163938,
+  installedState: "not-installed",
+  executionDevice: "CPU",
+  supportedDevices: ["CPU"],
+  version: "2023mar-552d8a98",
+  download: { state: "not-requested" },
+  runtime: "native-inference",
+};
 export async function nativeJob<T>(
   command: string,
   args: Record<string, unknown>,
@@ -126,6 +139,7 @@ export class MediaAnalysisService {
   ) {
     this.models.register(speechModel);
     this.models.register(visionModel);
+    this.models.register(personModel);
   }
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -163,11 +177,18 @@ export class MediaAnalysisService {
   }
   async capabilities() {
     if (!desktop)
-      return { model: null, visionModel: null, audio: false, video: false };
-    const [model, media, vision] = await Promise.all([
+      return {
+        model: null,
+        visionModel: null,
+        personModel: null,
+        audio: false,
+        video: false,
+      };
+    const [model, media, vision, person] = await Promise.all([
       invoke<ModelStatus>("speech_model_status"),
       invoke<Capabilities>("probe_capabilities"),
       invoke<ModelStatus>("vision_model_status"),
+      invoke<ModelStatus>("person_model_status"),
     ]);
     this.models.reportRuntimeState(speechModel.id, {
       installedState: model.installed ? "installed" : "not-installed",
@@ -177,16 +198,27 @@ export class MediaAnalysisService {
       installedState: vision.installed ? "installed" : "not-installed",
       download: { state: "not-requested" },
     });
+    this.models.reportRuntimeState(personModel.id, {
+      installedState: person.installed ? "installed" : "not-installed",
+      download: { state: "not-requested" },
+    });
     return {
       model,
+      personModel: person,
       visionModel: vision,
       audio: media.ffmpeg && media.ffprobe,
       video: media.ffmpeg && media.ffprobe,
     };
   }
-  install(projectId: string, kind: "speech" | "vision" = "speech") {
-    const selected = kind === "speech" ? speechModel : visionModel,
-      bytes = kind === "speech" ? 86620353 : 177170323;
+  install(projectId: string, kind: "speech" | "vision" | "person" = "speech") {
+    const selected =
+        kind === "speech"
+          ? speechModel
+          : kind === "person"
+            ? personModel
+            : visionModel,
+      bytes =
+        kind === "speech" ? 86620353 : kind === "person" ? 6175375 : 177170323;
     return this.jobs.enqueue({
       label: `Install ${selected.name} (${Math.ceil(bytes / 1048576)} MiB download)`,
       scope: projectId,
@@ -201,7 +233,11 @@ export class MediaAnalysisService {
         });
         try {
           const model = await nativeJob<ModelStatus>(
-            kind === "speech" ? "install_speech_model" : "install_vision_model",
+            kind === "speech"
+              ? "install_speech_model"
+              : kind === "person"
+                ? "install_person_model"
+                : "install_vision_model",
             {},
             {
               ...job,
@@ -240,9 +276,14 @@ export class MediaAnalysisService {
       },
     });
   }
-  async remove(kind: "speech" | "vision") {
+  async remove(kind: "speech" | "vision" | "person") {
     if (!desktop) throw new Error("Model management requires the desktop app");
-    const model = kind === "speech" ? speechModel : visionModel;
+    const model =
+      kind === "speech"
+        ? speechModel
+        : kind === "person"
+          ? personModel
+          : visionModel;
     await invoke("remove_ai_model", { modelId: model.id });
     this.models.reportRuntimeState(model.id, {
       installedState: "not-installed",

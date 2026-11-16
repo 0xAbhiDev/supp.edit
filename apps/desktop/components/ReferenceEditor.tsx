@@ -31,6 +31,7 @@ import {
   type StyleDNA,
 } from "../../../packages/ai/reference/dna";
 import { recreate } from "../../../packages/ai/reference/service";
+import { measureTitleInk } from "../../../packages/ai/reference/font-match";
 import { SequencePreview } from "./SequencePreview";
 import "./reference-editor.css";
 type Result = Extract<
@@ -141,7 +142,20 @@ export function ReferenceEditor() {
         // Refit word animation for changed wording. Preserve measured onsets for equal word counts.
         const wordStarts =
           words === call.wordStarts?.length ? call.wordStarts : undefined;
-        return [{ ...call, content, wordStarts }];
+        let measuredInk = call.measuredInk;
+        if (measuredInk && call.face && content !== call.content) {
+          const context = document.createElement("canvas").getContext("2d");
+          const metrics =
+            context &&
+            measureTitleInk(
+              context,
+              content,
+              call.face.family,
+              call.face.weight,
+            );
+          measuredInk = metrics ? { ...measuredInk, ...metrics } : undefined;
+        }
+        return [{ ...call, content, wordStarts, measuredInk }];
       });
       const preview = previewEditPlan({ ...plan, commands }, project, revision);
       setResult({ ...result, preview });
@@ -250,7 +264,16 @@ export function ReferenceEditor() {
           ...result.dna,
           text:
             result.dna.text?.map(
-              ({ content: _content, ...geometry }) => geometry,
+              ({
+                content: _content,
+                glyphRows: _glyphs,
+                templateRows: _template,
+                geometry: samples,
+                ...style
+              }) => ({
+                ...style,
+                geometry: samples?.map(({ rows: _rows, ...box }) => box),
+              }),
             ) ?? null,
         },
         ...profiles.filter((p) => p.name !== result.dna.name),
@@ -406,6 +429,40 @@ export function ReferenceEditor() {
               <option value="omit">Omit reference titles</option>
             </select>
           </label>
+          <label>
+            Output framing
+            <select
+              aria-label="Output framing"
+              value={controls.format ?? "reference"}
+              onChange={(e) =>
+                update({ format: e.target.value as Controls["format"] })
+              }
+            >
+              <option value="vertical">
+                9:16 · protect subjects, fill background
+              </option>
+              <option value="reference">Reference aspect ratio</option>
+            </select>
+          </label>
+          <label>
+            Text layering
+            <select
+              aria-label="Text layering"
+              value={controls.subjectLayering ?? "flat"}
+              onChange={(e) =>
+                update({
+                  subjectLayering: e.target
+                    .value as Controls["subjectLayering"],
+                })
+              }
+            >
+              <option value="reference">Follow measured reference depth</option>
+              <option value="flat">In front</option>
+              <option value="behind-people">
+                Behind people · local mask model
+              </option>
+            </select>
+          </label>
           {controls.wording === "original" && (
             <p>
               Review the locally recognized words in Preview before applying.
@@ -535,6 +592,22 @@ export function ReferenceEditor() {
               </tbody>
             </table>
           </details>
+          {result.dna.text?.some((t) => t.evidence?.kind === "unresolved") && (
+            <details>
+              <summary>Uncertain reference wording</summary>
+              <ul>
+                {result.dna.text
+                  .filter((t) => t.evidence?.kind === "unresolved")
+                  .map((t, i) => (
+                    <li key={i}>
+                      {(t.startMs / 1000).toFixed(2)}–
+                      {(t.endMs / 1000).toFixed(2)} s ·{" "}
+                      {t.content ?? "Unreadable"} (omitted)
+                    </li>
+                  ))}
+              </ul>
+            </details>
+          )}
           {view.clips.some((c) => c.kind === "text") && (
             <details>
               <summary>Review title wording</summary>

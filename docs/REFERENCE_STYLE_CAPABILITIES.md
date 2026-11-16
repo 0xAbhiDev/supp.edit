@@ -1,5 +1,11 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**16 November fidelity increment (not style acceptance).** Both supplied gym references now have actual 1080 × 1920 Windows Close Match exports in `test-results/fidelity-breakthrough/{54,55}/final`. Every frame decodes; permitted raw sources only, no detected black frames or dark side bars, and zero measured music lag in three windows. Measured installed-font ink geometry places text within the foreground footage. Cast-aware OCR recovers YOU, CANNOT and REASON in the second reference, and conservative depth analysis correctly leaves REASON in front. Missing ornate words, coarse timing, excessive background blur, subject scale and green-tinted grading remain failures. See `REFERENCE_FIDELITY_BREAKTHROUGH.md` for before/after diagnostics and mode-specific verification; no overall similarity percentage is claimed.
+
+**14 November portrait evidence.** The first supplied gym Reel produced an eight-shot 1080 × 1920 Close Match Windows export. All 506 frames decode with audible AAC, no fully black frames, no detected dark side bars and at most 8.34 ms cut-start error. The render graph contains only the selected raw footage and supplied music. Frame 340 confirms removal of the baked squat letterbox. Inspect `test-results/fidelity2/54/windows-close/{render.mp4,comparison.json,comparison.png,frame-340.png}`. The blurred background preserves the visible exercise equipment but differs substantially from the reference composition.
+
+The first layered native save reopened after a full process restart. A manual correction from “MISs” to “MISS” retained the title's animation keys and the five editable mask layers. Gym reference 55 still has unresolved textured lettering, an occluded title and a creator end card. Person-mask evidence in `test-results/fidelity2/55/person-masks.png` shows limb and equipment errors. The accurate subject segmentation and ornate typography acceptance criteria remain open.
+
 The Windows editor creates editable sequences from reference measurements and selected raw footage. The accepted cases include an earlier four-shot gym edit and an eight-shot coastal workflow. The two newly supplied gym Reels expose further typography and style gaps.
 
 | Capability | Evidence and practical boundary |

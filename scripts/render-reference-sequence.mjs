@@ -25,6 +25,15 @@ const inspectMotion = process.argv.includes("--verify-motion");
 const inspectPulses = process.argv.includes("--verify-pulses");
 const inspectExisting = process.argv.includes("--verify-existing");
 const inspectParity = process.argv.includes("--verify-parity");
+const inspectOcclusion = process.argv.includes("--verify-occlusion");
+const inspectTitles = process.argv.includes("--verify-titles");
+const selectedFrames = process.argv
+  .find((a) => a.startsWith("--frames="))
+  ?.slice(9)
+  .split(",")
+  .map(Number);
+if (selectedFrames?.some((f) => !Number.isInteger(f) || f < 0))
+  throw Error("Invalid inspection frame");
 if (!inspectMotion && !inspectPulses) run(exe("verify"), [input, saved]);
 const project = JSON.parse(await fs.readFile(saved, "utf8"));
 const sequence = process.argv[4]
@@ -72,7 +81,7 @@ try {
     );
   }
   const snapshot = await page.evaluate(
-    async ({ project, id, gpu, parity, pulses }) => {
+    async ({ project, id, gpu, parity, pulses, occlusion, titles }) => {
       const { parseProject } =
         await import("/packages/project-schema/index.ts");
       const { sequenceExportSnapshot } =
@@ -83,6 +92,61 @@ try {
         renderer: gpu ? "auto" : "cpu",
       });
       const neutral = structuredClone(graph);
+      if (titles) {
+        const seq = graph.compositions.find((c) => c.id === id);
+        globalThis.titlePixels = async (frame, clipId) => {
+          const off = structuredClone(graph);
+          off.compositions.find((c) => c.id === id).layers = seq.layers.filter(
+            (l) => l.id !== clipId,
+          );
+          const images = [];
+          for (const model of [graph, off]) {
+            const err = await r.render(model, frame, false, 1, true);
+            if (err) throw Error(String(err));
+            images.push(r.canvas.toDataURL("image/png").split(",")[1]);
+          }
+          return images;
+        };
+      }
+      if (occlusion) {
+        const comp = graph.compositions.find((c) => c.id === id);
+        const noSubject = structuredClone(graph),
+          noType = structuredClone(graph);
+        const without = (model, predicate) => {
+          const edit = model.compositions.find((c) => c.id === id);
+          edit.layers = edit.layers.filter((l) => !predicate(l));
+        };
+        without(noSubject, (l) => l.name.startsWith("Foreground person · "));
+        without(noType, (l) => l.kind === "text");
+        globalThis.inspectOcclusion = async (frame) => {
+          const pixels = [];
+          const pngs = [];
+          for (const preview of [graph, noSubject, noType]) {
+            const error = await r.render(preview, frame, false, 1, true);
+            if (error) throw Error(String(error));
+            pixels.push(
+              r.canvas
+                .getContext("2d")
+                .getImageData(0, 0, comp.settings.width, comp.settings.height)
+                .data,
+            );
+            pngs.push(r.canvas.toDataURL("image/png").split(",")[1]);
+          }
+          const [layered, flat, background] = pixels;
+          let hidden = 0,
+            visible = 0,
+            total = 0;
+          for (let i = 0; i < flat.length; i += 4) {
+            const difference = (a, b) =>
+              Math.max(...[0, 1, 2].map((k) => Math.abs(a[i + k] - b[i + k])));
+            if (difference(flat, background) < 32) continue;
+            total++;
+            if (difference(layered, background) <= 3) hidden++;
+            if (difference(layered, flat) <= 3) visible++;
+          }
+          return { frame, hidden, visible, total, pngs };
+        };
+      }
       if (parity) {
         const other = new Compositor(document.createElement("canvas"), true, {
           renderer: "auto",
@@ -142,11 +206,119 @@ try {
       gpu: process.argv.includes("--gpu"),
       parity: inspectParity,
       pulses: inspectPulses,
+      occlusion: inspectOcclusion,
+      titles: inspectTitles,
     },
   );
-  if (inspectParity) {
+  if (inspectTitles) {
+    const { width, height } = sequence.settings,
+      movie = path.join(dir, "render.mp4");
+    const rgb = (args, input) =>
+      execFileSync(
+        env.SUPP_FFMPEG,
+        [
+          "-v",
+          "error",
+          ...args,
+          "-an",
+          "-frames:v",
+          "1",
+          "-f",
+          "rawvideo",
+          "-pix_fmt",
+          "rgb24",
+          "pipe:1",
+        ],
+        { env, input, maxBuffer: width * height * 4, windowsHide: true },
+      );
     const rows = [];
-    for (const frame of [
+    for (const l of sequence.layers.filter((c) => c.kind === "text")) {
+      const frame = l.start + Math.floor(l.duration / 2);
+      const pngs = await page.evaluate(
+        ([f, id]) => globalThis.titlePixels(f, id),
+        [frame, l.id],
+      );
+      const [on, off] = pngs.map((b64) =>
+        rgb(["-i", "pipe:0"], Buffer.from(b64, "base64")),
+      );
+      const actual = rgb(["-i", movie, "-vf", "select=eq(n\\," + frame + ")"]);
+      let count = 0,
+        authoredError = 0,
+        absentError = 0,
+        x0 = width,
+        y0 = height,
+        x1 = -1,
+        y1 = -1;
+      for (let i = 0; i < actual.length; i += 3) {
+        if (
+          Math.max(...[0, 1, 2].map((k) => Math.abs(on[i + k] - off[i + k]))) <
+          48
+        )
+          continue;
+        const x = (i / 3) % width,
+          y = Math.floor(i / 3 / width);
+        count++;
+        x0 = Math.min(x0, x);
+        x1 = Math.max(x1, x);
+        y0 = Math.min(y0, y);
+        y1 = Math.max(y1, y);
+        for (let k = 0; k < 3; k++) {
+          authoredError += Math.abs(actual[i + k] - on[i + k]);
+          absentError += Math.abs(actual[i + k] - off[i + k]);
+        }
+      }
+      rows.push({
+        title: l.text.content,
+        id: l.id,
+        frame,
+        pixels: count,
+        box: count ? [x0, y0, x1 + 1, y1 + 1] : null,
+        authoredMAE: count ? authoredError / (3 * count) : null,
+        withoutTitleMAE: count ? absentError / (3 * count) : null,
+      });
+    }
+    await fs.writeFile(
+      path.join(dir, "title-pixels.json"),
+      JSON.stringify(rows, null, 2),
+    );
+    console.log(rows);
+    assert(
+      rows.length &&
+        rows.every(
+          (v) => v.pixels > 25 && v.authoredMAE + 10 < v.withoutTitleMAE,
+        ),
+      "Some authored titles do not appear in the decoded export at their sampled time",
+    );
+  } else if (inspectOcclusion) {
+    assert(
+      selectedFrames?.length >= 2,
+      "Select multiple frames where a title crosses the moving subject",
+    );
+    const rows = [];
+    for (const frame of selectedFrames) {
+      const { pngs, ...row } = await page.evaluate(
+        (f) => globalThis.inspectOcclusion(f),
+        frame,
+      );
+      for (const [i, label] of ["layered", "flat", "no-title"].entries())
+        await fs.writeFile(
+          path.join(dir, frame + "-" + label + ".png"),
+          Buffer.from(pngs[i], "base64"),
+        );
+      rows.push(row);
+    }
+    await fs.writeFile(
+      path.join(dir, "occlusion.json"),
+      JSON.stringify(rows, null, 2),
+    );
+    console.log(rows);
+    assert(
+      rows.every((r) => r.hidden > 100 && r.visible > 100),
+      "Expected both occluded and visible lettering on every selected frame",
+    );
+  } else if (inspectParity) {
+    const rows = [];
+    for (const frame of selectedFrames ?? [
       0,
       Math.floor(sequence.duration / 2),
       sequence.duration - 1,
@@ -271,6 +443,7 @@ try {
       JSON.stringify(snapshot),
     );
     for (let frame = 0; frame < sequence.duration; frame++) {
+      if (selectedFrames && !selectedFrames.includes(frame)) continue;
       if (
         inspectExisting &&
         ![0, Math.floor(sequence.duration / 2), sequence.duration - 1].includes(
@@ -294,7 +467,13 @@ try {
   await browser.close();
   await server.close();
 }
-if (!inspectMotion && !inspectParity && !inspectPulses) {
+if (
+  !selectedFrames &&
+  !inspectMotion &&
+  !inspectParity &&
+  !inspectPulses &&
+  !inspectTitles
+) {
   if (!inspectExisting) run(exe("render_frames"), [dir]);
   run(process.execPath, ["scripts/verify-render.mjs", dir]);
 }

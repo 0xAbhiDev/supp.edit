@@ -3,6 +3,7 @@ pub mod analysis;
 pub mod cache;
 pub mod hardware;
 pub mod models;
+pub mod person_model;
 mod process;
 pub mod vision_models;
 use serde::Serialize;

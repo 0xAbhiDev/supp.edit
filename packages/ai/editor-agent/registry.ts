@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  backgroundFillSchema,
+  subjectLayerSchema,
+  referenceLayer,
+} from "../../commands/reference-layers";
 import { addColorPulse, colorPulseSchema } from "../../commands/color-pulse";
 import {
   referenceTransitionSchema,
@@ -58,6 +63,8 @@ const id = z.string().min(1).max(128),
   frame = z.number().int().min(0).max(2_000_000_000),
   value = z.number().finite();
 export const toolCallSchema = z.discriminatedUnion("tool", [
+  backgroundFillSchema,
+  subjectLayerSchema,
   colorPulseSchema,
   typographyCommandSchema,
   referenceTransitionSchema,
@@ -147,7 +154,17 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       tool: z.literal("sequence.keyframe"),
       sequenceId: id,
       clipId: id,
-      property: z.enum(["x", "y", "scale", "gain", "opacity"]),
+      property: z.enum([
+        "x",
+        "y",
+        "scale",
+        "gain",
+        "opacity",
+        "cropLeft",
+        "cropTop",
+        "cropRight",
+        "cropBottom",
+      ]),
       value,
       frame,
       easing: z.enum(interpolationModes),
@@ -248,7 +265,11 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
 export type EditorToolCall = z.infer<typeof toolCallSchema>;
 /** Only implemented command adapters are advertised. No generated code or arbitrary property paths. */
 export const editorTools = Object.freeze([
-  { name: "sequence.colorPulse", description: "Create an editable negative duotone pulse from a raw clip's luminance" },
+  {
+    name: "sequence.colorPulse",
+    description:
+      "Create an editable negative duotone pulse from a raw clip's luminance",
+  },
   {
     name: "sequence.transition",
     description:
@@ -358,6 +379,11 @@ export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
   if (call.tool === "sequence.colorPulse")
     return inComposition(call.sequenceId, addColorPulse(call));
+  if (
+    call.tool === "sequence.backgroundFill" ||
+    call.tool === "sequence.subjectLayer"
+  )
+    return inComposition(call.sequenceId, referenceLayer(call));
   if (call.tool === "sequence.transition")
     return inComposition(call.sequenceId, addReferenceTransition(call));
   if (call.tool === "sequence.text") {

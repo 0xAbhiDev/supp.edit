@@ -69,7 +69,7 @@ test("three editable recreations from independent footage with local captured an
     ]);
   for (const [prefix, file] of [
     ["reference-blocks-v2", "motion.json"],
-    ["reference-text-v3", "text.json"],
+    ["reference-text-v8", "text.json"],
   ])
     entries.push([
       [prefix, reference.id, reference.fingerprint].join(":"),
@@ -86,6 +86,8 @@ test("three editable recreations from independent footage with local captured an
     .setInputFiles(path.join(dir, "SOURCE.supp"));
   await page.getByRole("button", { name: "AI Studio", exact: true }).click();
   const panel = page.getByRole("region", { name: "Recreate an edit" });
+  // Preserve this baseline's reference-aspect assertions; vertical fill has separate coverage.
+  await panel.getByLabel("Output framing").selectOption("reference");
   await panel
     .getByLabel("Reference video", { exact: true })
     .selectOption(reference.id);

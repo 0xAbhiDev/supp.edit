@@ -12,6 +12,26 @@ import type { Edit } from "./index";
 // The main sequence keeps its v1/v2 representation. A composition is a scoped
 // view of the same clip/track model, so animation and editor commands are shared.
 const views = new WeakMap<Project, Map<string, Project>>();
+const validatingBatch = new WeakSet<Project>();
+/** The complete atomic edit is validated once; failure still rolls back in History. */
+export function batchCompositionEdits(edit: Edit): Edit {
+  return (p) => {
+    if (validatingBatch.has(p)) {
+      edit(p);
+      return;
+    }
+    validatingBatch.add(p);
+    try {
+      edit(p);
+    } finally {
+      validatingBatch.delete(p);
+    }
+    projectSchema.parse(p);
+  };
+}
+function validateCompositionEdit(p: Project) {
+  if (!validatingBatch.has(p)) projectSchema.parse(p);
+}
 export function compositionView(project: Project, id: string | null): Project {
   if (!id) return project;
   const comp = project.compositions.find((c) => c.id === id);
@@ -45,7 +65,7 @@ export function inComposition(id: string | null, edit: Edit): Edit {
   if (!id)
     return (p) => {
       edit(p);
-      projectSchema.parse(p);
+      validateCompositionEdit(p);
     };
   return (p) => {
     const c = p.compositions.find((c) => c.id === id);
@@ -63,9 +83,9 @@ export function inComposition(id: string | null, edit: Edit): Edit {
     c.settings = view.settings;
     c.tracks = view.tracks;
     c.layers = view.clips;
-    if(c.markers || view.markers.length) c.markers = view.markers;
-    // Structure is small: validate here, never while rendering a frame.
-    projectSchema.parse(p);
+    if (c.markers || view.markers.length) c.markers = view.markers;
+    // Compound AI edits can contain thousands of mask vertices. Validate their atomic result once.
+    validateCompositionEdit(p);
   };
 }
 export function createComposition(

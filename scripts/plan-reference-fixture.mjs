@@ -3,11 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { createServer } from "vite";
+import { chromium } from "@playwright/test";
 const dir = path.resolve(process.argv[2] || "test-results/reference-coastal");
 const out = path.resolve(process.argv[3] || dir);
 fs.mkdirSync(out, { recursive: true });
 const read = (name) =>
-  JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
+  JSON.parse(
+    fs.readFileSync(path.join(dir, name), "utf8").replace(/^\uFEFF/, ""),
+  );
 const optional = (name) =>
   fs.existsSync(path.join(dir, name)) ? read(name) : undefined;
 const server = await createServer({
@@ -32,14 +35,59 @@ try {
   const ref = p.assets[0],
     colors = read("colors.json");
   const color = (a) => colors.find((c) => c.assetId === a.id);
+  const evidencePath = process.argv
+    .find((s) => s.startsWith("--text="))
+    ?.slice(7);
+  let text = evidencePath
+    ? JSON.parse(fs.readFileSync(evidencePath, "utf8").replace(/^\uFEFF/, ""))
+    : read("text.json");
+  if (process.argv.includes("--measure-fonts")) {
+    const host = await createServer({
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+        strictPort: false,
+        hmr: false,
+        watch: null,
+      },
+    });
+    let browser;
+    try {
+      await host.listen();
+      browser = await chromium.launch();
+      const page = await browser.newPage();
+      await page.goto(new URL("favicon.ico", host.resolvedUrls.local[0]).href, {
+        waitUntil: "commit",
+      });
+      text = await page.evaluate(
+        async ([lines, aspect]) =>
+          (
+            await import("/packages/ai/reference/font-match.ts")
+          ).matchReferenceFonts(lines, aspect),
+        [text, ref.width / ref.height],
+      );
+    } finally {
+      await browser?.close();
+      await host.close();
+    }
+  }
+  if (process.argv.includes("--reference-depth")) {
+    const { measureTextDepth } = await server.ssrLoadModule(
+      "/packages/ai/reference/text-depth.ts",
+    );
+    text = text.map((t) =>
+      measureTextDepth(t, optional("0-person.json") ?? []),
+    );
+  }
   const dna = extractDNA(
     ref,
     read("0-vision.json"),
     optional("0-audio.json")?.audio?.beatMap,
     color(ref),
     read("motion.json"),
-    read("text.json"),
+    text,
     read("0-visual.json"),
+    optional("0-speech.json")?.transcript,
   );
   fs.writeFileSync(path.join(out, "dna.json"), JSON.stringify(dna, null, 2));
   const sources = p.assets
@@ -52,6 +100,8 @@ try {
         analysis: read(i + "-vision.json"),
         color: color(a),
         visual: read(i + "-visual.json"),
+        people: optional(i + "-person.json"),
+        aperture: optional(i + "-aperture.json"),
       };
     });
   const music = p.assets.slice(1).find((a) => a.kind === "audio");
@@ -67,7 +117,17 @@ try {
       ref,
       dna,
       sources,
-      { ...defaults, mode, wording: "original" },
+      {
+        ...defaults,
+        mode,
+        wording: "original",
+        format: process.argv.includes("--vertical") ? "vertical" : "reference",
+        subjectLayering: process.argv.includes("--reference-depth")
+          ? "reference"
+          : process.argv.includes("--people")
+            ? "behind-people"
+            : "flat",
+      },
       music,
       beatMap,
     );

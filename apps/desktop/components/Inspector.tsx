@@ -1,4 +1,5 @@
 import { propertyValue } from "../../../packages/animation";
+import { fontFamilies } from "../../../packages/typography/fonts";
 import {TypographyControls} from "./TypographyControls";
 import { useState } from "react";
 import {
@@ -244,7 +245,9 @@ export function Inspector() {
                     <option value="sans-serif">Sans serif</option>
                     <option value="serif">Serif</option>
                     <option value="monospace">Monospace</option>
-                    {["Arial", "Arial Black", "Impact", "Georgia", "Segoe UI", "Times New Roman"].map(f=><option key={f}>{f}</option>)}
+                    {Array.from(new Set([...fontFamilies, clip.text.font]))
+                      .filter(f => !["sans-serif", "serif", "monospace"].includes(f))
+                      .map(f => <option key={f}>{f}</option>)}
                   </select>
                 </label>
                 <label>

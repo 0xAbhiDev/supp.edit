@@ -1,4 +1,20 @@
-# Visual Fidelity 2.0 — active work, not accepted
+## Windows export check completed 17 November 2026
+
+The reopened second gym project exported Creative Remix through Windows Deliver. All 384 H.264 frames and the AAC audio decoded. The complete frame scan found zero black frames, including cut 100. The permitted-source graph excludes the reference. The largest sampled preview-to-export mean channel error was 1.88/255. The separate CPU rerender passed too. Both results and the original failing export are retained. The intermittent trigger remains unproven. See `test-results/fidelity-breakthrough/55/Windows-Creative-Remix`.
+
+The active fidelity target is the second reference's opening typography and athlete interaction. Earlier whole-Reel exports remain comparison evidence.
+
+# Reference fidelity breakthrough — 16 November 2026, in progress
+
+Continue from the current working tree after `93f97de`; preserve the accepted audio and typography checkpoints. This increment improves measured typography geometry, cast-aware OCR, aperture framing, and evidence-based text depth. It is **not acceptance of autonomous high-fidelity recreation**. The user's assessment of less than 30% similarity remains the baseline feedback, not a measured score.
+
+Current evidence is in `test-results/fidelity-breakthrough/{54,55}`. `final/Three-modes.supp` contains all three editable modes; `final/render.mp4` is the actual Windows Deliver Close Match export (506 / 392 frames). Both fully decode H.264/AAC, pass permitted-source checks with reference footage excluded, have no detected black frames or dark side bars, and show zero measured music lag in three windows. Every accepted title has a decoded-ink presence check: 16 intervals in 54 and three words in 55. Recovered words and geometry are improved, but missing ornate words, event timing, protected wide framing, and grading remain significant failures.
+
+Reference 54 was saved, the application fully exited, then relaunched and reopened. Saving again preserved all three compositions, 48 editable title instances and all assets exactly (`54/reopen-verification.json`). Smart Adaptation was subsequently exported through Windows Deliver and passed the full frame scan. Reference 55 Smart Adaptation passed the production compositor/native-encoder harness. A single black frame at cut 100 in the first harness Creative Remix output is under investigation; preserve that failed output. A decoded-frame presentation fence has been added to media seeking, with cache/speed-ramp regression passing; a complete rerender is in progress.
+
+The full diagnosis, artifact paths and practical limits are in `docs/REFERENCE_FIDELITY_BREAKTHROUGH.md`. Already passed before the additional seek change: 174 TypeScript tests, the three-mode browser acceptance, 41 native tests, frontend build and embedded Windows build. Do not repeat successful analysis or replace current projects. Finish the pending seek/export check, update these results, and commit the tested increment. Preserve the unrelated formatting-only diff in `native/crates/supp-project/src/typography.rs`.
+
+## Historical Visual Fidelity 2.0 notes (superseded by the current evidence above)
 
 Starting checkpoint: `7be9d83`. The existing audio, typography and coastal acceptance remains valid. The new vertical gym workflow is **partially complete**; six final native exports and independent non-gym acceptance are still outstanding.
 

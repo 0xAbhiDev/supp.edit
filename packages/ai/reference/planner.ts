@@ -1,4 +1,6 @@
 import { measuredColor, type VisualFrame } from "./visual";
+import type { Aperture } from "./aperture";
+import { editablePersonMask, type PersonSample } from "./subject-mask";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
 import type { EditorToolCall } from "../editor-agent/registry";
@@ -10,6 +12,7 @@ import { compositionView } from "../../commands/compositions";
 import { placement } from "../../typography/planner";
 import { availableRanges, matchRange, consumeRange } from "./matcher";
 import { sourceFrameAt } from "../../time-remap/model";
+import { projectInk, visiblePicture } from "./text-layout";
 import { type StyleDNA, type RecreationMode } from "./dna";
 export interface SourceEvidence {
   asset: Asset;
@@ -17,6 +20,8 @@ export interface SourceEvidence {
   color?: ColorStats;
   speech?: MediaAnalysis;
   visual?: VisualFrame[];
+  people?: PersonSample[];
+  aperture?: Aperture;
 }
 export interface Controls {
   mode: RecreationMode;
@@ -25,6 +30,8 @@ export interface Controls {
   color: number;
   beat: number;
   instructions: string;
+  format?: "vertical" | "reference";
+  subjectLayering?: "flat" | "behind-people" | "reference";
 }
 export const defaults: Controls = {
   mode: "Smart Adaptation",
@@ -33,6 +40,8 @@ export const defaults: Controls = {
   color: 0.75,
   beat: 0.65,
   instructions: "",
+  format: "vertical",
+  subjectLayering: "reference",
 };
 const clamp = (n: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, n)) || 0;
@@ -89,6 +98,16 @@ export function buildRecreation(
   if (music && voice && music.fingerprint === voice.fingerprint)
     throw Error("Choose separate music and voiceover files");
   const pool = availableRanges(sources, rate);
+  const refScale = Math.min(1, 1920 / Math.max(dna.width, dna.height));
+  const width =
+    controls.format === "vertical"
+      ? 1080
+      : Math.max(64, 2 * Math.round((dna.width * refScale) / 2));
+  const height =
+    controls.format === "vertical"
+      ? 1920
+      : Math.max(64, 2 * Math.round((dna.height * refScale) / 2));
+  const backgroundClips: string[] = [];
   const remix = controls.mode === "Creative Remix",
     close = controls.mode === "Close Match",
     keepColor = /keep .*colou?r|original colou?r|no grad/i.test(
@@ -300,9 +319,6 @@ export function buildRecreation(
       key(duration - 1, 0);
     }
     const camera = ref.camera;
-    const refScale = Math.min(1, 1920 / Math.max(dna.width, dna.height));
-    const width = 2 * Math.round((dna.width * refScale) / 2),
-      height = 2 * Math.round((dna.height * refScale) / 2);
     const observations =
       s.source.analysis.vision?.frames.filter(
         (f) =>
@@ -345,7 +361,13 @@ export function buildRecreation(
     if (box) protection.push({ clipId, bounds: box });
     let baseScale = 1;
     let safeScale = 10;
-    if (!box && ref.layout && !ref.subject && (camera?.letterbox ?? 0) < 0.03) {
+    if (
+      !box &&
+      controls.format !== "vertical" &&
+      ref.layout &&
+      !ref.subject &&
+      (camera?.letterbox ?? 0) < 0.03
+    ) {
       const fit = Math.min(width / asset.width, height / asset.height);
       baseScale = clamp(
         Math.max(width / (asset.width * fit), height / (asset.height * fit)),
@@ -415,6 +437,59 @@ export function buildRecreation(
           easing: "linear",
         });
     }
+    // A person detector does not bound held equipment (barbells, bicycles, products).
+    // Preserve the whole wide source in portrait delivery; use fill rather than an unproven crop.
+    if (
+      controls.format === "vertical" &&
+      asset.width / asset.height > (width / height) * 1.5
+    ) {
+      baseScale = 1;
+      safeScale = 1;
+      for (const c of command)
+        if (
+          c.tool === "sequence.keyframe" &&
+          c.clipId === clipId &&
+          c.frame === cursor
+        ) {
+          if (c.property === "scale") c.value = 1;
+          if (c.property === "x" || c.property === "y") c.value = 0;
+        }
+    }
+    const fit = Math.min(width / asset.width, height / asset.height);
+    const aperture = s.source.aperture;
+    if (
+      controls.format === "vertical" &&
+      aperture &&
+      Object.values(aperture).some((n) => n > 0)
+    ) {
+      for (const [property, value] of [
+        ["cropLeft", 0.5 + ((aperture.left - 0.5) * asset.width * fit) / width],
+        [
+          "cropRight",
+          0.5 + ((aperture.right - 0.5) * asset.width * fit) / width,
+        ],
+        ["cropTop", 0.5 + ((aperture.top - 0.5) * asset.height * fit) / height],
+        [
+          "cropBottom",
+          0.5 + ((aperture.bottom - 0.5) * asset.height * fit) / height,
+        ],
+      ] as const)
+        command.push({
+          tool: "sequence.keyframe",
+          sequenceId: id,
+          clipId,
+          property,
+          frame: cursor,
+          value: Math.max(0, value),
+          easing: "linear",
+        });
+    }
+    if (
+      controls.format === "vertical" &&
+      (baseScale * asset.width * fit < width - 0.1 ||
+        baseScale * asset.height * fit < height - 0.1)
+    )
+      backgroundClips.push(clipId);
     if (camera && camera.confidence > 0.3 && duration >= 8) {
       if (Math.abs(camera.expansion) > 0.025) {
         const zoom = 1 + Math.min(0.14, Math.abs(camera.expansion));
@@ -631,8 +706,6 @@ export function buildRecreation(
   const brief = parseEditBrief(
     controls.instructions.trim() || "Create a reference edit",
   );
-  const scale = Math.min(1, 1920 / Math.max(dna.width, dna.height)),
-    dim = (n: number) => Math.max(64, 2 * Math.round((n * scale) / 2));
   const baseName = "Recreation · " + controls.mode;
   let name = baseName;
   for (let take = 2; p.compositions.some((c) => c.name === name); take++)
@@ -641,7 +714,7 @@ export function buildRecreation(
     tool: "sequence.create",
     id,
     name,
-    settings: { ...p.settings, width: dim(dna.width), height: dim(dna.height) },
+    settings: { ...p.settings, width, height },
     duration: cursor,
     videoTrackId: video,
     audioTrackId: audio,
@@ -667,6 +740,20 @@ export function buildRecreation(
     summary: controls.mode + " · " + matches.length + " matched source ranges",
     commands: command,
   };
+  const fillTrack = uid();
+  for (const sourceId of backgroundClips)
+    command.push({
+      tool: "sequence.backgroundFill",
+      sequenceId: id,
+      id: uid(),
+      sourceId,
+      trackId: fillTrack,
+      blur: 24,
+    });
+  if (backgroundClips.length)
+    warnings.push(
+      `${backgroundClips.length} shots use editable blurred fill to preserve protected framing.`,
+    );
   let preview = previewEditPlan(plan, p, revision);
   const initialSequence = compositionView(preview.project, id);
   for (const c of command) {
@@ -690,6 +777,8 @@ export function buildRecreation(
   const seen = new Set<string>();
   let omitted = 0;
   const graphics = uid();
+  const frontGraphics = uid();
+  const frontTitles: EditorToolCall[] = [];
   const overlays =
     dna.text?.filter((t) => t.role === "persistent-overlay").length ?? 0;
   if (overlays && controls.wording !== "omit")
@@ -698,11 +787,20 @@ export function buildRecreation(
     );
   if (controls.wording === "original" && !dna.text?.some((t) => t.content))
     warnings.push("No readable reference words were recognized.");
+  const uncertain = dna.text?.filter(
+    (t) =>
+      t.evidence?.status === "uncertain" && t.role !== "persistent-overlay",
+  ).length;
+  if (uncertain && controls.wording !== "omit")
+    warnings.push(
+      `${uncertain} uncertain text intervals withheld. Review the observations against the reference.`,
+    );
   for (const appearance of controls.wording === "omit"
     ? []
     : (dna.text ?? [])) {
     if (appearance.role === "persistent-overlay") continue;
-    if (command.length >= 508) break;
+    if (appearance.evidence?.status === "uncertain") continue;
+    if (command.length + frontTitles.length >= 508) break;
     const match = matches.find(
       (m) =>
         appearance.startMs >= m.referenceMs &&
@@ -716,9 +814,23 @@ export function buildRecreation(
           (match.referenceEndMs - match.referenceMs),
       );
     const start = relative(appearance.startMs);
+    const last =
+      matches.find(
+        (m) =>
+          appearance.endMs > m.referenceMs &&
+          appearance.endMs <= m.referenceEndMs,
+      ) ?? matches.at(-1)!;
     const end = Math.min(
-      match.start + match.duration,
-      Math.max(start + 4, relative(appearance.endMs)),
+      cursor,
+      last.start + last.duration,
+      Math.max(
+        start + 4,
+        last.start +
+          Math.round(
+            ((appearance.endMs - last.referenceMs) * last.duration) /
+              (last.referenceEndMs - last.referenceMs),
+          ),
+      ),
     );
     if (end - start < 4) continue;
     const source = sources.find((s) => s.asset.id === match.source)!;
@@ -772,20 +884,157 @@ export function buildRecreation(
       continue;
     }
     if (label) seen.add(label.label);
+    const behind =
+      controls.subjectLayering === "behind-people" ||
+      (controls.subjectLayering === "reference" &&
+        appearance.depth?.relation === "behind");
+    const picture = visiblePicture(layout, sourceClip, source.asset, start);
+    const firstInk =
+      close &&
+      controls.wording === "original" &&
+      picture &&
+      appearance.inkMetrics
+        ? projectInk(
+            layout,
+            picture,
+            appearance,
+            controls.format === "vertical",
+          )
+        : undefined;
+    const placementBox = firstInk
+      ? {
+          x: (firstInk.x - firstInk.width / 2) / width + 0.5,
+          y: (firstInk.y - firstInk.height / 2) / height + 0.5,
+          width: firstInk.width / width,
+          height: firstInk.height / height,
+        }
+      : appearance;
     const band = placement(
       layout,
       start,
       end,
       sources.map((s) => s.analysis),
-      appearance.y + appearance.height / 2,
-      appearance,
+      placementBox.y + placementBox.height / 2,
+      placementBox,
     );
-    command.push({
+    if (behind) {
+      band.y =
+        (clamp(appearance.y + appearance.height / 2, 0.12, 0.78) - 0.5) *
+        height;
+    }
+    let measuredInk: Extract<
+      EditorToolCall,
+      { tool: "sequence.text" }
+    >["measuredInk"];
+    if (firstInk && appearance.inkMetrics && picture) {
+      const { family: _family, weight: _weight, ...em } = appearance.inkMetrics;
+      const dy =
+        behind || controls.subjectLayering === "reference"
+          ? 0
+          : band.y - firstInk.y;
+      const positioned = (box: typeof firstInk, region: typeof picture) => ({
+        ...box,
+        y: Math.max(
+          region.top - height / 2 + box.height / 2,
+          Math.min(region.bottom - height / 2 - box.height / 2, box.y + dy),
+        ),
+      });
+      const samples = new Map([
+        [0, { frame: 0, ...positioned(firstInk, picture) }],
+      ]);
+      for (const g of appearance.geometry ?? []) {
+        const shot = matches.find(
+          (m) => m.referenceMs <= g.timeMs && g.timeMs < m.referenceEndMs,
+        );
+        if (!shot) continue;
+        const at =
+          shot.start +
+          Math.round(
+            ((g.timeMs - shot.referenceMs) * shot.duration) /
+              (shot.referenceEndMs - shot.referenceMs),
+          );
+        const local = at - start;
+        if (local < 0 || at >= end) continue;
+        const clip = layout.clips.find((c) => c.id === shot.clipId),
+          a = sources.find((s) => s.asset.id === shot.source)?.asset;
+        if (!clip || !a) continue;
+        const region = visiblePicture(layout, clip, a, at);
+        const box =
+          region &&
+          projectInk(layout, region, g, controls.format === "vertical");
+        if (box && region)
+          samples.set(local, { frame: local, ...positioned(box, region) });
+      }
+      measuredInk = {
+        ...em,
+        samples: [...samples.values()].sort((a, b) => a.frame - b.frame),
+      };
+    }
+    // Only a measured visual build calls for staggered words. Map corroborating
+    // vocal onsets through each matched shot, including a title that spans a cut.
+    let wordStarts: number[] | undefined;
+    const wordCount = content.trim().split(/\s+/).length;
+    if (
+      appearance.revealOffsetMs != null &&
+      wordCount > 1 &&
+      wordCount <= end - start
+    ) {
+      const onsets = appearance.evidence?.wordStartsMs;
+      const measured =
+        controls.wording === "original" && onsets?.length === wordCount;
+      wordStarts = Array.from({ length: wordCount }, (_, i) => {
+        if (measured) {
+          const ms = onsets[i];
+          const shot =
+            matches.find((m) => ms >= m.referenceMs && ms < m.referenceEndMs) ??
+            (ms <= appearance.startMs ? match : last);
+          return (
+            Math.round(
+              shot.start +
+                ((ms - shot.referenceMs) * shot.duration) /
+                  (shot.referenceEndMs - shot.referenceMs),
+            ) - start
+          );
+        }
+        return Math.round(
+          (i *
+            Math.min(
+              end - start - 1,
+              (appearance.revealOffsetMs! * rate) / 1000,
+            )) /
+            (wordCount - 1),
+        );
+      });
+      for (let i = 0; i < wordCount; i++)
+        wordStarts[i] = clamp(
+          wordStarts[i],
+          i ? wordStarts[i - 1] + 1 : 0,
+          end - start - wordCount + i,
+        );
+    }
+    const aboveMask = controls.subjectLayering === "reference" && !behind;
+    (aboveMask ? frontTitles : command).push({
       tool: "sequence.text",
       sequenceId: id,
       id: uid(),
-      trackId: graphics,
+      trackId: aboveMask ? frontGraphics : graphics,
       content,
+      ...(measuredInk && appearance.inkMetrics
+        ? {
+            face: {
+              family: appearance.inkMetrics.family,
+              weight: appearance.inkMetrics.weight,
+            },
+            measuredInk,
+          }
+        : appearance.face
+          ? {
+              face: {
+                family: appearance.face.family,
+                weight: appearance.face.weight,
+              },
+            }
+          : {}),
       start,
       duration: end - start,
       style: appearance.height > 0.024 ? "Bold" : "Minimal",
@@ -812,28 +1061,13 @@ export function buildRecreation(
             },
           }
         : {}),
-      ...(appearance.revealOffsetMs != null &&
-      content.trim().split(/\s+/).length > 1
-        ? {
-            wordStarts: content
-              .trim()
-              .split(/\s+/)
-              .map((_, i, a) =>
-                Math.round(
-                  (i *
-                    Math.max(
-                      a.length - 1,
-                      Math.min(
-                        end - start - 1,
-                        (appearance.revealOffsetMs! * rate) / 1000,
-                      ),
-                    )) /
-                    (a.length - 1),
-                ),
-              ),
-          }
-        : {}),
-      timing: "manual",
+      ...(wordStarts ? { wordStarts } : {}),
+      timing:
+        wordStarts &&
+        controls.wording === "original" &&
+        appearance.evidence?.wordStartsMs.length === wordCount
+          ? "transcript"
+          : "manual",
       maxFontSize: clamp(
         (appearance.height * layout.settings.height) / 0.78,
         6,
@@ -848,6 +1082,46 @@ export function buildRecreation(
       omitted +
         " detected text intervals had no original copy. Supply quoted titles to fill them.",
     );
+  if (controls.subjectLayering !== "flat") {
+    const foreground = uid();
+    for (const match of matches) {
+      if (
+        !command.some(
+          (c) =>
+            c.tool === "sequence.text" &&
+            c.start < match.start + match.duration &&
+            c.start + c.duration > match.start,
+        )
+      )
+        continue;
+      const source = sources.find((s) => s.asset.id === match.source)!;
+      const clip = layout.clips.find((c) => c.id === match.clipId)!;
+      const mask = source.people?.length
+        ? editablePersonMask(
+            source.people,
+            clip,
+            source.asset,
+            width,
+            height,
+            rate,
+          )
+        : undefined;
+      if (mask && command.length + frontTitles.length < 510)
+        command.push({
+          tool: "sequence.subjectLayer",
+          sequenceId: id,
+          id: uid(),
+          sourceId: clip.id,
+          trackId: foreground,
+          mask,
+        });
+      else
+        warnings.push(
+          `No reliable local person outline for ${source.asset.name}; text remains in front.`,
+        );
+    }
+  }
+  command.push(...frontTitles);
   if (command.length !== preview.plan.commands.length || warnings.length)
     preview = previewEditPlan(plan, p, revision);
   return { matches, warnings, preview };

@@ -57,6 +57,7 @@ const shots = seq.layers
   .filter(
     (c) =>
       c.kind === "media" &&
+      !/^(Background fill|Foreground person) · /.test(c.name) &&
       p.assets.find((a) => a.id === c.assetId)?.kind === "video",
   )
   .sort((a, b) => a.start - b.start);
@@ -168,7 +169,6 @@ try {
     }
     if (rows >= height * 0.95) darkSideBars.push(frame);
   }
-  assert.equal(blackFrames.length, 0, "Unexpected fully black frames");
   const audioPCM = audio
     ? ff([
         "-i",
@@ -256,11 +256,13 @@ try {
       frames: seq.duration,
       decoded: true,
       audioRms,
-      blackFrames: 0,
+      blackFrames: blackFrames.length,
       referenceExcluded: true,
       contact,
     }),
   );
+  // Preserve the actual failing frame numbers and comparison before exiting.
+  assert.equal(blackFrames.length, 0, "Unexpected fully black frames");
 } finally {
   await server.close();
 }

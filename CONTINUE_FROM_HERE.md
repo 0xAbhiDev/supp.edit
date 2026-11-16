@@ -1,4 +1,20 @@
-# Resume Visual Fidelity 2.0 in the current tree
+## Windows export check completed 17 November 2026
+
+The reopened second gym project exported Creative Remix through Windows Deliver. All 384 H.264 frames and the AAC audio decoded. The complete frame scan found zero black frames, including cut 100. The permitted-source graph excludes the reference. The largest sampled preview-to-export mean channel error was 1.88/255. The separate CPU rerender passed too. Both results and the original failing export are retained. The intermittent trigger remains unproven. See `test-results/fidelity-breakthrough/55/Windows-Creative-Remix`.
+
+The active fidelity target is the second reference's opening typography and athlete interaction. Earlier whole-Reel exports remain comparison evidence.
+
+# Resume Reference Fidelity Breakthrough from the current tree
+
+The governing request is attachment `ddeb5f00-5028-4122-9f3c-5d2f9524c9aa/Pasted text.txt`. Preserve `93f97de`, all current changes and the accepted typography/audio baseline. Desktop testing and a reproducible commit are authorized.
+
+Latest projects: `test-results/fidelity-breakthrough/{54,55}/final/Three-modes.supp`. These use `reference-text-v8`, measured installed-font ink geometry and conservative reference-depth inference. Actual Windows Close Match videos are `final/render.mp4`. Aligned diagnostics live in `before`, `intermediate`, and `after`; `comparison.png` presents reference/previous/current decoded frames. Read `docs/REFERENCE_FIDELITY_BREAKTHROUGH.md` before interpreting fidelity claims.
+
+Both Close Match exports passed complete decoding, source isolation, black/side-bar scans, title-pixel verification and zero-lag music checks. Reference 54 passed full native exit/reopen with identical compositions/assets, then a Windows Smart Adaptation export. Reference 55 Smart Adaptation passed the native encoder harness. First 55 Creative Remix harness failed at black frame 100; direct cold seeks did not reproduce it. The original failed artifact is retained. `55/Creative-Remix-recheck` is being rerendered after adding an actual decoded-frame presentation fence to the production seek path. Cache and speed-remap browser regressions passed. Finish this investigation without calling a non-reproduction proof of root cause.
+
+Next: finish remaining mode export checks, rebuild the native executable after any additional source change, document exact UI-versus-harness provenance, and commit. Preserve the unrelated `native/crates/supp-project/src/typography.rs` whitespace diff. Next fidelity work is missing-word/timing evidence, subject-and-equipment-aware framing, and measured green–magenta/tone reconstruction. Difficult automatic occlusion, ornate text and arbitrary Instagram-style recreation remain unaccepted.
+
+## Historical Visual Fidelity 2.0 notes
 
 Preserve `7be9d83` and all current changes. The latest user brief is attachment `2ed66c5d-db87-4fe8-99e8-eb6e3ac5b9e5/Pasted text.txt`. Continue automated Windows testing; the user explicitly authorized it.
 

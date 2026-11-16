@@ -19,8 +19,9 @@ export const sampleSchema = z
   })
   .strict();
 import { appearanceSchema } from "./appearance";
+import { matchReferenceFonts } from "./font-match";
 export async function referenceText(a: Asset, job: JobContext) {
-  const key = "reference-text-v3:" + a.id + ":" + a.fingerprint,
+  const key = "reference-text-v8:" + a.id + ":" + a.fingerprint,
     validate = z.array(appearanceSchema).max(512);
   const cached = validate.safeParse(await readDerived(key));
   if (cached.success) return cached.data;
@@ -28,8 +29,9 @@ export async function referenceText(a: Asset, job: JobContext) {
   const samples = validate.parse(
     await nativeJob("reference_text", { path: a.path }, job),
   );
-  await writeDerived(key, samples, JSON.stringify(samples).length * 2);
-  return samples;
+  const matched = await matchReferenceFonts(samples, a.width / a.height);
+  await writeDerived(key, matched, JSON.stringify(matched).length * 2);
+  return matched;
 }
 export type MotionSample = z.infer<typeof sampleSchema>;
 export async function referenceMotion(a: Asset, job: JobContext) {

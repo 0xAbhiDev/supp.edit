@@ -256,11 +256,40 @@ export function MediaAnalysisPanel() {
           )}
         </div>
       )}
+      {desktop && cap?.personModel && (
+        <div className="model-card">
+          <p>
+            PP-HumanSeg · local person masks · 6 MiB · CPU. Requires the local
+            vision runtime. People only; detailed limbs and equipment need
+            review.
+          </p>
+          {!cap.personModel.installed && cap.personModel.installSupported && (
+            <button
+              disabled={busy}
+              onClick={async () => {
+                setError("");
+                try {
+                  const h = mediaAnalysis.install(project.id, "person");
+                  setJobId(h.id);
+                  const result = await h.finished;
+                  if (result.state === "Failed") setError(result.error);
+                  refresh();
+                } catch (e) {
+                  setError(String(e));
+                }
+              }}
+            >
+              Download and install person masks
+            </button>
+          )}
+        </div>
+      )}
       {desktop &&
         (
           [
             ["speech", cap?.model],
             ["vision", cap?.visionModel],
+            ["person", cap?.personModel],
           ] as const
         ).map(
           ([kind, model]) =>

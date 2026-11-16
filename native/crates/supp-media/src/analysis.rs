@@ -1,10 +1,12 @@
 //! Local, fingerprinted media analysis. Results are data; this crate cannot edit a project.
 pub mod audio;
+pub mod aperture;
 pub mod color;
 pub mod speech;
 pub mod video;
 pub mod vision;
 pub mod visual;
+pub mod person_mask;
 use crate::models::Progress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

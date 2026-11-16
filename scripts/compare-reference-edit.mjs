@@ -4,13 +4,16 @@ import path from "node:path";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mediaEnvironment } from "./runtime.mjs";
-const [directory, inventory = "test-results/reference-gym"] =
-  process.argv.slice(2);
+const [
+  directory,
+  inventory = "test-results/reference-gym",
+  planDir = inventory,
+] = process.argv.slice(2);
 if (!directory) throw Error("Supply a render directory");
 const json = (dir, name) =>
   JSON.parse(fs.readFileSync(path.join(dir, name), "utf8"));
 const { assets } = json(inventory, "assets.json"),
-  dna = json(inventory, "dna.json"),
+  dna = json(planDir, "dna.json"),
   project = json(directory, "editable.supp"),
   seq = fs.existsSync(path.join(directory, "project.supp"))
     ? project.compositions.find(
@@ -29,11 +32,14 @@ const ff = (args, extra = {}) =>
     ["-hide_banner", "-loglevel", "error", ...args],
     { windowsHide: true, maxBuffer: 64 * 1024 * 1024, ...extra },
   );
-const shots = seq.layers.filter(
-  (c) =>
-    c.kind === "media" &&
-    project.assets.find((a) => a.id === c.assetId)?.kind === "video",
-);
+const shots = seq.layers
+  .filter(
+    (c) =>
+      c.kind === "media" &&
+      !/^(Background fill|Foreground person) · /.test(c.name) &&
+      project.assets.find((a) => a.id === c.assetId)?.kind === "video",
+  )
+  .sort((a, b) => a.start - b.start);
 assert(
   shots.length === dna.shots.length &&
     shots.every((c) =>
@@ -76,7 +82,7 @@ const samples = shots.map((c, i) => {
       c.effectStack?.map((e) => ({ type: e.type, value: e.value })) ?? [],
   };
 });
-const contact = path.join(directory, "comparison.png");
+const contact = path.join(directory, "shot-timing.png");
 const strip = (frames) =>
   "select='" +
   frames.map((frame) => "eq(n," + frame + ")").join("+") +
@@ -203,7 +209,7 @@ const report = {
   samples,
 };
 fs.writeFileSync(
-  path.join(directory, "comparison.json"),
+  path.join(directory, "audio-timing.json"),
   JSON.stringify(report, null, 2),
 );
 console.log(seq.name, offsets, contact);
