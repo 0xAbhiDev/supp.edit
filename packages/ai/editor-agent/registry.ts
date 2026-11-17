@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   backgroundFillSchema,
   subjectLayerSchema,
-  referenceLayer,
+  referenceLayer, plateTintSchema, referencePlateTint,
 } from "../../commands/reference-layers";
 import { addColorPulse, colorPulseSchema } from "../../commands/color-pulse";
 import {
@@ -65,7 +65,7 @@ const id = z.string().min(1).max(128),
 export const toolCallSchema = z.discriminatedUnion("tool", [
   backgroundFillSchema,
   subjectLayerSchema,
-  colorPulseSchema,
+  colorPulseSchema, plateTintSchema,
   typographyCommandSchema,
   referenceTransitionSchema,
   typographyCommandSchema
@@ -377,6 +377,7 @@ function range(v: number, min: number, max: number) {
 }
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
+  if(call.tool==="sequence.plateTint") return inComposition(call.sequenceId,referencePlateTint(call));
   if (call.tool === "sequence.colorPulse")
     return inComposition(call.sequenceId, addColorPulse(call));
   if (

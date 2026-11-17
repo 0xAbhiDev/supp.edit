@@ -44,6 +44,7 @@ export const typographyCommandSchema = z
     maxFontSize: z.number().finite().min(6).max(1000).optional(),
     // Captured ink centers in composition pixels. Materialize ordinary editable
     // transform keys once so rendering does not depend on the analysis cache.
+    differenceInk: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
     measuredInk: z
       .object({
         widthEm: z.number().positive().max(256),
@@ -234,6 +235,11 @@ export function createTypography(
             easing: "linear",
           }));
       }
+    }
+    if (call.differenceInk) {
+      c.blendMode = "difference";
+      c.text.color = call.differenceInk;
+      c.text.emphasis = [];
     }
     if (call.cueFrame !== undefined) {
       if (call.cueFrame >= c.duration)

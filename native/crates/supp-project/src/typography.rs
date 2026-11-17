@@ -68,7 +68,11 @@ pub fn validate(text: &Text) -> Result<(), Error> {
     let t = &text.typography;
     ensure(
         range(t.tracking, -10., 100.)
-            && t.word_starts.as_ref().is_none_or(|keys| keys.len() <= 256 && keys.iter().all(|k| *k <= 2_000_000_000) && keys.windows(2).all(|pair| pair[0] < pair[1]))
+            && t.word_starts.as_ref().is_none_or(|keys| {
+                keys.len() <= 256
+                    && keys.iter().all(|k| *k <= 2_000_000_000)
+                    && keys.windows(2).all(|pair| pair[0] < pair[1])
+            })
             && range(t.line_spacing, 0.5, 3.)
             && range(t.reveal, 0., 1.)
             && range(t.highlight, -1., 10000.)

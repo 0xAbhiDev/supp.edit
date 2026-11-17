@@ -1,3 +1,18 @@
+## Focused title reconstruction verified in the Windows app — 17 November 2026
+
+The opening of the second gym reference (0–3.967 s) now exports from the rebuilt Windows application with all nine reference words as editable difference-blend titles, a measured highlight and shadow cast, and a filled frame. A 0–7.967 s run adds IS, IN and ITS and keeps the two-frame MOUTH flash flagged for review. Both runs passed Open, Recreate, Preview, Apply, Undo, Redo, Save, full exit, reopen with identical compositions and assets, and Deliver export. This is **not acceptance of autonomous reference recreation**.
+
+| Evidence | Location |
+| --- | --- |
+| Windows Deliver exports | `test-results/focus55/native/render.mp4` (119 frames), `test-results/focus55/native-long/render.mp4` (239 frames) |
+| Native session records and screenshots | `native-verification.json`, `run.log`, `0-…6-*.png` in the same directories |
+| Reference / previous / Windows export sheets | `comparison.jpg` in the same directories |
+| Title overlap and plate tone | `test-results/focus55/native/fidelity/title-fidelity.json` and `.png` |
+
+Measured on 0–3.967 s: mean title overlap 0.491 with 9 of 9 words present (earlier focused pass 0.187 with 5 of 9); plate tone error 7.0 / 10.1 levels (earlier 25.3 / 18.3). The negative pulse at frames 139–144 keeps its yellow and purple above the new grade layers. 180 TypeScript tests and 41 native tests pass; `bin/supp-edit.exe` was rebuilt from this tree and `bin/supp-edit-before-focus.exe` is the prior build.
+
+Still different from the reference: the export is darker on average (flatly lit raw footage), the typefaces are the nearest installed ones, the subject flash is a soft contour, MOUTH and the red HONORABLE title are withheld, and titles have no measured motion. Reference 54 and the other modes were not rerun. Details and reproduction: `docs/REFERENCE_FIDELITY_BREAKTHROUGH.md`, section "Focused title reconstruction".
+
 ## Windows export check completed 17 November 2026
 
 The reopened second gym project exported Creative Remix through Windows Deliver. All 384 H.264 frames and the AAC audio decoded. The complete frame scan found zero black frames, including cut 100. The permitted-source graph excludes the reference. The largest sampled preview-to-export mean channel error was 1.88/255. The separate CPU rerender passed too. Both results and the original failing export are retained. The intermittent trigger remains unproven. See `test-results/fidelity-breakthrough/55/Windows-Creative-Remix`.

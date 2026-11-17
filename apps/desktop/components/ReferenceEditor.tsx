@@ -407,7 +407,7 @@ export function ReferenceEditor() {
             <select
               value={controls.mode}
               onChange={(e) =>
-                update({ mode: e.target.value as Controls["mode"] })
+                update({ mode: e.target.value as Controls["mode"], interval: undefined })
               }
             >
               {modes.map((m) => (
@@ -498,6 +498,16 @@ export function ReferenceEditor() {
         </label>
         <details>
           <summary>Style controls</summary>
+          {controls.mode === "Close Match" && <label>
+            <input type="checkbox" checked={!!controls.interval} onChange={e=>update({interval:e.target.checked?{startMs:0,endMs:Math.min(4000,Math.round((chosen?.duration??4)*1000))}:undefined})}/>
+            Reconstruct a focused title interval
+          </label>}
+          {controls.interval && <>{(["startMs","endMs"] as const).map(k=><label key={k}>
+            {k==="startMs"?"Reference in (seconds)":"Reference out (seconds)"}
+            <input type="number" step="0.001" min="0" value={controls.interval![k]/1000}
+              onChange={e=>update({interval:{...controls.interval!,[k]:Math.round(Number(e.target.value)*1000)}})}/>
+          </label>)}<label>Visually reviewed words (optional, one time in seconds and word per line)
+            <textarea value={controls.reviewedTitleCues??""} maxLength={1000} onChange={e=>update({reviewedTitleCues:e.target.value})}/></label></>}
           {(["pace", "color", "beat"] as const).map((k) => (
             <label key={k}>
               {k} · {controls[k].toFixed(2)}

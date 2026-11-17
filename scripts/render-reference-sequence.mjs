@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { createServer } from "vite";
 import { chromium } from "@playwright/test";
-import { mediaEnvironment } from "./runtime.mjs";
+import { mediaEnvironment, launchBrowser } from "./runtime.mjs";
 const [input, destination] = process.argv.slice(2);
 if (!input || !destination)
   throw Error("Supply a project and a dedicated output directory");
@@ -52,12 +52,19 @@ const server = await createServer({
   },
 });
 await server.listen();
-const browser = await chromium.launch();
+const browser = await launchBrowser(chromium);
 try {
   const page = await browser.newPage();
-  await page.goto(new URL("favicon.ico", server.resolvedUrls.local[0]).href, {
-    waitUntil: "commit",
-  });
+  // A blank same-origin HTML document. Installed Chrome rejects the 404 page
+  // that the pinned headless shell tolerated.
+  const origin = new URL("render-harness.html", server.resolvedUrls.local[0]).href;
+  await page.route(origin, (r) =>
+    r.fulfill({
+      contentType: "text/html",
+      body: "<!doctype html><title>Render harness</title>",
+    }),
+  );
+  await page.goto(origin);
   // Only selected raw video and supplied audio are made available to the rendering harness.
   const ids = new Set(sequence.layers.map((c) => c.assetId).filter(Boolean));
   for (const asset of project.assets.filter((a) => ids.has(a.id))) {

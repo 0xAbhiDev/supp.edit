@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { newTrack } from "../project-schema";
+import { newClip, newTrack } from "../project-schema";
 import { bezierMaskSchema } from "../masks/model";
 import { editable, type Edit } from "./index";
 import { resolveClip } from "../animation";
@@ -18,8 +18,36 @@ export const subjectLayerSchema = z
     tool: z.literal("sequence.subjectLayer"),
     ...common,
     mask: bezierMaskSchema,
+    silhouette: z.object({
+      color: z.string().regex(/^#[0-9a-f]{6}$/i),
+      spans: z.array(z.object({start:z.number().int().nonnegative(),end:z.number().int().positive()}).strict()).min(1).max(300)
+    }).strict().optional(),
   })
   .strict();
+
+export const plateTintSchema=z.object({tool:z.literal("sequence.plateTint"),...common,color:z.string().regex(/^#[0-9a-f]{6}$/i),strength:z.number().min(0).max(1),
+  // "shadow-cast" multiplies through the raw shot's inverted luminance: shadows and midtones
+  // take the cast, highlights stay near neutral. "color" is a flat hue wash.
+  // "highlight-cast" is a plain multiply over the shot: a white balance.
+  treatment:z.enum(["color","shadow-cast","highlight-cast"]).optional()}).strict();
+export function referencePlateTint(input:z.infer<typeof plateTintSchema>):Edit{
+  const call=plateTintSchema.parse(input);
+  return p=>{
+    const source=editable(p,call.sourceId);
+    if(!source || source.kind!=="media" || !p.assets.some(a=>a.id===source.assetId && a.kind==="video"))throw Error("Choose an unlocked raw video for the measured color treatment.");
+    if(p.clips.some(c=>c.id===call.id))throw Error("Grade layer already exists.");
+    const sourceOrder=p.tracks.findIndex(t=>t.id===source.trackId);
+    let track=p.tracks.find(t=>t.id===call.trackId);
+    if(track && (track.locked || track.kind!=="video" || p.tracks.indexOf(track)>=sourceOrder))throw Error("Grade track must be above the source.");
+    if(!track){track={...newTrack("video",p.tracks.length+1),name:call.treatment==="highlight-cast"?"Reference highlight cast":"Reference color cast",id:call.trackId};p.tracks.splice(sourceOrder,0,track);}
+    const tint=newClip(track.id,source.start,source.duration,"shape");
+    const cast=call.treatment==="shadow-cast", balance=call.treatment==="highlight-cast";
+    tint.id=call.id;tint.name=cast?"Measured shadow cast":balance?"Measured highlight cast":"Measured plate tint";tint.blendMode=cast||balance?"multiply":"color";tint.transform.opacity=call.strength;
+    tint.shape={type:"rectangle",color:call.color,width:p.settings.width,height:p.settings.height};
+    tint.matte={layerId:source.id,mode:cast?"luma-inverted":"alpha",keepSourceVisible:true};
+    p.clips.push(tint);
+  };
+}
 
 /** Copies retain source timing and grading. All new state uses ordinary editable layers. */
 export function referenceLayer(
@@ -118,6 +146,25 @@ export function referenceLayer(
     } else {
       copy.name = "Foreground person · " + source.name;
       copy.masks.push(call.mask);
+      if (call.silhouette) {
+        copy.kind = "shape";
+        delete copy.assetId;
+        copy.name = "Subject flash · " + source.name;
+        copy.shape = {type:"rectangle", color:call.silhouette.color, width:p.settings.width, height:p.settings.height};
+        copy.effectStack = [];
+        copy.effects = {brightness:1,contrast:1,saturation:1,blur:0};
+        delete copy.timeRemap;
+        const values=new Map([[0,0]]);
+        let end=0;
+        for(const span of call.silhouette.spans){
+          if(span.start<end || span.end<=span.start || span.end>source.duration) throw Error("Subject flash lies outside its raw shot");
+          values.set(span.start,1);
+          if(span.end<source.duration)values.set(span.end,0);
+          end=span.end;
+        }
+        copy.transform.opacity=values.get(0)!;
+        copy.keyframes.opacity=[...values].map(([frame,value])=>({frame,value,easing:"hold"}));
+      }
     }
     p.clips.push(copy);
   };

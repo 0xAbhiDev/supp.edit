@@ -96,3 +96,71 @@ The first CPU harness export `55/Creative-Remix/render.mp4` failed the full scan
 The production seek path now registers a video-frame presentation callback before seeking and waits for both completed seek/readiness and a matching source-frame timestamp. It rejects stale events and times out instead of returning unready pixels. This closes a readiness gap but does not establish the original trigger conclusively. The complete rerender passed all 384 frames; retain both the failed output and `Creative-Remix-recheck` for further stress testing. New browser evidence exercises stale seek-event rejection on real decoded video, repeated source-frame equality, the existing cache/parity test, relinking and fractional speed remapping. All four tests pass. Both frontend and embedded Windows builds pass after the change. The comparison script now writes failure frame numbers before returning a failing exit code.
 
 The additional Windows Deliver export after restarting and reopening reference 55 passed all 384 frames, AAC, and source isolation. Its largest sampled preview-to-export error was 1.88/255. See 55/Windows-Creative-Remix. These results close the interrupted export check.
+
+## Focused title reconstruction — 17 November 2026
+
+This increment rebuilds the opening of the second gym reference (`…12.51.55 AM.mp4`) and is verified through the rebuilt Windows application, not only the browser harness. It is **not acceptance of autonomous reference recreation**: the footage, typefaces and several listed attributes still differ. No overall similarity percentage is claimed.
+
+### What the reference does in 0–3.967 s
+
+One word at a time at a fixed center: YOU, CANNOT, REASON, WITH, A, a script Tiger, WHEN, YOUR, HEAD. The lettering is white composited in difference mode, so it shows the plate's photographic negative: pink over the green grade and maroon over a flat mint subject flash. The plate is dark with a teal cast that deepens toward the shadows and fades toward near-neutral highlights. The picture fills the frame. A hard cut falls at 2.967 s.
+
+### Diagnosis of the earlier output
+
+| Defect in the previous focused export (`test-results/focus55/pass1`) | Stage | Correction |
+| --- | --- | --- |
+| A, Tiger, YOUR and HEAD missing; WHEN partly | Analysis | The chroma-band mask broke over skin and bright plate, and the Whisper transcript for this vocal is wrong ("Who cannot please him … heavy sin is slow"), so vocal words could not supply the wording. |
+| Flat monochrome green wash, or no grade | Treatment | A single `color` blend replaced hue everywhere. The reference keeps near-neutral highlights. |
+| Black bars above and below | Planning | The union of detected subjects kept a contain fit although the reference has no letterbox. |
+| Negative pulse muted to dim green (found while extending to 8 s) | Planning | Grade tracks were inserted before the pulse tracks and ended up above them. |
+
+### Implemented
+
+- `packages/ai/reference/title-ink.ts` — negative-ink classifier. The plate outside the title band gives a per-frame color model; a band pixel is ink when its negative is an ordinary plate color and the pixel is not. Votes across the frames of one stationary word reject moving scenery. Runs tolerate frames inside a measured full-frame pulse. No color threshold and no reference-specific values.
+- `packages/ai/reference/title-read.ts` — local reader. Each candidate wording is rendered in every installed candidate face and compared with the full-resolution mask. A letter-by-letter decode of separated capitals proposes wordings when OCR and the vocal have none.
+- `packages/ai/reference/ink-titles.ts` — evidence rules. Reviewed wording wins; prior OCR that still fits is kept; a decode within one substituted letter of an OCR or vocal wording yields to it; a decode with no other support must persist for at least three frames; a vocal word that does not fit on its own (connected script, single letter) is accepted only between two confirmed neighbors with exactly matching counts. Unread lettering is reported by time, never guessed. Capitals of one size share one face and one ink treatment.
+- `packages/ai/reference/tone.ts`, `source-tone.ts` — five per-channel percentiles for each reference shot and each raw source, and a solver for one brightness gain, a highlight cast (plain multiply) and a shadow cast (multiply through an inverted-luminance matte). `sequence.plateTint` gained `highlight-cast` and `shadow-cast`; both are ordinary editable shape layers with mattes.
+- `packages/ai/reference/planner.ts` — Close Match in reference framing covers the frame when the reference has no letterbox and warns when the detected subject area is cropped; grade layers are emitted after color pulses so pulses stay above them; the saturation boost is capped when a measured cast is present.
+- `packages/typography/fonts.ts` — more installed sans and script candidates.
+- Earlier uncommitted work is kept: focused-interval controls, difference ink on text, subject flash layers, the chroma-band reader (now the fallback for flat colored fills).
+
+### Windows application evidence
+
+`scripts/verify-native-focused.mjs` launches `bin/supp-edit.exe` (rebuilt 17 November, 36,015,104 bytes, embedded bundle `index-T9WY3Q9Z.js`), drives its own interface through the WebView2 debugging port, and answers native file dialogs with `scripts/native-file-dialog.ps1`. Analysis runs in the native host and the MP4 is written by Deliver.
+
+| Run | Evidence directory | Result |
+| --- | --- | --- |
+| 0–3.967 s | `test-results/focus55/native` | Open → Recreate (235 s of local analysis) → Preview → Apply → Undo → Redo → Save → full exit → reopen → resave with identical compositions and assets → Deliver. `render.mp4`: 464×368, 119 H.264 frames, AAC. 17 layers, 9 editable difference-blend titles. The Deliver step was resumed in the same reopened application after a harness selector error; `native-session.json` records the earlier steps from `run.log`. |
+| 0–7.967 s | `test-results/focus55/native-long` | Same sequence in one uninterrupted run. `render.mp4`: 239 frames, AAC. 27 layers, 12 editable titles (adds IS, IN, ITS, read from letter shapes alone). The preview states that lettering at 4.70–4.77 s and 4.83–4.90 s was isolated but not read; MOUTH is absent from the export by design. |
+
+Screenshots `0-launched.png` … `6-deliver-done.png`, `native-verification.json`, `before-close.supp` and the saved project are in each directory. The Windows export and the CPU harness render of the same plan agree at 47.1 dB average PSNR.
+
+### Measurements
+
+`scripts/measure-title-fidelity.mjs REFERENCE EXPORT DNA OUT` isolates the lettering in the reference frame and in the export frame at each title's midpoint and reports their intersection over union, plus the mean absolute difference of five per-channel plate percentiles (0–255). These measure the compared attributes only.
+
+| Export of 0–3.967 s | Mean title overlap | Titles with any overlap | Plate tone error, shot 1 / shot 2 |
+| --- | ---: | ---: | ---: |
+| Earlier focused pass (`focus55/pass1/render.mp4`) | 0.187 | 5 of 9 | 25.3 / 18.3 |
+| Working tree at handoff (`focus55/claude/baseline`) | 0.266 | 5 of 9 | 21.9 / 15.6 |
+| Windows Deliver export (`focus55/native/render.mp4`) | 0.491 | 9 of 9 | 7.0 / 10.1 |
+
+Per title in the Windows export: YOU 0.74, CANNOT 0.42, REASON 0.57, WITH 0.49, A 0.36, Tiger 0.08, WHEN 0.57, YOUR 0.51, HEAD 0.70. Position and size agree; the remaining gap is letter shape (Segoe UI against a geometric display face) and places where the export's own plate is mid-gray and the classifier cannot see its ink. Tiger scores near zero because no installed script resembles the reference hand.
+
+Negative pulse, Windows 0–8 s export: mean RGB of frames 139, 140, 143, 144 is (199, 146–147, 53–54) against the reference's (201–202, 138–140, 53–54). Before the track-order fix the same frames rendered dim green (`focus55/claude/long1`). Aligned sheets: `focus55/native/comparison.jpg`, `focus55/native-long/comparison.jpg`, overlay `focus55/native/fidelity/title-fidelity.png`.
+
+### Unresolved
+
+| Attribute | Status |
+| --- | --- |
+| Overall brightness | Outside pulses the export's mean RGB is about (22–32, 39–57, 32–47) against the reference's (42–46, 61–63, 48–50). Medians match; the reference has bright fixtures and floor that evenly lit raw footage lacks. Lifting toward the upper quartile was tried and reverted: tone error rose to 12.6 / 15.3 with almost no change in mean. |
+| Typeface | Nearest installed faces only: Segoe UI Bold for the capitals, Segoe Script for Tiger. No font is bundled or downloaded. |
+| Subject flash | Timing and color are measured. The silhouette comes from the low-resolution person contour of the matched raw shot; for the reclined incline-press athlete it is a soft blob beside the reference's crisp standing figure. |
+| MOUTH (4.63–4.97 s) | Two-frame flashes between pulses; the decode reads a damaged H as L. Withheld with a warning. Entering reviewed words places it in the family face and size (`focus55/claude/long6`, harness only). Its rotation is not reproduced. |
+| HONORABLE (5.3 s onward) | Red serif behind the athlete. The negative-ink model does not apply to a flat colored fill and OCR sees only fragments; still withheld. |
+| Title motion | Titles cut on and off on the measured frames. No entrance scale, rotation or blur is measured. |
+| Raw footage | Burned-in exercise labels, flat studio lighting and different camera positions are properties of the supplied clips. |
+| Instagram logo and handle | Recognized as recurring edge labels and deliberately excluded. |
+| Other references and modes | Reference 54, vertical framing, Smart Adaptation and Creative Remix were not rerun with these changes. Cover framing and tone casts apply to any Close Match with measured tone; only this reference has native evidence. |
+
+Harness note: Playwright's pinned Chromium is not installed on this machine. `scripts/runtime.mjs` falls back to installed Chrome or Edge; nothing is downloaded.

@@ -1,3 +1,16 @@
+## Resume after the focused Windows verification — 17 November 2026
+
+The working tree holds the focused title reconstruction, verified through `bin/supp-edit.exe` (rebuilt from this tree). Nothing is committed yet; `ce71503` is still the last commit. Read the "Focused title reconstruction" section of `docs/REFERENCE_FIDELITY_BREAKTHROUGH.md` before changing fidelity code.
+
+Reproduce:
+
+1. `npm run build`, then `cargo build -p supp-desktop --features tauri/custom-protocol`, then copy `target/debug/supp-edit.exe` to `bin/supp-edit.exe` with the app closed.
+2. Copy `test-results/fidelity2/55/SOURCE.supp` to a new file and run `node scripts/verify-native-focused.mjs COPY.supp OUT_DIR 0 3967`. It opens and saves the copy in place. Add a review file as the fifth argument to supply words such as `4.72 MOUTH`.
+3. `node scripts/compare-title-interval.mjs REFERENCE PREVIOUS OUT_DIR/render.mp4 OUT_DIR/comparison.jpg 5 20 40 …` and `node scripts/measure-title-fidelity.mjs REFERENCE OUT_DIR/render.mp4 DNA.json OUT_DIR/fidelity`.
+4. Faster iteration without the app: `node scripts/verify-focused-reference.mjs test-results/fidelity2/55 test-results/fidelity-breakthrough/55/final/dna.json NEW_DIR 0 3967`, then `node scripts/render-reference-sequence.mjs NEW_DIR/Focused.supp NEW_DIR/render`. The harness uses installed Chrome because Playwright's pinned browser is absent.
+
+Next fidelity work, in order of visible effect: choose raw shots whose subject pose suits a measured subject flash and sharpen its contour; read flat colored titles such as the red HONORABLE and place them behind the athlete; measure title entrance motion and rotation; decide with the owner whether a geometric display face and a brush script may be bundled; rerun reference 54, vertical framing and the other two modes with the new grade and framing. Do not raise brightness by lifting the upper quartile: it was measured and reverted.
+
 ## Windows export check completed 17 November 2026
 
 The reopened second gym project exported Creative Remix through Windows Deliver. All 384 H.264 frames and the AAC audio decoded. The complete frame scan found zero black frames, including cut 100. The permitted-source graph excludes the reference. The largest sampled preview-to-export mean channel error was 1.88/255. The separate CPU rerender passed too. Both results and the original failing export are retained. The intermittent trigger remains unproven. See `test-results/fidelity-breakthrough/55/Windows-Creative-Remix`.

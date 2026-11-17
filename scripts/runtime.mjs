@@ -11,3 +11,18 @@ export function mediaEnvironment() {
   }
   return env;
 }
+/** Launch the pinned Playwright browser, or an installed Chrome/Edge when the
+ * pinned build has not been downloaded. Nothing is fetched from the network. */
+export async function launchBrowser(chromium) {
+  if (process.env.SUPP_BROWSER_CHANNEL)
+    return chromium.launch({ channel: process.env.SUPP_BROWSER_CHANNEL });
+  if (existsSync(chromium.executablePath())) return chromium.launch();
+  let failure;
+  for (const channel of ["chrome", "msedge"])
+    try {
+      return await chromium.launch({ channel });
+    } catch (e) {
+      failure = e;
+    }
+  throw failure;
+}

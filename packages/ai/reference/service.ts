@@ -1,5 +1,8 @@
 import { referenceVisual } from "./visual-source";
 import { personMasks } from "./subject-mask";
+import { traceTitles } from "./focus";
+import { sourceTone } from "./source-tone";
+import { medianTone } from "./tone";
 import { measureTextDepth } from "./text-depth";
 import { sourceAperture } from "./aperture";
 import type { Project, Asset } from "../../project-schema";
@@ -91,6 +94,7 @@ export function recreate(
         job.report({ completed, total, unit: "stages", detail });
       stage(0, "Analyzing reference");
       const quiet = { ...job, report: () => {} };
+      let referenceTranscript: Project["transcripts"][number] | undefined;
       async function measureReference() {
         const measured = await visuals(reference);
         let text = null;
@@ -142,6 +146,7 @@ export function recreate(
             );
           }
         }
+        referenceTranscript=transcript;
         return extractDNA(
           reference,
           measured.analysis,
@@ -153,10 +158,37 @@ export function recreate(
           transcript,
         );
       }
-      const dna =
+      let dna =
         profile && controls.wording !== "original"
           ? profile
           : await measureReference();
+      if(controls.interval){
+        const contours=caps.personModel?.installed ? await personMasks(reference,quiet) : [];
+        const focused=await traceTitles(reference,dna,controls.interval,contours,referenceTranscript,quiet,undefined,controls.reviewedTitleCues);
+        dna=focused.dna;
+        warnings.push(...focused.warnings);
+      }
+      const closeMatch = controls.mode === "Close Match";
+      if (closeMatch && dna.shots.some((shot) => !shot.tone)) {
+        try {
+          const samples = await sourceTone(reference, quiet);
+          dna = {
+            ...dna,
+            shots: dna.shots.map((shot) => {
+              if (shot.tone) return shot;
+              const tone = medianTone(
+                samples
+                  .filter((t) => t.timeMs >= shot.startMs && t.timeMs < shot.endMs)
+                  .map((t) => t.tone),
+              );
+              return tone ? { ...shot, tone } : shot;
+            }),
+          };
+        } catch (e) {
+          await job.checkpoint();
+          warnings.push("Reference tone could not be measured: " + String(e).slice(0, 160));
+        }
+      }
       stage(1, "Extracted Style DNA");
       const sources: SourceEvidence[] = [];
       for (const a of raw) {
@@ -164,14 +196,22 @@ export function recreate(
         const evidence: SourceEvidence = await visuals(a);
         if (controls.format === "vertical")
           evidence.aperture = await sourceAperture(a, quiet);
+        if (closeMatch) {
+          try {
+            evidence.tone = await sourceTone(a, quiet);
+          } catch (e) {
+            await job.checkpoint();
+            warnings.push("Footage tone could not be measured: " + String(e).slice(0, 160));
+          }
+        }
         if (
           controls.subjectLayering === "behind-people" ||
           (controls.subjectLayering === "reference" &&
-            dna.text?.some(
+            (!!dna.personFlashes?.length || dna.text?.some(
               (l) =>
                 l.depth?.relation === "behind" &&
                 l.evidence?.status !== "uncertain",
-            ))
+            )))
         ) {
           try {
             evidence.people = await personMasks(a, quiet);

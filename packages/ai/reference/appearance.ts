@@ -3,6 +3,7 @@ const unit = z.number().finite().min(0).max(1);
 const glyph = z.array(z.number().int().min(0).max(0xffffffff)).length(16);
 export const appearanceSchema = z
   .object({
+    differenceInk: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
     startMs: z.number().int().nonnegative(),
     templateRows: glyph.optional(),
     depth: z
@@ -63,7 +64,7 @@ export const appearanceSchema = z
       .optional(),
     evidence: z
       .object({
-        status: z.enum(["audio-visual", "visual-consensus", "uncertain"]),
+        status: z.enum(["audio-visual", "visual-consensus", "uncertain","reviewed"]),
         kind: z.enum([
           "captioned-lyrics",
           "captioned-speech",

@@ -1,5 +1,6 @@
 import { measuredColor, type VisualFrame } from "./visual";
 import type { Aperture } from "./aperture";
+import { castTreatment, medianTone, type ToneSample } from "./tone";
 import { editablePersonMask, type PersonSample } from "./subject-mask";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
@@ -22,6 +23,7 @@ export interface SourceEvidence {
   visual?: VisualFrame[];
   people?: PersonSample[];
   aperture?: Aperture;
+  tone?: ToneSample[];
 }
 export interface Controls {
   mode: RecreationMode;
@@ -30,6 +32,8 @@ export interface Controls {
   color: number;
   beat: number;
   instructions: string;
+  reviewedTitleCues?:string;
+  interval?: {startMs:number;endMs:number};
   format?: "vertical" | "reference";
   subjectLayering?: "flat" | "behind-people" | "reference";
 }
@@ -107,6 +111,10 @@ export function buildRecreation(
     controls.format === "vertical"
       ? 1920
       : Math.max(64, 2 * Math.round((dna.height * refScale) / 2));
+  const tintTrack=uid(), balanceTrack=uid();
+  // Grade layers are placed after color pulses so their tracks sit directly above the footage
+  // and below any pulse: a negative pulse then inverts the graded picture, as in the reference.
+  const grade: EditorToolCall[] = [];
   const backgroundClips: string[] = [];
   const remix = controls.mode === "Creative Remix",
     close = controls.mode === "Close Match",
@@ -246,6 +254,40 @@ export function buildRecreation(
       duration,
       gain: voice ? -60 : music ? -20 : 0,
     });
+    // Measured tone on both sides: rebuild the grade as one gain plus a shadow cast.
+    const rangeTone = medianTone(
+      (s.source.tone ?? [])
+        .filter(
+          (t) =>
+            t.timeMs >= (sourceIn * 1000) / rate - 250 &&
+            t.timeMs <= ((sourceIn + duration) * 1000) / rate + 250,
+        )
+        .map((t) => t.tone),
+    );
+    const cast =
+      close && !keepColor && controls.color > 0 && ref.tone && rangeTone
+        ? // Close Match at the default color strength applies the whole measured grade.
+          castTreatment(rangeTone, ref.tone, controls.color / defaults.color)
+        : undefined;
+    if (cast)
+      for (const [treatment, color] of [
+        ["highlight-cast", cast.highlight],
+        ["shadow-cast", cast.shadow],
+      ] as const) {
+        // A cast within a few levels of white changes nothing visible.
+        if ([1, 3, 5].every((i) => parseInt(color.slice(i, i + 2), 16) >= 247)) continue;
+        grade.push({
+          tool: "sequence.plateTint",
+          sequenceId: id,
+          id: uid(),
+          trackId: treatment === "shadow-cast" ? tintTrack : balanceTrack,
+          sourceId: clipId,
+          color,
+          strength: cast.strength,
+          treatment,
+        });
+      }
+    else if (close && controls.interval && !keepColor && controls.color>0 && ref.plateTint)grade.push({tool:"sequence.plateTint",sequenceId:id,id:uid(),trackId:tintTrack,sourceId:clipId,color:ref.plateTint,strength:clamp(controls.color,0,1)});
     const sourceColor = measuredColor(
       s.source.visual ?? [],
       (sourceIn * 1000) / rate,
@@ -259,13 +301,15 @@ export function buildRecreation(
       effect(
         clipId,
         "brightness",
-        referenceGain(
-          sourceColor?.luma ?? from.meanLuma,
-          to.luma,
-          k,
-          0.06,
-          1.8,
-        ),
+        cast
+          ? cast.gain
+          : referenceGain(
+              sourceColor?.luma ?? from.meanLuma,
+              to.luma,
+              k,
+              0.06,
+              1.8,
+            ),
       );
       effect(
         clipId,
@@ -276,20 +320,20 @@ export function buildRecreation(
           1.25,
         ),
       );
-      effect(
-        clipId,
-        "saturation",
-        referenceGain(
-          sourceColor?.saturation ?? from.meanSaturation,
-          to.saturation,
-          k,
-          0.12,
-          1.6,
-        ),
+      const saturation = referenceGain(
+        sourceColor?.saturation ?? from.meanSaturation,
+        to.saturation,
+        k,
+        0.12,
+        1.6,
       );
+      // A measured cast supplies the reference's chroma; boosting the raw colors under it
+      // would count that chroma twice.
+      effect(clipId, "saturation", cast ? Math.min(1, saturation) : saturation);
       const sourceTemperature =
         sourceColor?.temperature ?? from.neutralTemperature;
-      if (to.temperature !== null && sourceTemperature !== null)
+      // The shadow cast already carries the measured hue.
+      if (!cast && to.temperature !== null && sourceTemperature !== null)
         effect(
           clipId,
           "temperature",
@@ -389,15 +433,33 @@ export function buildRecreation(
         sw = asset.width * fit,
         sh = asset.height * fit;
       const cover = Math.max(width / sw, height / sh);
+      // A reference that fills its frame is matched without bars: cover the frame and keep the
+      // subject as centered as the footage allows.
+      const fill =
+        close &&
+        controls.format !== "vertical" &&
+        (camera?.letterbox ?? 0) < 0.03;
       baseScale = clamp(
-        Math.min(
-          cover,
-          (width * 0.86) / (box.width * sw),
-          (height * 0.8) / (box.height * sh),
-        ),
+        fill
+          ? cover
+          : Math.min(
+              cover,
+              (width * 0.86) / (box.width * sw),
+              (height * 0.8) / (box.height * sh),
+            ),
         1,
         10,
       );
+      if (
+        fill &&
+        (box.width * sw * baseScale > width + 1 ||
+          box.height * sh * baseScale > height + 1)
+      )
+        warnings.push(
+          "Shot " +
+            (index + 1) +
+            " fills the reference frame; the outer edge of the detected subject area is cropped.",
+        );
       const x = clamp(
         (0.5 - box.x - box.width / 2) * baseScale * sw,
         -Math.max(0, (baseScale * sw - width) / 2),
@@ -665,6 +727,7 @@ export function buildRecreation(
       ...pulse.palette,
     });
   }
+  command.push(...grade);
   for (const asset of [music, voice]) {
     if (!asset) continue;
     const trackId = asset === voice && music ? uid() : audio;
@@ -1019,6 +1082,7 @@ export function buildRecreation(
       id: uid(),
       trackId: aboveMask ? frontGraphics : graphics,
       content,
+      ...(measuredInk && appearance.differenceInk ? {differenceInk:appearance.differenceInk} : {}),
       ...(measuredInk && appearance.inkMetrics
         ? {
             face: {
@@ -1119,6 +1183,24 @@ export function buildRecreation(
         warnings.push(
           `No reliable local person outline for ${source.asset.name}; text remains in front.`,
         );
+    }
+  }
+  if (close && controls.subjectLayering === "reference" && dna.personFlashes?.length) {
+    const trackId=uid();
+    for(const match of matches){
+      const spans=dna.personFlashes.filter(f=>f.startMs<match.referenceEndMs && f.endMs>match.referenceMs);
+      if(!spans.length)continue;
+      const source=sources.find(s=>s.asset.id===match.source)!;
+      const clip=layout.clips.find(c=>c.id===match.clipId)!;
+      const mask=editablePersonMask(source.people??[],clip,source.asset,width,height,rate);
+      if(!mask){warnings.push("Subject flash withheld because the raw shot has no measured person contour.");continue;}
+      // A flat flash has a hard edge in the reference; keep only enough feather to hide stair-stepping.
+      mask.feather=0.5;
+      const local=(ms:number)=>clamp(Math.round((ms-match.referenceMs)*match.duration/(match.referenceEndMs-match.referenceMs)),0,match.duration);
+      for(const color of new Set(spans.map(f=>f.color))){
+        const ranges=spans.filter(f=>f.color===color).map(f=>({start:local(f.startMs),end:local(f.endMs)})).filter(f=>f.end>f.start);
+        if(ranges.length && command.length+frontTitles.length<508)command.push({tool:"sequence.subjectLayer",sequenceId:id,id:uid(),sourceId:clip.id,trackId,mask,silhouette:{color,spans:ranges}});
+      }
     }
   }
   command.push(...frontTitles);
