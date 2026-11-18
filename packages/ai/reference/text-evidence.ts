@@ -45,12 +45,14 @@ export function assessReferenceText(
       /[\p{Ll}][\p{Lu}]|[\p{L}]\d|\d[\p{L}]|[^\p{L}\p{N} '’.,!?-]/u.test(
         line.content ?? "",
       );
+    // Agreement between preprocessing passes, or the same reading held over many sampled frames
+    // (temporal consensus: one pass can fail on busy or coloured backgrounds while the other
+    // reads the line identically frame after frame). Short words still need both passes.
     const consensus =
       !!line.observations &&
-      line.observations >= 2 &&
-      (line.passAgreements ?? 0) >= 2 &&
       !dubious &&
-      (letters.length >= 3 || line.observations >= 4);
+      ((line.observations >= 2 && (line.passAgreements ?? 0) >= 2 && (letters.length >= 3 || line.observations >= 4)) ||
+        (line.observations >= 5 && letters.length >= 3));
     // Older profiles have no pass counts. Keep the established, multi-word title path.
     const legacy = line.observations == null && tokens.length >= 2 && !dubious;
     const label = line.role === "persistent-overlay";

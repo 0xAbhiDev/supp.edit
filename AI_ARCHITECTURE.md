@@ -1,5 +1,60 @@
 # Reference-to-Edit
 
+## Long-footage selection (footage index)
+
+Raw footage may be far longer than the reference. `packages/ai/reference/footage-index.ts` treats every supplied clip as one searchable pool and never assumes a clip's first seconds are the useful part.
+
+- **Index:** `buildFootageIndex` works from the cached analysis of each whole clip: quality every 500 ms (motion, luma, sharpness), scenes, vision embeddings, layout, people. Nothing is decoded again, so the reference can be rematched cheaply.
+  - **Candidates:** it proposes *action* windows around motion peaks, refined between samples, and *hold* windows across calm stretches, inside every scene.
+  - **Quality:** each window gets a quality share (sharp, exposed, stable, not black) with named issues (blur, exposure, black, shake or transition). Coverage is reported: clips, supplied and analysed duration, candidate count.
+- **Requirements:** each reference shot carries its wanted duration, look (embedding), framing, pose (subject shape), motion, layout and luma. It also carries the moment that matters inside it: its strongest linked audio event from the event graph (impact > drop > bass hit > downbeat > kick > snare > beat), as a fraction of the shot.
+- **Scoring:** `scoreCandidate` first trims the candidate so its action peak lands at the shot's peak fraction inside the scene; there is no centring. It then scores look, pose, framing, motion, peak alignment, composition, tone and quality, with mode weights.
+  - **Close Match** follows the stated priority: action/pose, framing, motion, audio-event alignment, composition, tone, quality.
+  - **Creative Remix** leans on action.
+  - Windows that are mostly unusable lose 70% of their score, so better footage always wins.
+- **Global choice:** `selectShots` runs a beam search over the whole edit (width 10, top 12 candidates per shot).
+  - **Reuse:** overlapping use of the same source interval is forbidden unless the reference itself repeats a shot (near-identical look). Reuse is recorded as `{ intentional, reason }`.
+  - **Neighbours:** same-clip moments within 3 s are penalised as a stutter, and going backwards within one clip slightly.
+  - **Alternatives:** the best three are kept per shot.
+- **Planner:** the global choice is each shot's first option, and the existing local matcher remains the fallback. Caption-led edits keep each source's chronology with the local matcher. Matches record `selection`, `match`, `alternatives`, `reuse` and `peak`, and the plan reports coverage.
+- **Preview:** "Why each source moment was chosen" lists per shot the source moment, the action-peak placement, per-criterion bars and overall match. Up to three alternatives each offer *Choose another take*, which swaps that shot's source in the plan and re-previews without re-analysis.
+
+## Recreate-workflow UI
+
+The Recreate panel is now organised for the task:
+- **Layout:** a header with progress steps (Sources → Style → Preview → Apply), then Sources and Style cards side by side, collapsing by container width. The style options sit in a compact two-column grid.
+- **Actions:** one primary *Recreate This Style* button in an action bar that summarises the choices; after preview, an *Apply recreation* bar.
+- **Results:** stat cards (shots, BPM, matched ranges, editable titles) and the raw-footage coverage line. Notes are grouped in one callout, and evidence uses chevron sections, compact tables and confidence meters, with tags for unmatched audio events.
+- **Elsewhere:** audio-event markers on the timeline have their own colour, a stem and a drag cursor. In AI Studio the timeline is capped at 220 px so the planning panel has room.
+
+All accessible names used by the automated Windows driver are unchanged.
+
+## Structural recreation of audio (3.1)
+
+*Recreate audio structure* no longer moves each reference event to the nearest replacement event within 150 ms. It aligns the two soundtracks' structures globally and then solves the edit's relationships (`packages/ai/reference/structural-alignment.ts`).
+
+- **Structure** (`packages/ai/audio/structure.ts`):
+  - **Sections:** `segmentsOf` divides a timeline at drops, silence edges, sweep peaks and starts, section changes and fade-outs, collapsing boundaries closer than 0.6 s. It labels each section by function and energy: intro, build, drop, energetic, phrase, breakdown, outro, silence, dialogue. Dialogue means speech over sparse drums; sung words over a groove remain music.
+  - **Beat clock:** `beatClock` gives fractional beat, bar, beat-in-bar and phrase (4 bars) coordinates. The beat list is regularised, so a gap of about *k* median beats is filled.
+- **Normalised coordinates:** every event-graph link stores section label and progress, beat position and phase, beat-in-bar and phrase progress (`measured`). It also stores its association (beat, phrase boundary, transient, impact, section change, sweep, silence edge, vocal word, no audio event) and an explicit constraint such as `title_in BEFORE impact -73 ms` (`inferred`).
+- **Alignment, in the beat domain:** one reference beat maps to ½, 1 or 2 replacement beats, whichever keeps the beat length nearest the reference.
+  1. **Start.** The start beat is chosen by global agreement of linked event types, section labels and downbeat phase.
+  2. **Landmarks.** Matching drops, sweep peaks and silence edges within four beats become control points.
+  3. **Events.** Linked reference anchors are mapped by an order-preserving dynamic programme. Its cost combines type similarity (anchor families, closest first), same predicted section, bar phase, strength and position against the structural prediction, with a skip cost. No later event can map before an earlier one.
+  4. **Constraints.** Each visual event is placed at its mapped anchor plus its measured offset. Offsets up to 120 ms stay in milliseconds; longer ones scale with the beat length.
+  5. **Unmapped anchors.** When an anchor has no counterpart, the event follows the beat map and is reported as *No suitable replacement event found* (`status: "no-replacement"`). Final times are kept monotonic.
+- **Diagnostics:** the plan records where every visual event went and why: reference → adapted time, trigger → replacement, kept relation and offset, per-term reasons and confidence. This goes into `ai.audioMapping` (TypeScript and native schemas) and the preview's Audio events table. `ai.audioEventFrames` stores the detected events of the audio actually played, as snap targets.
+- **Detectors:**
+  - **Tempo:** tempo is octave-aware. Local periods are folded to one octave. The tracked pulse, half and double are scored as hypotheses: do in-between pulses lack the sub-bass attack and strength of the main ones (subdivisions)? Do midpoints carry them (a missed level)? A broad prior also contributes. Medians are taken within continuous runs, and `tempoHypotheses` and `tempoAmbiguous` are stored.
+  - **Downbeats:** chosen from the linear sub-bass accent per bar phase plus votes from impacts and drops on a beat.
+  - **Drops:** a sustained sub-bass and level rise. The before-level counts audible frames only. The after-level skips impact tails and must still hold 1.5 s later. A rise within 1 s of a silence ending is re-entry, not a drop. The time is refined to the steepest sub-bass rise and snapped to an attack.
+- **Generated effects:** `plannedSounds` measures each reference effect's peak over the music just before it, plus attack, release and band balance. The clip gain reproduces that relation over the replacement's bed at the mapped time plus the music gain, against the synthesised sound's measured peak, and never exceeds −3 dBFS. Attack and release become ordinary gain keys. Ducking of the reference music is not measured separately from the effect's tail, so the music is not ducked.
+- **Timeline output:** the default audio track carries the audio actually used: named "Reference audio" in reference mode and "Music" otherwise. It is omitted when nothing lands on it. The SFX track exists only when a sound is placed.
+- **Interaction and limits:**
+  - Audio-event markers can be dragged. They snap to `audioEventFrames` within about 8 px; Alt moves the marker alone. Each drag is one history entry.
+  - Focused intervals may now run up to ten minutes; title tracing is streaming and linear in duration. Audio analysis decodes up to 600 s.
+- **Text evidence:** a line read identically in at least five sampled frames, with three or more letters and nothing dubious, counts as consensus even when only one OCR preprocessing pass reads it (temporal aggregation). Short words still need both passes.
+
 ## Audio fidelity and the shared audio/visual event clock (3.0)
 
 **One clock.** `packages/ai/audio/features.ts` decodes any soundtrack (natively through `decode_audio_pcm` in the desktop app, through Web Audio elsewhere) to 22.05 kHz stereo and measures it every 10 ms: RMS (mono, left, right, side), log energy and half-wave spectral flux in five bands (sub < 120 Hz, low, mid, high, air), spectral centroid, and spectral flatness between 300 Hz and 8 kHz. Reference visual analysis already reports milliseconds of the same file, so every audio and visual event shares one millisecond clock.

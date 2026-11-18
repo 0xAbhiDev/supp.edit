@@ -6,6 +6,19 @@
 import { z } from "zod";
 import type { StyleDNA } from "./dna";
 import type { AudioEvent, AudioTimeline } from "../audio/timeline";
+import { beatClock, segmentAt, segmentsOf } from "../audio/structure";
+
+/** What a visual event is tied to, as an editor would describe it. */
+export function associationOf(anchorKind: string, phraseStart = false) {
+  if (anchorKind === "beat" || anchorKind === "downbeat") return phraseStart ? "phrase boundary" : "beat";
+  if (["kick", "snare", "hat", "onset"].includes(anchorKind)) return "transient";
+  if (["impact", "drop", "bass_hit"].includes(anchorKind)) return "impact";
+  if (anchorKind === "section") return "section change";
+  if (anchorKind.endsWith("_end") && (anchorKind.startsWith("whoosh") || anchorKind.startsWith("riser"))) return "sweep";
+  if (anchorKind.startsWith("silence")) return "silence edge";
+  if (anchorKind.startsWith("word")) return "vocal word";
+  return "no audio event";
+}
 
 export const visualEventKinds = ["cut", "title_in", "title_out", "pulse", "subject_flash"] as const;
 export type VisualEventKind = (typeof visualEventKinds)[number];
@@ -124,7 +137,7 @@ export function buildEventGraph(dna: StyleDNA, audio: AudioTimeline, frameMs = 1
     }
     // A weak plain onset half a beat from the grid does not explain a cut: the cut is offbeat.
     const nearestBeat = beats.reduce<(typeof beats)[number] | undefined>((m, b) => (!m || Math.abs(b.timeMs - v.timeMs) < Math.abs(m.timeMs - v.timeMs) ? b : m), undefined);
-    if (best && period && nearestBeat && ["onset", "hat"].includes(best.kind) && best.anchor.strength < 0.35 && Math.abs(Math.abs(v.timeMs - nearestBeat.timeMs) / period - 0.5) <= 0.12) best = undefined;
+    if (best && period && nearestBeat && ["onset", "hat", "snare"].includes(best.kind) && best.anchor.strength < 0.5 && Math.abs(Math.abs(v.timeMs - nearestBeat.timeMs) / period - 0.5) <= 0.12) best = undefined;
     if (best) {
       const delta = v.timeMs - best.anchor.timeMs;
       return {
@@ -147,6 +160,33 @@ export function buildEventGraph(dna: StyleDNA, audio: AudioTimeline, frameMs = 1
     }
     return { visualId: v.id, anchorId: null, relation: "unanchored", offsetMs: 0, confidence: 0, measured: nearest ? { nearestBeatDeltaMs: Math.round(v.timeMs - nearest.timeMs) } : {}, inferred: { anchor: "none", rule: `${v.kind} not tied to a measured audio event` } };
   });
+  // Normalised coordinates of every visual event: where it sits in its section, beat, bar and
+  // phrase, and the relationship it keeps with its trigger, stated as a constraint.
+  const segments = segmentsOf(audio),
+    clock = beatClock(audio);
+  for (const l of links) {
+    const v = visual.find((x) => x.id === l.visualId)!;
+    const seg = segmentAt(segments, v.timeMs),
+      beat = clock.position(v.timeMs),
+      bar = clock.barPosition(beat);
+    const anchor = l.anchorId ? anchors.find((a) => a.id === l.anchorId) : undefined;
+    const anchorBar = anchor ? clock.barPosition(clock.position(anchor.timeMs)) : undefined;
+    const phraseStart = !!anchorBar && anchor?.kind === "downbeat" && Math.round(anchorBar.beatInBar) % 4 === 0 && ((anchorBar.bar % 4) + 4) % 4 === 0;
+    l.measured = {
+      ...l.measured,
+      sectionProgress: Number(((v.timeMs - seg.startMs) / Math.max(1, seg.endMs - seg.startMs)).toFixed(3)),
+      beatPosition: Number(beat.toFixed(3)),
+      beatPhase: Number((beat - Math.round(beat)).toFixed(3)),
+      ...(bar ? { beatInBar: Number(bar.beatInBar.toFixed(3)), phraseProgress: Number(bar.phraseProgress.toFixed(3)) } : {}),
+    };
+    const association = l.anchorId ? associationOf(String(l.inferred.anchor), phraseStart) : "no audio event";
+    l.inferred = {
+      ...l.inferred,
+      section: seg.label,
+      association,
+      constraint: l.anchorId ? `${v.kind} ${l.relation.toUpperCase()} ${l.inferred.anchor} ${l.offsetMs >= 0 ? "+" : ""}${l.offsetMs} ms`.slice(0, 80) : `${v.kind} free`,
+    };
+  }
   // Grammar: how each kind of visual event relates to the audio, as fractions.
   const grammar: EventGraph["grammar"] = {};
   for (const kind of visualEventKinds) {

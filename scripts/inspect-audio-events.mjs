@@ -12,5 +12,6 @@ const { audioFeatures } = await host.ssrLoadModule("/packages/ai/audio/features.
 const { analyzeAudio } = await host.ssrLoadModule("/packages/ai/audio/timeline.ts");
 const a = analyzeAudio(audioFeatures({ rate: 22050, channels: [l, r] }));
 for (const e of a.events) if (e.kind !== "onset" || process.argv[3]) console.log(e.kind.padEnd(13), String(e.timeMs).padStart(6), e.endMs ?? "", e.strength.toFixed(2), JSON.stringify(e.measured));
+console.log("tempo hypotheses", JSON.stringify(a.tempoHypotheses), "ambiguous", a.tempoAmbiguous, "downbeatConfidence", a.downbeatConfidence);
 console.log("beats", a.beats.map(b => b.timeMs + (b.downbeat ? "D" : "") + ":" + b.strength.toFixed(2)).join(" "));
 await host.close();

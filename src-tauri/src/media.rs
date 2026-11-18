@@ -130,7 +130,7 @@ pub async fn decode_audio_pcm(app: AppHandle, path: String) -> Result<tauri::ipc
         let source = app
             .state::<Session>()
             .require(std::path::Path::new(&path))?;
-        supp_media::decode_pcm(&source, 22050, 300.).map(tauri::ipc::Response::new)
+        supp_media::decode_pcm(&source, 22050, 600.).map(tauri::ipc::Response::new)
     })
     .await
     .map_err(|e| e.to_string())?

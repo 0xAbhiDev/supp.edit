@@ -72,6 +72,31 @@ export const aiEditMetadataSchema = z
       )
       .max(2000)
       .optional(),
+    /** Recreate mode: where each reference visual event went and why (structural alignment). */
+    audioMapping: z
+      .array(
+        z
+          .object({
+            visual: z.string().min(1).max(32),
+            referenceMs: z.number().int().nonnegative(),
+            adaptedMs: z.number().int().nonnegative(),
+            anchor: z.string().min(1).max(32),
+            replacement: z.string().min(1).max(32),
+            relation: z.string().min(1).max(16),
+            offsetMs: z.number().int().min(-10000).max(10000),
+            confidence: z.number().min(0).max(1),
+            status: z.enum(["anchored", "no-replacement", "free"]),
+            reasons: z
+              .object({ type: z.number().min(0).max(1), section: z.number().min(0).max(1), phrase: z.number().min(0).max(1), strength: z.number().min(0).max(1), position: z.number().min(0).max(1) })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      )
+      .max(400)
+      .optional(),
+    /** Frames of the detected events of the audio the sequence uses: snap targets for markers. */
+    audioEventFrames: z.array(z.number().int().nonnegative()).max(4000).optional(),
     /** Which audio the plan used and why. */
     audioMode: z.enum(["music", "reference", "recreate"]).optional(),
     audioNotes: z.array(z.string().max(400)).max(64).optional(),

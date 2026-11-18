@@ -52,6 +52,9 @@ export const audioTimelineSchema = z
     tempo: z.array(z.object({ timeMs: ms, bpm: z.number().finite().min(30).max(300) }).strict()).max(4000),
     beatConfidence: unit,
     downbeatConfidence: unit,
+    /** Competing tempo readings (pulse, half, double) with their evidence; the beats follow the first. */
+    tempoHypotheses: z.array(z.object({ bpm: z.number().finite().min(20).max(400), confidence: unit, basis: z.string().max(120) }).strict()).max(4).optional(),
+    tempoAmbiguous: z.boolean().optional(),
     sections: z
       .array(z.object({ startMs: ms, endMs: ms, loudnessDb: z.number().finite(), lowEnergy: z.number().finite(), width: z.number().finite() }).strict())
       .max(2000),
@@ -294,12 +297,113 @@ export function analyzeAudio(f: Features, words: TranscriptWord[] = []): AudioTi
       at.inferred = { ...at.inferred, onSweepClimax: true };
     }
   }
+  // ---- Drops: a sustained rise of sub-bass energy and level, measured past any transient's
+  // tail (0.5–2.5 s after against 2.0–0.2 s before), and not the music re-entering after a
+  // silence. Placed on the strongest attack nearby.
+  {
+    const subLin = Float32Array.from(f.bands.sub, (v) => 10 ** v),
+      dbOf = (v: number) => 10 * Math.log10(Math.max(v, 1e-12)),
+      at = (ms: number) => Math.round(ms / hop);
+    const silent = (a: number, b: number) =>
+      events.filter((e) => e.kind === "silence").reduce((s, e) => s + Math.max(0, Math.min(b, at(e.endMs ?? e.timeMs)) - Math.max(a, at(e.timeMs))), 0) / Math.max(1, b - a);
+    const candidates: { i: number; score: number; lift: number; lowLift: number }[] = [];
+    for (let i = at(1500); i < n - at(2500); i += at(50)) {
+      const b0 = i - at(2000),
+        b1 = i - at(200);
+      // After any impact in the first second, so its ringing tail is not mistaken for a new level.
+      const tail = events.filter((e) => e.kind === "impact" && e.timeMs >= toMs(i) - 100 && e.timeMs <= toMs(i) + 1000).reduce((m, e) => Math.max(m, at(e.timeMs + 1200)), 0);
+      const a0 = Math.max(i + at(500), tail),
+        a1 = Math.min(n, a0 + at(2000));
+      if (a1 - a0 < at(800)) continue;
+      // Music returning within a second of a silence is a re-entry, not a drop.
+      if (events.some((e) => e.kind === "silence" && (e.endMs ?? e.timeMs) <= toMs(i) + 200 && (e.endMs ?? e.timeMs) >= toMs(i) - 1000)) continue;
+      // Re-entry after silence is not a drop; a sparse groove before a dense one still is.
+      // Re-entry after silence is not a drop: the before-level counts audible frames only, and
+      // a mostly silent window is skipped. A sparse groove before a dense one still counts.
+      if (silent(b0, b1) > 0.4) continue;
+      const silences = events.filter((e) => e.kind === "silence");
+      const audibleMean = (a: number, b: number) => {
+        let sum = 0,
+          count = 0;
+        for (let k = Math.max(0, a); k < Math.min(n, b); k++)
+          if (!silences.some((e) => k >= at(e.timeMs) && k < at(e.endMs ?? e.timeMs))) {
+            sum += rmsDb[k];
+            count++;
+          }
+        return count ? sum / count : -120;
+      };
+      const before = audibleMean(b0, b1);
+      if (before < loud - 45) continue;
+      // Inside a sweep the sweep itself raises level and low energy; its landing is judged instead.
+      if (events.some((e) => (e.kind === "riser" || e.kind === "whoosh") && toMs(i) >= e.timeMs && toMs(i) < (e.endMs ?? e.timeMs) - 100)) continue;
+      const tails = events.filter((e) => e.kind === "impact").map((e) => [at(e.timeMs), at(e.timeMs + 1200)] as const);
+      const steady = (arr: Float32Array, a: number, b: number) => {
+        let sum = 0,
+          count = 0;
+        for (let k = Math.max(0, a); k < Math.min(n, b); k++)
+          if (!tails.some(([x, y]) => k >= x && k < y)) {
+            sum += arr[k];
+            count++;
+          }
+        return count >= at(400) ? sum / count : NaN;
+      };
+      const afterDb = steady(rmsDb, a0, a1),
+        afterSub = steady(subLin, a0, a1);
+      if (!Number.isFinite(afterDb)) continue;
+      const lift = afterDb - before,
+        lowLift = dbOf(afterSub) - dbOf((() => {
+          let sum = 0,
+            count = 0;
+          for (let k = Math.max(0, b0); k < Math.min(n, b1); k++)
+            if (!silences.some((e) => k >= at(e.timeMs) && k < at(e.endMs ?? e.timeMs))) {
+              sum += subLin[k];
+              count++;
+            }
+          return count ? sum / count : 1e-12;
+        })());
+      // Sustained: a drop still holds 2.5–4 s later, where a transient's tail has died away.
+      const l0 = a1,
+        l1 = Math.min(n, a1 + at(1500));
+      const lateDb = steady(rmsDb, l0, l1),
+        lateSub = steady(subLin, l0, l1);
+      const sustained = !Number.isFinite(lateDb) || (lateDb - before >= 0.5 * lift && dbOf(lateSub) - (dbOf(afterSub) - lowLift) >= 0.5 * lowLift);
+      if (lift >= 1.5 && lowLift >= 6 && sustained) candidates.push({ i, score: lift + lowLift / 2, lift, lowLift });
+    }
+    const kept: typeof candidates = [];
+    for (const c of candidates.sort((a, b) => b.score - a.score)) if (kept.every((k) => Math.abs(k.i - c.i) >= at(4000))) kept.push(c);
+    for (const c of kept.sort((a, b) => a.i - b.i)) {
+      // The boundary is where sub-bass rises most steeply near the candidate.
+      let edge = c.i,
+        steepest = -Infinity;
+      for (let k = Math.max(at(300), c.i - at(600)); k <= Math.min(n - at(300), c.i + at(1200)); k++) {
+        const rise = dbOf(mean(subLin, k, k + at(300))) - dbOf(mean(subLin, k - at(300), k));
+        if (rise > steepest) [steepest, edge] = [rise, k];
+      }
+      if (events.some((e) => e.kind === "silence" && (e.endMs ?? e.timeMs) <= toMs(edge) + 200 && (e.endMs ?? e.timeMs) >= toMs(edge) - 1000)) continue;
+      const t = toMs(edge),
+        riser = events.some((e) => (e.kind === "riser" || e.kind === "whoosh") && Math.abs((e.endMs ?? e.timeMs) - t) <= 600);
+      // The landing attack within a quarter second, impacts first.
+      const weightOf = (k: string) => ({ impact: 3, bass_hit: 2, kick: 1.5 })[k] ?? 1;
+      const near = events.filter((e) => ["impact", "kick", "bass_hit", "onset", "snare"].includes(e.kind) && Math.abs(e.timeMs - t) <= 150).sort((a, b) => weightOf(b.kind) * b.strength - weightOf(a.kind) * a.strength)[0];
+      add({
+        kind: "drop",
+        timeMs: near?.timeMs ?? t,
+        strength: clamp((c.lift + c.lowLift / 2) / 20),
+        confidence: clamp(0.45 + (riser ? 0.25 : 0) + c.lowLift / 40),
+        measured: { loudnessChangeDb: Number(c.lift.toFixed(2)), subChangeDb: Number(c.lowLift.toFixed(2)) },
+        inferred: { precededByRiser: riser },
+      });
+    }
+  }
+
   // ---- Beats: dynamic programming over the onset envelope with a locally estimated period,
   // so tempo may drift or change. No regular grid is imposed where the audio has none.
   const ose = movingMean(novelty, 1),
     sd = Math.sqrt(mean(Float32Array.from(ose, (v) => v * v), 0, n) - mean(ose, 0, n) ** 2) || 0;
   const beats: AudioTimeline["beats"] = [],
     tempo: AudioTimeline["tempo"] = [];
+  const tempoHypotheses: NonNullable<AudioTimeline["tempoHypotheses"]> = [];
+  let tempoAmbiguous = false;
   let beatConfidence = 0,
     downbeatConfidence = 0;
   if (sd > 1e-6 && n > 300) {
@@ -333,7 +437,15 @@ export function analyzeAudio(f: Features, words: TranscriptWord[] = []): AudioTi
       periods = new Float32Array(n);
     const local: { at: number; period: number }[] = [];
     for (let c = 0; c < n; c += stride) local.push({ at: c, period: periodAt(c - window / 2, c + window / 2) });
-    // Median over neighbours removes single-window octave slips.
+    // One octave for the whole track: each local period is folded (×½, ×1, ×2) to the one
+    // closest to the track's median period, so drift survives but octave jumps do not. Which
+    // octave is right overall is decided afterwards from the beats themselves.
+    const center = quantile(Float32Array.from(local.map((q) => Math.log2(q.period))), 0.5);
+    for (const q of local) {
+      const options = [q.period / 2, q.period, q.period * 2].filter((p) => p >= minLag / 2 && p <= maxLag * 1.5);
+      q.period = options.reduce((best, p) => (Math.abs(Math.log2(p) - center) < Math.abs(Math.log2(best) - center) ? p : best), q.period);
+    }
+    // Median over neighbours removes single-window slips.
     const smooth = local.map((_, k) => quantile(local.slice(Math.max(0, k - 2), k + 3).map((q) => q.period), 0.5));
     for (let i = 0; i < n; i++) periods[i] = smooth[Math.min(smooth.length - 1, Math.round(i / stride))];
     const score = new Float64Array(n),
@@ -361,24 +473,81 @@ export function analyzeAudio(f: Features, words: TranscriptWord[] = []): AudioTi
       }
     let chain: number[] = [];
     for (let t = end; t >= 0; t = from[t]) chain.unshift(t);
-    if (chain.length >= 8) {
-      const at = (t: number) => max(norm, t - 2, t + 3);
-      const parity = [0, 1].map((p) => chain.filter((_, j) => j % 2 === p).reduce((s, t) => s + at(t), 0) / Math.ceil((chain.length - p) / 2));
-      const strong = parity[0] >= parity[1] ? 0 : 1,
-        halfBpm = 60000 / (2 * hop * quantile(Float32Array.from(chain.slice(1).map((t, j) => t - chain[j])), 0.5));
-      if (parity[1 - strong] < 0.55 * parity[strong] && halfBpm >= 70) chain = chain.filter((_, j) => j % 2 === strong);
+    // ---- Octave: the tracked pulse, half of it and double it are hypotheses. Evidence: whether
+    // the in-between pulses lack the sub-bass attack of the main ones (subdivisions, not beats),
+    // their relative strength, and a broad tempo prior. Alternatives are kept with confidences.
+    const strengthAt = (t: number) => max(norm, Math.max(0, t - 2), Math.min(n, t + 3));
+    const subRise = (t: number) => {
+      let peak = 0,
+        floor = Infinity;
+      for (let k = Math.max(0, t - 1); k < Math.min(n, t + 4); k++) peak = Math.max(peak, 10 ** f.bands.sub[k]);
+      for (let k = Math.max(0, t - 6); k < Math.max(1, t - 1); k++) floor = Math.min(floor, 10 ** f.bands.sub[k]);
+      return Math.max(0, peak - (Number.isFinite(floor) ? floor : 0));
+    };
+    const avg = (xs: number[]) => xs.reduce((s, v) => s + v, 0) / Math.max(1, xs.length);
+    const prior = (bpm: number) => Math.exp(-0.5 * (Math.log2(bpm / 115) / 0.7) ** 2);
+    if (chain.length >= 6) {
+      const ibi = quantile(Float32Array.from(chain.slice(1).map((t, j) => t - chain[j])), 0.5),
+        bpm = 60000 / (ibi * hop);
+      // Parity is judged within continuous runs: a pause or a slip changes which half is strong.
+      const runs: number[][] = [[chain[0]]];
+      for (let j = 1; j < chain.length; j++) {
+        if (chain[j] - chain[j - 1] > 1.5 * ibi) runs.push([]);
+        runs[runs.length - 1].push(chain[j]);
+      }
+      let subWeighted = 0,
+        strWeighted = 0,
+        weight = 0;
+      const keep: number[] = [];
+      for (const run of runs) {
+        const sets = [0, 1].map((p) => run.filter((_, j) => j % 2 === p));
+        // Medians: one impact on an off pulse must not make the whole half look like beats.
+        const med = (xs: number[]) => (xs.length ? quantile(Float32Array.from(xs), 0.5) : 0);
+        const str = sets.map((s) => med(s.map(strengthAt))),
+          sub = sets.map((s) => med(s.map(subRise)));
+        const strong = str[0] + sub[0] / Math.max(1e-12, sub[0] + sub[1]) >= str[1] + sub[1] / Math.max(1e-12, sub[0] + sub[1]) ? 0 : 1;
+        keep.push(...sets[strong]);
+        if (run.length < 4) continue;
+        subWeighted += (sub[1 - strong] / Math.max(1e-12, sub[strong])) * run.length;
+        strWeighted += (str[1 - strong] / Math.max(1e-9, str[strong])) * run.length;
+        weight += run.length;
+      }
+      const subRatio = weight ? subWeighted / weight : 1,
+        strRatio = weight ? strWeighted / weight : 1;
+      const half = bpm / 2 >= 55 ? 0.6 * clamp((0.55 - subRatio) / 0.4) + 0.4 * clamp((0.8 - strRatio) / 0.4) : 0;
+      const mids = chain.slice(1).map((t, j) => Math.round((t + chain[j]) / 2));
+      const midStr = avg(mids.map(strengthAt)) / Math.max(1e-9, avg(chain.map(strengthAt))),
+        midSub = avg(mids.map(subRise)) / Math.max(1e-12, avg(chain.map(subRise)));
+      const double = bpm * 2 <= 220 ? 0.5 * clamp((midStr - 0.6) / 0.3) + 0.5 * clamp((midSub - 0.5) / 0.3) : 0;
+      const scored = [
+        { bpm, s: prior(bpm) * (1 - Math.max(half, double)), basis: "tracked pulse" },
+        { bpm: bpm / 2, s: prior(bpm / 2) * half, basis: `alternate pulses lack sub-bass (${subRatio.toFixed(2)}) and strength (${strRatio.toFixed(2)})` },
+        { bpm: bpm * 2, s: prior(bpm * 2) * double, basis: `midpoints carry strength (${midStr.toFixed(2)}) and sub-bass (${midSub.toFixed(2)})` },
+      ].filter((h) => h.s > 0);
+      const total = scored.reduce((s, h) => s + h.s, 0) || 1;
+      scored.sort((a, b) => b.s - a.s);
+      for (const h of scored) tempoHypotheses.push({ bpm: Number(h.bpm.toFixed(2)), confidence: Number((h.s / total).toFixed(3)), basis: h.basis.slice(0, 120) });
+      tempoAmbiguous = scored.length > 1 && (scored[0].s - scored[1].s) / total < 0.15;
+      if (scored[0].bpm < bpm * 0.75) chain = keep.sort((a, b) => a - b);
+      else if (scored[0].bpm > bpm * 1.5) chain = chain.flatMap((t, j) => (j ? [mids[j - 1], t] : [t]));
     }
     const strongest = quantile(norm, 0.99) || 1;
     const onBeat = chain.reduce((s, t) => s + norm[t], 0) / Math.max(1, chain.length),
       overall = mean(norm, 0, n);
     beatConfidence = clamp((onBeat / Math.max(1e-6, overall) - 1) / 3);
     if (chain.length >= 4 && beatConfidence > 0.1) {
-      // Downbeats: the bar phase whose beats carry the most low-band attack (4 beats assumed).
-      const lowAt = (t: number) => mean(f.bandFlux.sub, t - 1, t + 2);
-      const phases = [0, 1, 2, 3].map((k) => {
-        const own = chain.filter((_, j) => j % 4 === k);
-        return own.reduce((s, t) => s + lowAt(t), 0) / Math.max(1, own.length);
-      });
+      // Downbeats (4 beats assumed): the bar phase whose beats carry the largest linear sub-bass
+      // attack, plus votes from impacts and drops that land on a beat (structural accents).
+      const accents = [0, 1, 2, 3].map((k) => avg(chain.filter((_, j) => j % 4 === k).map(subRise)));
+      const votes = [0, 0, 0, 0];
+      for (const e of events)
+        if (e.kind === "impact" || e.kind === "drop") {
+          const j = chain.findIndex((t) => Math.abs(toMs(t) - e.timeMs) <= 60);
+          if (j >= 0) votes[j % 4] += e.strength;
+        }
+      const top = Math.max(...accents, 1e-12),
+        totalVotes = votes.reduce((s, v) => s + v, 0);
+      const phases = accents.map((a, k) => a / top + (totalVotes ? (0.6 * votes[k]) / totalVotes : 0));
       const phase = phases.indexOf(Math.max(...phases)),
         others = phases.filter((_, k) => k !== phase);
       downbeatConfidence = clamp((phases[phase] - Math.max(...others)) / Math.max(1e-6, phases[phase]));
@@ -426,12 +595,7 @@ export function analyzeAudio(f: Features, words: TranscriptWord[] = []): AudioTi
       riser = events.some((e) => e.kind === "riser" && Math.abs((e.endMs ?? e.timeMs) - t) <= 500),
       lift = s.loudnessDb - before.loudnessDb,
       lowLift = (s.lowEnergy - before.lowEnergy) * 10;
-    add({ kind: "section", timeMs: t, strength: clamp(nov[boundaries[k]] / 2), confidence: 0.6, measured: { novelty: Number(nov[boundaries[k]].toFixed(3)), loudnessChangeDb: Number(lift.toFixed(2)), lowChangeDb: Number(lowLift.toFixed(2)) } });
-    if ((lift >= 3 && lowLift >= 4) || (riser && lift >= 2)) {
-      // A drop lands on the strongest attack near the boundary, when one exists.
-      const near = events.filter((e) => ["impact", "kick", "bass_hit", "onset"].includes(e.kind) && Math.abs(e.timeMs - t) <= 120).sort((a, b) => b.strength - a.strength)[0];
-      add({ kind: "drop", timeMs: near?.timeMs ?? t, strength: clamp((lift + lowLift) / 20), confidence: clamp(0.4 + (riser ? 0.3 : 0) + lift / 20), measured: { loudnessChangeDb: Number(lift.toFixed(2)), lowChangeDb: Number(lowLift.toFixed(2)) }, inferred: { precededByRiser: riser } });
-    }
+    add({ kind: "section", timeMs: t, strength: clamp(nov[boundaries[k]] / 2), confidence: 0.6, measured: { novelty: Number(nov[boundaries[k]].toFixed(3)), loudnessChangeDb: Number(lift.toFixed(2)), lowChangeDb: Number(lowLift.toFixed(2)) }, inferred: { nearRiser: riser } });
     if (Math.abs(s.width - before.width) >= 0.15)
       add({ kind: "stereo_change", timeMs: t, strength: clamp(Math.abs(s.width - before.width)), confidence: 0.6, measured: { widthBefore: before.width, widthAfter: s.width } });
   });
@@ -477,6 +641,8 @@ export function analyzeAudio(f: Features, words: TranscriptWord[] = []): AudioTi
     tempo,
     beatConfidence: Number(beatConfidence.toFixed(3)),
     downbeatConfidence: Number(downbeatConfidence.toFixed(3)),
+    tempoHypotheses,
+    tempoAmbiguous,
     sections,
     stereo: { width: Number((mean(f.side, 0, n) / total).toFixed(3)), balance: Number(clamp((mean(f.rmsLeft, 0, n) - mean(f.rmsRight, 0, n)) / lr, -1, 1).toFixed(3)) },
     events: events.sort((a, b) => a.timeMs - b.timeMs).slice(0, 40000),

@@ -1,3 +1,41 @@
+## Audio fidelity 3.1: structural recreation — 18 November 2026
+
+*Recreate audio structure* now aligns the two soundtracks' structures instead of snapping each event to the nearest replacement event:
+- **Sections and beats:** labelled sections and an octave-matched beat mapping.
+- **Landmarks:** drops, sweep peaks and silence edges anchor the map.
+- **Events:** an order-preserving event mapping with per-term reasons.
+- **Relationships:** each visual event is re-placed by its measured relationship (anchor + offset); events without a counterpart are reported.
+- **Detectors:** tempo octave, downbeats and drops were fixed against ground truth.
+- **Generated effects:** placed at the reference's level relative to its music, with fades.
+- **Timeline:** no empty audio tracks; audio-event markers can be dragged with snapping.
+- **Limits:** focused intervals up to ten minutes; titles read consistently over many frames are kept.
+
+Design: `AI_ARCHITECTURE.md` (top section). Evidence: `docs/REFERENCE_STYLE_CAPABILITIES.md`, `test-results/audio31/`.
+
+| Case 2 (reference 55, squat withheld, recreate on `music.wav`) | 3.0 | 3.1 |
+| --- | --- | --- |
+| Cuts keeping their relation in the export | 2/2 (1/2 strictly "on") | 2/2 |
+| Titles keeping their relation | 26% (5/19) | 50% (9/18) |
+| Pulses keeping their relation | 0/2 | 2/2 |
+| Linked audio events mapped | nearest-event within 150 ms | 19/24, in order, 0 inversions |
+| Generated-effect level vs reference relation | uncontrolled (+15 dB over music) | median error 2.6 dB |
+
+Other cases on the 3.1 build, all through the full Windows flow:
+- **Case 1:** reference audio; export byte-identical to 3.0; lag and drift 0 ms.
+- **Case 3:** S1 over the full 12 s; NEW HEIGHTS and "fall" present; audio F 1.00; lag 0 ms.
+- **Case 4:** dialogue + music; cuts exact; lag 0 ms.
+- **Case 5:** beat montage recreated; 21/22 cuts and 6/9 titles keep their relation; 22/22 events mapped.
+
+Tests: 208 TypeScript, 42 native.
+
+Open:
+- the dialogue fixture's beats and downbeats under a ducked bed;
+- "cut in a pause" needs speech-activity detection, which needs a transcript today;
+- caption fragments are not merged (case 4);
+- a false large "rise" title in case 3;
+- recreated edits have no drop when the replacement has none;
+- two-letter words still need both OCR passes.
+
 ## Audio fidelity 3.0: shared audio/visual event clock and three audio modes — 18 November 2026
 
 References are now measured for sound as well as picture, on one millisecond clock: typed audio events, drifting beats, sections, sweeps, silences, words. An event graph links every cut, title, pulse and flash to the sound that triggers it, keeping the measured offset apart from the inferred relation. The Recreate panel has an Audio control:

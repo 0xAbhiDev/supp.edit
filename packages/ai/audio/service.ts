@@ -23,15 +23,15 @@ export async function decodeAudio(asset: Asset, url?: string): Promise<PCM> {
     return { rate: RATE, channels: [left, right] };
   }
   const data = await (await fetch(url ?? (await sourceUrl(asset)))).arrayBuffer();
-  const context = new OfflineAudioContext(2, Math.max(1, Math.ceil(Math.min(asset.duration, 300) * RATE)), RATE);
+  const context = new OfflineAudioContext(2, Math.max(1, Math.ceil(Math.min(asset.duration, 600) * RATE)), RATE);
   const decoded = await context.decodeAudioData(data);
   const channels = [decoded.getChannelData(0), decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : decoded.getChannelData(0)];
-  return { rate: decoded.sampleRate, channels: channels.map((c) => c.slice(0, Math.ceil(Math.min(asset.duration, 300) * decoded.sampleRate))) };
+  return { rate: decoded.sampleRate, channels: channels.map((c) => c.slice(0, Math.ceil(Math.min(asset.duration, 600) * decoded.sampleRate))) };
 }
 
 export async function audioTimeline(asset: Asset, words: TranscriptWord[] = [], url?: string): Promise<AudioTimeline | undefined> {
   if (!asset.hasAudio) return;
-  const key = "audio-timeline-v1:" + asset.id + ":" + asset.fingerprint + ":" + words.length;
+  const key = "audio-timeline-v2:" + asset.id + ":" + asset.fingerprint + ":" + words.length;
   const cached = audioTimelineSchema.safeParse(await readDerived(key).catch(() => undefined));
   if (cached.success) return cached.data;
   const timeline = analyzeAudio(audioFeatures(await decodeAudio(asset, url)), words);

@@ -92,7 +92,8 @@ export function App() {
         {
           "--left": `${left}px`,
           "--right": `${right}px`,
-          "--timeline": `${height}px`,
+          // AI Studio is for planning: keep the timeline visible but compact.
+          "--timeline": `${workspace === "AI Studio" ? Math.min(height, 220) : height}px`,
         } as React.CSSProperties
       }
       onDragOver={(e) => {

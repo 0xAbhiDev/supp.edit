@@ -4,7 +4,9 @@ import { medianTone, spanTone, type ToneSample } from "./tone";
 import { matchingCurve } from "../../effects/curves";
 import type { AudioTimeline } from "../audio/timeline";
 import type { SoundKind } from "../audio/synth";
-import { alignReplacement, beatMapOf, plannedSounds, retimeDna, retimer, type Alignment } from "./audio-structure";
+import { beatMapOf, plannedSounds, retimeDna, retimer } from "./audio-structure";
+import { alignStructure, type StructuralAlignment } from "./structural-alignment";
+import { buildFootageIndex, selectShots, type ShotChoice, type ShotRequirement } from "./footage-index";
 import { editablePersonMask, type PersonSample } from "./subject-mask";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
@@ -101,6 +103,12 @@ export function buildRecreation(
       referenceEndMs: number;
       /** The matcher's scoring terms for the chosen range. */
       why?: Record<string, number>;
+      /** Global long-footage selection: per-criterion match (0–1), alternatives and reuse. */
+      selection?: "global" | "local";
+      match?: Record<string, number>;
+      alternatives?: ShotChoice["alternatives"];
+      reuse?: ShotChoice["reuse"];
+      peak?: { fraction: number; source: ShotRequirement["peakSource"] };
     }[] = [];
   if (
     !sources.length ||
@@ -146,18 +154,38 @@ export function buildRecreation(
     audioMode = "music";
   }
   const intervalStart = measuredDna.shots[0]?.startMs ?? 0;
-  let alignment: Alignment | undefined,
+  let alignment: StructuralAlignment | undefined,
     retime = (t: number) => t;
-  if (audioMode === "recreate" && audioPlan.music && measuredDna.eventGraph) {
-    const span = (measuredDna.shots.at(-1)?.endMs ?? 0) - intervalStart;
-    alignment = alignReplacement(measuredDna.eventGraph, audioPlan.music, span, intervalStart);
+  const audioMapping: NonNullable<NonNullable<Project["compositions"][number]["ai"]>["audioMapping"]> = [];
+  if (audioMode === "recreate" && audioPlan.music && audioPlan.reference && measuredDna.eventGraph) {
+    // Structural alignment: sections, beats and linked events of both soundtracks, then each
+    // visual event placed by its measured relationship to its mapped trigger.
+    const intervalEnd = measuredDna.shots.at(-1)?.endMs ?? intervalStart;
+    alignment = alignStructure(measuredDna.eventGraph, audioPlan.reference, audioPlan.music, intervalStart, intervalEnd);
     if (controls.mode === "Close Match") {
-      retime = retimer(alignment.moves, 34, intervalStart);
+      retime = retimer(alignment.moves.map((m) => ({ visualId: m.visualId, fromMs: m.fromMs, toMs: m.toMs, anchor: m.anchor ?? "", replacement: m.replacement ?? "", distanceMs: 0 })), 1, intervalStart);
       dna = retimeDna(measuredDna, retime);
     }
+    const anchored = alignment.moves.filter((m) => m.status === "anchored"),
+      unplaced = alignment.moves.filter((m) => m.status === "no-replacement");
     audioNotes.push(
-      `Replacement music starts ${(alignment.offsetMs / 1000).toFixed(3)} s in, where its events best match the reference's (score ${alignment.score}). ${alignment.moves.length} linked visual events moved onto replacement events (largest shift ${Math.max(0, ...alignment.moves.map((m) => Math.abs(m.toMs - m.fromMs)))} ms); ${alignment.kept.length} kept their reference time.`,
+      `Structural alignment (${alignment.method}): replacement music starts ${(alignment.offsetMs / 1000).toFixed(3)} s in; beat length ×${alignment.beatRatio}; ${alignment.events.filter((e) => e.status === "mapped").length}/${alignment.events.length} linked audio events mapped in order; ${anchored.length} visual events placed by their measured relationship, ${unplaced.length} without a suitable replacement event, ${alignment.moves.length - anchored.length - unplaced.length} free.`,
+      `Sections: ${alignment.sections.map((x) => `${x.ref.label} → ${x.rep.label}`).join(", ") || "none measured"}${alignment.landmarks.length ? "; landmarks: " + alignment.landmarks.map((l) => `${l.kind} ${(l.refMs / 1000).toFixed(2)}→${(l.repMs / 1000).toFixed(2)} s`).join(", ") : ""}.`.slice(0, 400),
     );
+    for (const m of unplaced.slice(0, 20)) audioNotes.push(`No suitable replacement event found for ${m.visualKind.replace("_", " ")} at ${(m.fromMs / 1000).toFixed(3)} s (${m.relation} ${m.anchor}); it follows the beat map.`);
+    for (const m of alignment.moves.slice(0, 400))
+      audioMapping.push({
+        visual: m.visualKind,
+        referenceMs: Math.round(m.fromMs),
+        adaptedMs: Math.round(Math.max(0, m.toMs)),
+        anchor: (m.anchor ?? "none").slice(0, 32),
+        replacement: (m.replacement ?? "none").slice(0, 32),
+        relation: m.relation,
+        offsetMs: Math.max(-10000, Math.min(10000, m.offsetMs)),
+        confidence: m.confidence,
+        status: m.status,
+        ...(m.reasons ? { reasons: m.reasons } : {}),
+      });
   }
   // Smart Adaptation and Creative Remix regularise cuts onto beats of the audio actually used.
   if (audioMode === "reference" && audioPlan.reference) map = beatMapOf(audioPlan.reference);
@@ -220,6 +248,25 @@ export function buildRecreation(
     });
   }
   const referenceShots = dna.shots;
+  const requestedFor = (index: number) => {
+    const ref = referenceShots[index];
+    return Math.max(2, Math.round(((((ref.endMs - ref.startMs) * rate) / 1000) / pace) * (remix ? (index % 2 ? 0.78 : 1.12) : 1)));
+  };
+  // ---- Long-footage selection: every raw clip indexed once over its whole length, then one
+  // global choice per reference shot, trimmed so the source's action peak lands on the shot's
+  // important moment (its strongest linked audio event).
+  const footage = buildFootageIndex(sources);
+  const peakOf = (index: number): Pick<ShotRequirement, "peakFraction" | "peakSource"> => {
+    const shot = measuredDna.shots.length === referenceShots.length ? measuredDna.shots[index] : referenceShots[index];
+    const weight: Record<string, number> = { impact: 3, drop: 3, bass_hit: 2.5, downbeat: 1.6, kick: 1.5, snare: 1.2, beat: 1, onset: 0.8 };
+    const anchor = (measuredDna.eventGraph?.anchors ?? [])
+      .filter((a) => a.timeMs > shot.startMs + 40 && a.timeMs < shot.endMs - 40 && weight[a.kind])
+      .sort((a, b) => weight[b.kind] * (0.5 + b.strength) - weight[a.kind] * (0.5 + a.strength))[0];
+    return anchor ? { peakFraction: (anchor.timeMs - shot.startMs) / Math.max(1, shot.endMs - shot.startMs), peakSource: "audio event" } : { peakFraction: 0.4, peakSource: "none" };
+  };
+  const requirements: ShotRequirement[] = referenceShots.map((shot, index) => ({ shot, durationMs: (requestedFor(index) * 1000) / rate, ...peakOf(index) }));
+  // Caption-led edits keep each source's chronology; the local matcher handles that order.
+  const choices = captions ? [] : selectShots(footage, sources, requirements, controls.mode);
   const longestLater: number[] = [];
   let longest = 0;
   for (let i = referenceShots.length - 1; i >= 0; i--) {
@@ -242,7 +289,15 @@ export function buildRecreation(
         Math.round((ideal / pace) * (remix ? (index % 2 ? 0.78 : 1.12) : 1)),
       );
     const nextRef = referenceShots[index + 1];
-    const candidate = matchRange(
+    const pick = choices[index];
+    const fromChoice = (() => {
+      if (!pick) return undefined;
+      const first = Math.round((pick.inMs * rate) / 1000),
+        length = Math.min(requested, Math.round(((pick.outMs - pick.inMs) * rate) / 1000));
+      const range = pool.find((r) => r.source.asset.id === pick.sourceId && r.first <= first && first + length <= r.end);
+      return range && length >= 2 ? { range, first, length, score: pick.score, timingCoverage: 0, motion: range.shot.motion, terms: pick.match } : undefined;
+    })();
+    const candidate = fromChoice ?? matchRange(
       pool,
       ref,
       requested,
@@ -725,6 +780,9 @@ export function buildRecreation(
       referenceMs: ref.startMs,
       referenceEndMs: ref.endMs,
       why: candidate.terms,
+      selection: fromChoice ? "global" : "local",
+      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives, reuse: pick.reuse } : {}),
+      peak: { fraction: Number(requirements[index].peakFraction.toFixed(3)), source: requirements[index].peakSource },
     });
     cursor += duration;
     consumeRange(pool, s, sourceIn, duration);
@@ -838,23 +896,24 @@ export function buildRecreation(
     return m.start + Math.round(((ms - m.referenceMs) * m.duration) / Math.max(1, m.referenceEndMs - m.referenceMs));
   };
   const assetAdds: EditorToolCall[] = [];
+  let audioTrackName: string | undefined;
   if (audioMode === "reference" && audioPlan.soundtrack) {
     // The reference's own soundtrack, as one ordinary audio clip: it can be muted, trimmed,
     // moved, regained or replaced like any other. Its clock is the reference's, so the interval
     // start is its Source In.
     const soundtrack = audioPlan.soundtrack,
-      trackId = uid(),
+      trackId = audio,
       clipId = uid(),
       sourceIn = Math.round((intervalStart * rate) / 1000);
     assetAdds.push({ tool: "asset.add", asset: soundtrack });
-    command.push({ tool: "sequence.audioTrack", sequenceId: id, trackId, name: "Reference audio" });
+    audioTrackName = "Reference audio";
     const duration = Math.min(cursor, Math.floor(soundtrack.duration * rate) - sourceIn);
     if (duration > 0)
       command.push({ tool: "sequence.insert", sequenceId: id, clipId, trackId, assetId: soundtrack.id, fingerprint: soundtrack.fingerprint, startFrame: 0, sourceIn, duration, gain: 0 });
     audioNotes.push(`Reference soundtrack from ${(intervalStart / 1000).toFixed(3)} s on its own track; raw clip audio at −60 dB; supplied music left out.`);
   }
   if (audioMode === "recreate" && audioPlan.reference && measuredDna.eventGraph) {
-    const sounds = plannedSounds(measuredDna.eventGraph, audioPlan.reference, audioPlan.music, alignment, intervalStart);
+    const sounds = plannedSounds(measuredDna.eventGraph, audioPlan.reference, audioPlan.music, alignment, intervalStart, voice ? -20 : -12);
     const trackId = uid();
     let made = 0;
     for (const sound of sounds) {
@@ -864,7 +923,6 @@ export function buildRecreation(
         continue;
       }
       if (!assetAdds.some((c) => c.tool === "asset.add" && c.asset.id === asset.id)) assetAdds.push({ tool: "asset.add", asset });
-      if (!made++) command.push({ tool: "sequence.audioTrack", sequenceId: id, trackId, name: "Recreated SFX" });
       const rising = sound.kind === "whoosh" || sound.kind === "riser",
         assetFrames = Math.floor(asset.duration * rate),
         startAt = toFrame(retime(sound.startMs)),
@@ -878,8 +936,21 @@ export function buildRecreation(
       }
       duration = Math.min(duration, cursor - at);
       if (duration < 1) continue;
-      command.push({ tool: "sequence.insert", sequenceId: id, clipId: uid(), trackId, assetId: asset.id, fingerprint: asset.fingerprint, startFrame: at, sourceIn: rising ? Math.max(0, assetFrames - duration) : 0, duration, gain: sound.gainDb });
-      audioNotes.push(`Generated ${sound.kind} at ${(at / rate).toFixed(3)} s: ${sound.reason}.`);
+      // The track exists only once something is placed on it.
+      if (!made++) command.push({ tool: "sequence.audioTrack", sequenceId: id, trackId, name: "Recreated SFX" });
+      const sfxId = uid();
+      command.push({ tool: "sequence.insert", sequenceId: id, clipId: sfxId, trackId, assetId: asset.id, fingerprint: asset.fingerprint, startFrame: at, sourceIn: rising ? Math.max(0, assetFrames - duration) : 0, duration, gain: sound.gainDb });
+      // Measured attack and release as ordinary gain keys (a rising sound already starts quietly).
+      const attack = rising ? 0 : Math.max(1, Math.min(Math.floor(duration / 3), Math.round((sound.attackMs * rate) / 1000))),
+        release = Math.max(1, Math.min(Math.floor(duration / 2), Math.round((sound.releaseMs * rate) / 1000)));
+      const keys: [number, number][] = [
+        ...(attack ? ([[at, -40], [at + attack, sound.gainDb]] as [number, number][]) : []),
+        [Math.max(at + attack, at + duration - release), sound.gainDb],
+        [at + duration - 1, -40],
+      ];
+      for (const [frame, value] of keys.filter((k, i, all) => i === 0 || k[0] > all[i - 1][0]))
+        command.push({ tool: "sequence.keyframe", sequenceId: id, clipId: sfxId, property: "gain", frame, value, easing: "linear" });
+      audioNotes.push(`Generated ${sound.kind} at ${(at / rate).toFixed(3)} s, ${sound.gainDb} dB (reference ${sound.relativeGainDb >= 0 ? "+" : ""}${sound.relativeGainDb} dB over its music; attack ${sound.attackMs} ms, release ${sound.releaseMs} ms): ${sound.reason}.`.slice(0, 400));
     }
   }
   for (const asset of [music, voice]) {
@@ -1425,12 +1496,31 @@ export function buildRecreation(
       });
     }
   }
+  // Snap targets: the detected events of the audio this sequence actually plays.
+  const heard = audioMode === "reference" ? audioPlan.reference : audioMode === "recreate" ? audioPlan.music : undefined;
+  const heardStart = audioMode === "reference" ? intervalStart : (alignment?.offsetMs ?? 0);
+  const audioEventFrames = heard
+    ? [...new Set(heard.events.filter((e) => ["kick", "snare", "impact", "bass_hit", "drop", "onset", "section", "word"].includes(e.kind)).map((e) => Math.round(((e.timeMs - heardStart) * rate) / 1000)).concat(heard.beats.map((b) => Math.round(((b.timeMs - heardStart) * rate) / 1000))))]
+        .filter((fr) => fr >= 0 && fr < cursor)
+        .sort((x, y) => x - y)
+        .slice(0, 4000)
+    : [];
   const create = command.find((c) => c.tool === "sequence.create");
+  if (create && create.tool === "sequence.create") {
+    if (audioTrackName) create.audioTrackName = audioTrackName;
+    // No empty default audio track: keep it only when a clip lands on it.
+    if (!command.some((c) => c.tool === "sequence.insert" && c.trackId === audio)) create.audioTrack = false;
+  }
   if (create && create.tool === "sequence.create")
-    create.ai = { ...create.ai, audioMode, ...(audioNotes.length ? { audioNotes: audioNotes.slice(0, 64) } : {}), ...(referenceEvents.length ? { referenceEvents } : {}) };
+    create.ai = { ...create.ai, ...(audioMapping.length ? { audioMapping } : {}), ...(audioEventFrames.length ? { audioEventFrames } : {}), audioMode, ...(audioNotes.length ? { audioNotes: audioNotes.slice(0, 64) } : {}), ...(referenceEvents.length ? { referenceEvents } : {}) };
   warnings.push(...audioNotes.filter((n) => /^(No generated|The reference has no|Recreating the audio)/.test(n)));
   command.push(...frontTitles);
   if (command.length !== preview.plan.commands.length || warnings.length)
     preview = previewEditPlan(plan, p, revision);
-  return { matches, warnings, preview };
+  const min = (ms: number) => `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+  const coverage = { ...footage.coverage, used: matches.length, global: matches.filter((m) => m.selection === "global").length, finalMs: Math.round((cursor * 1000) / rate) };
+  warnings.push(
+    `Raw footage: ${min(coverage.suppliedMs)} supplied, ${min(coverage.analyzedMs)} analysed, ${coverage.candidates} candidate moments, ${coverage.used} used (${coverage.global} chosen globally), final edit ${(coverage.finalMs / 1000).toFixed(1)} s.`,
+  );
+  return { matches, warnings, preview, coverage };
 }

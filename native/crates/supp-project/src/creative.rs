@@ -85,6 +85,31 @@ pub struct EventLink {
     pub relation: String,
     pub offset_ms: i64,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MappingReasons {
+    pub r#type: f64,
+    pub section: f64,
+    pub phrase: f64,
+    pub strength: f64,
+    pub position: f64,
+}
+/// Where a reference visual event went when the audio structure was recreated, and why.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AudioMappingEntry {
+    pub visual: String,
+    pub reference_ms: u64,
+    pub adapted_ms: u64,
+    pub anchor: String,
+    pub replacement: String,
+    pub relation: String,
+    pub offset_ms: i64,
+    pub confidence: f64,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasons: Option<MappingReasons>,
+}
 /// A reference audio event placed as a marker, and the generated layers it drives.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -107,6 +132,10 @@ pub struct AiEditMetadata {
     pub generated: Option<Vec<crate::generated::Treatment>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_events: Option<Vec<ReferenceEvent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_mapping: Option<Vec<AudioMappingEntry>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_event_frames: Option<Vec<u64>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -134,6 +163,23 @@ impl AiEditMetadata {
                 "Invalid reference event links",
             )?;
         }
+        let unit = |v: f64| (0. ..=1.).contains(&v);
+        ensure(
+            self.audio_mapping.as_ref().is_none_or(|m| {
+                m.len() <= 400
+                    && m.iter().all(|e| {
+                        (1..=32).contains(&e.visual.len())
+                            && (1..=32).contains(&e.anchor.len())
+                            && (1..=32).contains(&e.replacement.len())
+                            && (1..=16).contains(&e.relation.len())
+                            && (-10000..=10000).contains(&e.offset_ms)
+                            && unit(e.confidence)
+                            && ["anchored", "no-replacement", "free"].contains(&e.status.as_str())
+                            && e.reasons.as_ref().is_none_or(|r| [r.r#type, r.section, r.phrase, r.strength, r.position].into_iter().all(unit))
+                    })
+            }) && self.audio_event_frames.as_ref().is_none_or(|f| f.len() <= 4000),
+            "Invalid audio mapping",
+        )?;
         ensure(
             self.audio_mode.as_deref().is_none_or(|m| ["music", "reference", "recreate"].contains(&m))
                 && self.audio_notes.as_ref().is_none_or(|n| n.len() <= 64 && n.iter().all(|s| s.chars().count() <= 400)),

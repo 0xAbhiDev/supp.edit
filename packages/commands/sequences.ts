@@ -15,6 +15,9 @@ export function createSequence(input: {
   duration: number;
   videoTrackId: string;
   audioTrackId: string;
+  /** Name of the default audio track; `audioTrack: false` creates none (nothing would use it). */
+  audioTrackName?: string;
+  audioTrack?: boolean;
   ai: AIEditMetadata;
 }): Edit {
   return (p) => {
@@ -28,7 +31,7 @@ export function createSequence(input: {
       audio = {
         ...newTrack("audio", 1),
         id: input.audioTrackId,
-        name: "Music",
+        name: input.audioTrackName ?? "Music",
       };
     p.compositions.push({
       id: input.id,
@@ -36,7 +39,7 @@ export function createSequence(input: {
       settings: { ...input.settings },
       duration: input.duration,
       background: "#000000",
-      tracks: [video, audio],
+      tracks: input.audioTrack === false ? [video] : [video, audio],
       layers: [],
       markers: [],
       ai: input.ai,

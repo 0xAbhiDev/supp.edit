@@ -4,6 +4,18 @@
 import type { StyleDNA } from "../../../packages/ai/reference/dna";
 import type { EditorToolCall } from "../../../packages/ai/editor-agent/registry";
 
+/** A small bar for an evidence score (0–1), with the number beside it. */
+function Meter({ value }: { value: number }) {
+  const v = Math.max(0, Math.min(1, value));
+  return (
+    <span className="re-meter" title={`${Math.round(v * 100)} of 100 (rule evidence, not a calibrated probability)`}>
+      <i>
+        <b style={{ width: `${v * 100}%` }} />
+      </i>
+      {Math.round(v * 100)}
+    </span>
+  );
+}
 export function AudioEvidence({ dna, commands }: { dna: StyleDNA; commands: EditorToolCall[] }) {
   const create = commands.find((c) => c.tool === "sequence.create");
   const ai = create?.tool === "sequence.create" ? create.ai : undefined;
@@ -74,12 +86,53 @@ export function AudioEvidence({ dna, commands }: { dna: StyleDNA; commands: Edit
                   <td>{a ? `${String(l.inferred.anchor).replace("_", " ")} ${(a.timeMs / 1000).toFixed(3)}s` : "none"}</td>
                   <td>{l.relation}</td>
                   <td>{l.anchorId ? l.offsetMs + " ms" : ""}</td>
-                  <td>{Math.round(l.confidence * 100)}/100</td>
+                  <td>
+                    <Meter value={l.confidence} />
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+      )}
+      {!!ai?.audioMapping?.length && (
+        <table>
+          <thead>
+            <tr>
+              <th>Visual</th>
+              <th>Reference → adapted</th>
+              <th>Trigger → replacement</th>
+              <th>Kept relation</th>
+              <th>Why (type · section · bar · strength · position)</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ai.audioMapping.slice(0, 80).map((m, i) => (
+              <tr key={i}>
+                <td>{m.visual.replace("_", " ")}</td>
+                <td>
+                  {(m.referenceMs / 1000).toFixed(3)} → {(m.adaptedMs / 1000).toFixed(3)} s
+                </td>
+                <td>
+                  {m.anchor.replace("_", " ")} →{" "}
+                  {m.status === "anchored" ? m.replacement.replace("_", " ") : m.status === "free" ? <span className="re-tag">beat map</span> : <span className="re-tag warn">no suitable replacement event found</span>}
+                </td>
+                <td>{m.status === "anchored" ? `${m.relation} ${m.offsetMs >= 0 ? "+" : ""}${m.offsetMs} ms` : "—"}</td>
+                <td>{m.reasons ? [m.reasons.type, m.reasons.section, m.reasons.phrase, m.reasons.strength, m.reasons.position].map((v) => v.toFixed(2)).join(" · ") : "—"}</td>
+                <td>
+                  <Meter value={m.confidence} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {audio?.tempoHypotheses && audio.tempoHypotheses.length > 1 && (
+        <p>
+          Tempo readings: {audio.tempoHypotheses.map((h) => `${Math.round(h.bpm)} BPM (${Math.round(h.confidence * 100)}%)`).join(", ")}
+          {audio.tempoAmbiguous ? " · ambiguous" : ""}.
+        </p>
       )}
       {audio && <p>Not measured: {audio.capabilities.notMeasured.join(", ")}.</p>}
     </details>

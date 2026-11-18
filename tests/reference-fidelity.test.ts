@@ -83,6 +83,14 @@ it("requires exact visible and timed audio agreement and never fills missing wor
     )[0].evidence?.status,
   ).toBe("uncertain");
 });
+it("confirms a line read identically over many frames even when only one OCR pass reads it", () => {
+  const result = assessReferenceText([
+    line("NEW HEIGHTS", { observations: 12, passAgreements: 0 }),
+    line("we", { observations: 6, passAgreements: 0 }),
+    line("FALLS", { observations: 3, passAgreements: 0 }),
+  ]);
+  expect(result.map((l) => l.evidence?.status)).toEqual(["visual-consensus", "uncertain", "uncertain"]);
+});
 it("keeps reliable titles separate from vocals and marks repeated edge labels uncertain", () => {
   const result = assessReferenceText([
     line("OPENING DAY"),

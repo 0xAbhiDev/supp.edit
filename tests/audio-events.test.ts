@@ -8,7 +8,8 @@ import { audioFeatures } from "../packages/ai/audio/features";
 import { analyzeAudio, type AudioTimeline } from "../packages/ai/audio/timeline";
 import { place, synthesize } from "../packages/ai/audio/synth";
 import { buildEventGraph, eventGraphSchema } from "../packages/ai/reference/event-graph";
-import { alignReplacement, beatMapOf, plannedSounds, retimeDna, retimer } from "../packages/ai/reference/audio-structure";
+import { beatMapOf, plannedSounds, retimeDna, retimer, synthPeakDb } from "../packages/ai/reference/audio-structure";
+import { alignStructure } from "../packages/ai/reference/structural-alignment";
 import { beatMapSchema } from "../packages/ai/media-analysis/model";
 import type { StyleDNA } from "../packages/ai/reference/dna";
 
@@ -22,6 +23,15 @@ function measure(ms: number, kicksFrom: number, impacts: number[], words: { text
   const peak = left.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
   for (let i = 0; i < left.length; i++) left[i] *= 0.9 / peak;
   return analyzeAudio(audioFeatures({ rate: RATE, channels: [left, left.slice()] }), words);
+}
+/** Kicks every beatMs from 0 and impacts where given (another tempo). */
+function measureBeats(ms: number, beatMs: number, impacts: number[]) {
+  const left = new Float32Array((RATE * ms) / 1000);
+  for (let t = 0, k = 0; t < ms - 300; t += beatMs, k++) place(left, synthesize("kick", RATE, k + 1), RATE, t, 0.55);
+  for (const t of impacts) place(left, synthesize("impact", RATE, 7 + t), RATE, t, 1);
+  const peak = left.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+  for (let i = 0; i < left.length; i++) left[i] *= 0.9 / peak;
+  return analyzeAudio(audioFeatures({ rate: RATE, channels: [left, left.slice()] }));
 }
 const shots = (cuts: number[], end: number) => [0, ...cuts].map((startMs, i) => ({ startMs, endMs: cuts[i] ?? end }));
 // Only the fields the event graph reads; the rest of a measured DNA is irrelevant here.
@@ -67,17 +77,51 @@ describe("audio/visual event graph", () => {
 });
 
 describe("recreating the audio structure on other music", () => {
-  // The replacement: the same beat a quarter-second out of phase, impacts 1.25 s and 1.3 s later.
-  const replacement = () => measure(12000, 250, [3250, 7300]);
-  it("finds the offset where the replacement's events line up and moves linked cuts onto them", () => {
-    const audio = referenceAudio(),
-      graph = buildEventGraph(dnaOf([2000, 6000]), audio),
-      alignment = alignReplacement(graph, replacement(), 8000, 0);
-    expect(Math.abs(alignment.offsetMs - 1250)).toBeLessThanOrEqual(60);
-    const second = alignment.moves.find((m) => m.visualId === "cut_2")!;
-    expect(second).toBeTruthy();
-    // 7300 in the replacement is 7300 − offset on the edit's clock.
-    expect(Math.abs(second.toMs - (7300 - alignment.offsetMs))).toBeLessThanOrEqual(40);
+  // Reference: 120 BPM, impacts on beats 4 and 12. Replacement: 90 BPM, impacts on beats 6 and 14,
+  // so the same musical relationship sits at different absolute times.
+  const slower = () => measureBeats(14000, 667, [4000, 9333]);
+  it("maps linked cuts onto the replacement's impacts by musical position, keeping measured offsets", () => {
+    const audio = referenceAudio();
+    const graph = buildEventGraph(dnaOf([2000, 6000], { text: [{ content: "GO", startMs: 1920, endMs: 2600 }] as unknown as StyleDNA["text"] }), audio);
+    const al = alignStructure(graph, audio, slower(), 0, 8000);
+    expect(al.method).toBe("beats");
+    expect(Math.abs(al.offsetMs - 1333)).toBeLessThanOrEqual(80);
+    const move = (id: string) => al.moves.find((m) => m.visualId === id)!;
+    expect(move("cut_1")).toMatchObject({ status: "anchored" });
+    expect(["impact", "drop", "bass_hit"]).toContain(move("cut_1").replacement);
+    expect(Math.abs(move("cut_1").toMs - (4000 - al.offsetMs))).toBeLessThanOrEqual(40);
+    expect(Math.abs(move("cut_2").toMs - (9333 - al.offsetMs))).toBeLessThanOrEqual(40);
+    // The title entered about 80 ms before the first impact and still does.
+    const title = move("title_1_in");
+    expect(title.relation).toBe("before");
+    expect(Math.abs(move("cut_1").toMs - title.toMs - (move("cut_1").offsetMs - title.offsetMs))).toBeLessThanOrEqual(20);
+    // Reasons are recorded and no event moves before an earlier one.
+    expect(move("cut_1").reasons?.type).toBeGreaterThan(0.5);
+    for (let i = 1; i < al.moves.length; i++) expect(al.moves[i].toMs).toBeGreaterThanOrEqual(al.moves[i - 1].toMs);
+    expect(al.sections.length).toBeGreaterThan(0);
+  });
+  it("lands a lyric cue on the rhythm when the replacement has no vocals, at lower confidence", () => {
+    const audio = referenceAudio();
+    const graph = buildEventGraph(dnaOf([2000], { text: [{ content: "LIFT", startMs: 3000, endMs: 3600 }] as unknown as StyleDNA["text"] }), audio);
+    const title = alignStructure(graph, audio, slower(), 0, 8000).moves.find((m) => m.visualId === "title_1_in")!;
+    expect(title.status).toBe("anchored");
+    expect(title.reasons!.type).toBeLessThan(1);
+  });
+  it("reports a visual event whose trigger has no counterpart instead of keeping its old time", () => {
+    // A title that ends where a silence starts; the replacement never falls silent.
+    const left = new Float32Array(RATE * 8);
+    for (let t = 0, k = 0; t < 7700; t += 500, k++) if (t < 3000 || t >= 4500) place(left, synthesize("kick", RATE, k + 1), RATE, t, 0.55);
+    const audio = analyzeAudio(audioFeatures({ rate: RATE, channels: [left, left.slice()] }));
+    const silence = audio.events.find((e) => e.kind === "silence")!;
+    const graph = buildEventGraph(dnaOf([2000], { text: [{ content: "WAIT", startMs: silence.timeMs - 600, endMs: silence.timeMs }] as unknown as StyleDNA["text"] }), audio);
+    // The replacement is a steady tone: no attacks, beats, sections or silences to map onto.
+    const tone = new Float32Array(RATE * 14);
+    for (let i = 0; i < tone.length; i++) tone[i] = 0.3 * Math.sin((2 * Math.PI * 220 * i) / RATE);
+    const flat = analyzeAudio(audioFeatures({ rate: RATE, channels: [tone, tone.slice()] }));
+    const al = alignStructure(graph, audio, flat, 0, 8000);
+    const title = al.moves.find((m) => m.visualId === "title_1_out")!;
+    expect(title.anchor).toBe("silence_start");
+    expect(title.status).toBe("no-replacement");
   });
   it("retimes monotonically through the moves and never moves the interval start", () => {
     const r = retimer([{ visualId: "cut_1", fromMs: 2000, toMs: 2100, anchor: "impact", replacement: "impact", distanceMs: 0 }], 34, 0);
@@ -88,19 +132,58 @@ describe("recreating the audio structure on other music", () => {
     const dna = retimeDna(dnaOf([2000, 4000]), r);
     expect(dna.shots.map((s) => s.startMs)).toEqual([0, 2100, 4100]);
   });
-  it("plans generated effects only for linked sounds the replacement lacks", () => {
+  it("plans effects the replacement lacks at the reference level relative to its music, never above -3 dBFS", () => {
     const audio = referenceAudio(),
       graph = buildEventGraph(dnaOf([2000, 6000]), audio);
-    const kicksOnly = measure(12000, 0, []);
-    const planned = plannedSounds(graph, audio, kicksOnly, alignReplacement(graph, kicksOnly, 8000, 0), 0);
-    expect(planned.filter((s) => s.kind === "impact").length).toBeGreaterThanOrEqual(2);
-    const covered = plannedSounds(graph, audio, replacement(), alignReplacement(graph, replacement(), 8000, 0), 0);
-    expect(covered.filter((s) => s.kind === "impact").length).toBeLessThan(planned.filter((s) => s.kind === "impact").length);
+    const kicksOnly = measureBeats(14000, 667, []);
+    const planned = plannedSounds(graph, audio, kicksOnly, alignStructure(graph, audio, kicksOnly, 0, 8000), 0, -12);
+    const impacts = planned.filter((s) => s.kind === "impact");
+    expect(impacts.length).toBeGreaterThanOrEqual(2);
+    for (const s of impacts) {
+      expect(s.relativeGainDb).toBeGreaterThan(0);
+      expect(s.gainDb + synthPeakDb("impact")).toBeLessThanOrEqual(-3 + 1e-6);
+      expect(s.attackMs).toBeGreaterThan(0);
+      expect(s.releaseMs).toBeGreaterThan(0);
+    }
+    const covered = plannedSounds(graph, audio, slower(), alignStructure(graph, audio, slower(), 0, 8000), 0, -12);
+    expect(covered.filter((s) => s.kind === "impact").length).toBeLessThan(impacts.length);
   });
   it("offers the measured beats to the beat-snapping modes in the existing beat-map form", () => {
     const map = beatMapSchema.parse(beatMapOf(referenceAudio()));
     expect(map.beats.length).toBeGreaterThan(10);
     expect(Math.abs((map.bpm ?? 0) - 120)).toBeLessThan(6);
+  });
+});
+
+describe("tempo octave, downbeats, drops", () => {
+  it("does not double the tempo when hats sit between kicks, keeps the alternative and finds the bar", () => {
+    const left = new Float32Array(RATE * 12),
+      beat = 625;
+    for (let t = 0, k = 0; t < 11500; t += beat, k++) {
+      place(left, synthesize("kick", RATE, k + 1), RATE, t, k % 4 ? 0.35 : 0.5);
+      place(left, synthesize("hat", RATE, 50 + k), RATE, t + beat / 2, 0.15);
+    }
+    const a = analyzeAudio(audioFeatures({ rate: RATE, channels: [left, left.slice()] }));
+    const bpms = a.tempo.map((t) => t.bpm).sort((x, y) => x - y);
+    expect(Math.abs(bpms[bpms.length >> 1] - 96)).toBeLessThan(5);
+    expect(a.tempoHypotheses?.[0].bpm).toBeLessThan(110);
+    const downbeats = a.beats.filter((b) => b.downbeat).map((b) => b.timeMs);
+    expect(downbeats.length).toBeGreaterThan(2);
+    expect(downbeats.every((t) => Math.abs(((t + 1250) % 2500) - 1250) <= 60)).toBe(true);
+  });
+  it("finds a drop where sub-bass and level rise after a build, and none when music returns after a silence", () => {
+    const left = new Float32Array(RATE * 12);
+    for (let t = 0, k = 0; t < 11500; t += 500, k++) place(left, synthesize("kick", RATE, k + 1), RATE, t, t >= 6000 ? 0.8 : 0.45);
+    place(left, synthesize("riser", RATE, 3, 2000), RATE, 4000, 0.4);
+    for (let i = 6000 * (RATE / 1000); i < left.length; i++) left[i] += 0.2 * Math.sin((2 * Math.PI * 50 * i) / RATE);
+    const a = analyzeAudio(audioFeatures({ rate: RATE, channels: [left, left.slice()] }));
+    const drops = a.events.filter((e) => e.kind === "drop");
+    expect(drops.length).toBe(1);
+    expect(Math.abs(drops[0].timeMs - 6000)).toBeLessThanOrEqual(100);
+    const gap = new Float32Array(RATE * 10);
+    for (let t = 0, k = 0; t < 9500; t += 500, k++) if (t < 4000 || t >= 5500) place(gap, synthesize("kick", RATE, k + 1), RATE, t, 0.5);
+    const b = analyzeAudio(audioFeatures({ rate: RATE, channels: [gap, gap.slice()] }));
+    expect(b.events.filter((e) => e.kind === "drop").length).toBe(0);
   });
 });
 

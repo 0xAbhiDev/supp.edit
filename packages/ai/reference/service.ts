@@ -20,7 +20,8 @@ import { audioTimeline, generatedSound, soundtrackAsset } from "../audio/service
 import type { AudioTimeline } from "../audio/timeline";
 import type { SoundKind } from "../audio/synth";
 import { buildEventGraph } from "./event-graph";
-import { alignReplacement, plannedSounds } from "./audio-structure";
+import { plannedSounds } from "./audio-structure";
+import { alignStructure } from "./structural-alignment";
 export interface RecreationInputs {
   reference: string;
   raw: string[];
@@ -316,9 +317,9 @@ export function recreate(
           musicAudio = await audioTimeline(music);
           if (musicAudio) {
             const start = dna.shots[0]?.startMs ?? 0,
-              span = (dna.shots.at(-1)?.endMs ?? 0) - start;
-            const alignment = alignReplacement(dna.eventGraph, musicAudio, span, start);
-            for (const kind of new Set(plannedSounds(dna.eventGraph, dna.audio, musicAudio, alignment, start).map((s) => s.kind)))
+              end = dna.shots.at(-1)?.endMs ?? start;
+            const alignment = alignStructure(dna.eventGraph, dna.audio, musicAudio, start, end);
+            for (const kind of new Set(plannedSounds(dna.eventGraph, dna.audio, musicAudio, alignment, start, voice ? -20 : -12).map((s) => s.kind)))
               sounds[kind] = await generatedSound(kind);
           }
         } catch (e) {

@@ -125,6 +125,8 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       duration: frame.min(1),
       videoTrackId: id,
       audioTrackId: id,
+      audioTrackName: z.string().min(1).max(64).optional(),
+      audioTrack: z.boolean().optional(),
       ai: aiEditMetadataSchema,
     })
     .strict(),

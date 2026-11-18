@@ -1,5 +1,24 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**18 November structural recreation (3.1).** Evidence lives in `test-results/audio31/`: the generated corpus with ground truth under `corpus/`, and the Windows cases under `native/case1…5/`. Each case folder holds `native-verification.json`, screenshots, `render.mp4` and `av-metrics.json`. Every case passed the full Windows flow on the 3.1 build: preview, Apply/Undo/Redo, save, exit, reopen, playback, Inspector edit and Deliver.
+
+| Detector on ground truth | S1 letterbox lyrics | S2 vertical montage | S3 dialogue + music | S4 beat montage |
+| --- | --- | --- | --- | --- |
+| Tempo (truth) | 96.8 (96) | 127.7 (128) | 98.4 (100) | 139.5 (140) |
+| Beats F | 0.97 | 0.98 | 0.50 | 0.98 |
+| Downbeats | 5/5 | 6/6 | wrong phase | 6/6 |
+| Drops | none, correct | 1/1 | none, correct | 1/1 (13 ms) |
+| Impacts | 1/1 | 2/2 | – | 1/1 |
+| Cut relations | 4/4 | 10/10 | 0/3 ("in a pause" is not measurable without speech detection) | 21/21 |
+
+| Windows case | Mode | Result |
+| --- | --- | --- |
+| 1. Reference 55, original clips | reference audio | Export byte-identical to 3.0; loudness correlation 1.00, lag 0 ms, drift 0 ms, beats F 1.00. One "Reference audio" track and no empty track. |
+| 2. Reference 55, squat withheld | recreate on `music.wav` | Cuts 2/2, titles 50% (3.0: 26%), pulses 2/2 keep their relation in the export. 19/24 events mapped in order; 0 inversions; phrase-position error 0.045; effect-level error 2.6 dB. The reference drop has no counterpart because the replacement has none. |
+| 3. Generated S1, full 12 s | reference audio | NEW HEIGHTS and "fall" reconstructed. Audio F 1.00, lag 0 ms; cuts 4/4 keep on / offbeat / sweep / after-impact. Bars on two tracks. Defects: a false large "rise" title; "we" and "and" unread. |
+| 4. Generated S3 dialogue + music | reference audio | Cuts exactly at the three pauses; ducking preserved by the soundtrack; lag 0 ms; all four captions worded correctly. Defects: phrases 1 and 3 timed short, phrase 4 in three fragments. |
+| 5. Generated S4 beat montage | recreate on `music.wav` | 22/22 events mapped in order; cuts 21/22 and titles 6/9 keep their relation; phrase error 0.002; effect-level error 4.3 dB. The drop is not reproduced (the replacement has none). |
+
 **18 November audio fidelity (3.0).** References now carry a measured audio timeline and an audio/visual event graph on one millisecond clock (see `AI_ARCHITECTURE.md`). There are three audio modes: supplied music, the reference soundtrack as an editable clip, and the reference's audio structure recreated on supplied music with generated effects.
 
 ### Detector accuracy on generated ground truth

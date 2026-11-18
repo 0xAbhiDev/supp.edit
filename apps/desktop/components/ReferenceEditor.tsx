@@ -166,6 +166,29 @@ export function ReferenceEditor() {
       setError(String(e));
     }
   }
+  /** Swap one shot's source moment for an alternative and re-preview; nothing is re-analysed. */
+  function chooseTake(index: number, alt: NonNullable<Result["matches"][number]["alternatives"]>[number]) {
+    if (!result || !canApply) return;
+    try {
+      const m = result.matches[index],
+        asset = project.assets.find((a) => a.id === alt.sourceId);
+      if (!asset) throw Error("That footage is no longer in the project.");
+      const rate = fps(project),
+        sourceIn = Math.round((alt.inMs * rate) / 1000);
+      const commands = result.preview.plan.commands.map((call) =>
+        call.tool === "sequence.insert" && call.clipId === m.clipId ? { ...call, assetId: asset.id, fingerprint: asset.fingerprint, sourceIn } : call,
+      );
+      const preview = previewEditPlan({ ...result.preview.plan, commands }, project, revision);
+      const previous = { sourceId: m.source, inMs: Math.round((m.sourceIn * 1000) / rate), outMs: Math.round(((m.sourceIn + m.duration) * 1000) / rate), score: 0, match: m.match ?? {} };
+      const matches = result.matches.map((x, k) =>
+        k === index ? { ...x, source: asset.id, sourceIn, match: alt.match, alternatives: [previous, ...(x.alternatives ?? []).filter((a) => a !== alt)] } : x,
+      );
+      setResult({ ...result, preview, matches });
+      setError("");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
   function pick(role: "reference" | "raw", ids: string[]) {
     invalidate();
     if (role === "reference") {
@@ -292,8 +315,32 @@ export function ReferenceEditor() {
   };
   return (
     <section className="reference-editor" aria-label="Recreate an edit">
-      <h2>Recreate an edit</h2>
+      <header className="re-head">
+        <div>
+          <h2>Recreate an edit</h2>
+          <p className="re-sub">Match a finished reel's cuts, titles, colour and sound with your own footage. Everything stays editable.</p>
+        </div>
+        <ol className="re-steps" aria-label="Progress">
+          {[
+            ["Sources", !!chosen && raw.length > 0],
+            ["Style", !!chosen && raw.length > 0],
+            ["Preview", !!result],
+            ["Apply", false],
+          ].map(([label, done], i, all) => {
+            const current = all.findIndex(([, d]) => !d);
+            return (
+              <li key={String(label)} className={done ? "done" : i === current ? "current" : ""} aria-current={i === current ? "step" : undefined}>
+                <span>{i + 1}</span>
+                {label}
+              </li>
+            );
+          })}
+        </ol>
+      </header>
       <fieldset disabled={busy}>
+        <div className="re-grid">
+        <div className="re-card">
+        <h3 className="re-card-title">Sources</h3>
         <div className="reference-inputs">
           {(["reference", "raw"] as const).map((role) => (
             <div
@@ -383,6 +430,9 @@ export function ReferenceEditor() {
             e.target.value = "";
           }}
         />
+        </div>
+        <div className="re-card">
+        <h3 className="re-card-title">Style</h3>
         <div className="reference-options">
           {(["Music", "Voiceover"] as const).map((label) => (
             <label key={label}>
@@ -536,24 +586,55 @@ export function ReferenceEditor() {
             </label>
           ))}
         </details>
-        <button
-          disabled={!chosen || !raw.length}
-          onClick={() => void generate()}
-        >
-          Recreate This Style
-        </button>
+        </div>
+        </div>
+        <div className="re-actionbar">
+          <p className="re-summary">
+            {chosen ? chosen.name : "No reference yet"} · {raw.length} raw clip{raw.length === 1 ? "" : "s"} · {controls.mode} ·{" "}
+            {{ music: "supplied music", reference: "reference audio", recreate: "recreated audio structure" }[controls.audio ?? "music"]}
+            {controls.interval ? ` · ${(controls.interval.startMs / 1000).toFixed(1)}–${(controls.interval.endMs / 1000).toFixed(1)} s` : ""}
+          </p>
+          <button className="re-primary" disabled={!chosen || !raw.length} onClick={() => void generate()}>
+            Recreate This Style
+          </button>
+        </div>
       </fieldset>
       {busy && (
-        <p role="status">
+        <p role="status" className="re-status">
           {job?.progress?.detail ?? job?.state}{" "}
           <button onClick={() => backgroundJobs.cancel(jobId)}>Cancel</button>
         </p>
       )}
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <p role="alert" className="re-alert">
+          {error}
+        </p>
+      )}
       {result && view && (
-        <>
+        <div className="re-results">
           <h3>Style DNA</h3>
-          <p>
+          <div className="re-stats">
+            <p className="re-stat">
+              <b>{result.dna.shots.length}</b> shots
+            </p>
+            <p className="re-stat">
+              <b>{result.dna.bpm ? Math.round(result.dna.bpm) : "–"}</b> BPM
+            </p>
+            <p className="re-stat">
+              <b>{result.matches.length}</b> matched ranges
+            </p>
+            <p className="re-stat">
+              <b>{view.clips.filter((c) => c.kind === "text").length}</b> editable titles
+            </p>
+          </div>
+          {result.coverage && (
+            <p className="re-muted">
+              Raw footage searched end to end: {(result.coverage.suppliedMs / 1000).toFixed(1)} s supplied across {result.coverage.clips} clip
+              {result.coverage.clips === 1 ? "" : "s"}, {(result.coverage.analyzedMs / 1000).toFixed(1)} s analysed, {result.coverage.candidates} candidate moments,{" "}
+              {result.coverage.used} used, final edit {(result.coverage.finalMs / 1000).toFixed(1)} s.
+            </p>
+          )}
+          <p className="re-muted">
             {result.dna.shots.length} measured shots ·{" "}
             {result.dna.shots
               .map((s) => ((s.endMs - s.startMs) / 1000).toFixed(1) + "s")
@@ -561,7 +642,7 @@ export function ReferenceEditor() {
               .join(" / ")}
             {result.dna.bpm ? " · " + Math.round(result.dna.bpm) + " BPM" : ""}
           </p>
-          <p>
+          <p className="re-muted">
             {result.dna.color
               ? "Measured luma " +
                 result.dna.color.luma.toFixed(2) +
@@ -590,6 +671,79 @@ export function ReferenceEditor() {
               </ul>
             </details>
           )}
+          <details open>
+            <summary>Why each source moment was chosen</summary>
+            <p className="re-muted">
+              Every raw clip is searched over its whole length. Each reference shot gets the moment that best plays the same role; its action peak is placed on the shot's
+              strongest audio event. Choose another take to swap one shot without rebuilding.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Shot</th>
+                  <th>Source moment</th>
+                  <th>Match</th>
+                  <th>Alternatives</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.matches.map((m, i) => {
+                  const name = (id: string) => project.assets.find((a) => a.id === id)?.name ?? id;
+                  const rate = fps(view);
+                  const match = m.match ?? {};
+                  const overall = Object.keys(match).length ? Object.values(match).reduce((a, b) => a + b, 0) / Object.keys(match).length : undefined;
+                  return (
+                    <tr key={"why" + m.clipId}>
+                      <td>
+                        {i + 1}
+                        <br />
+                        <span className="re-muted">
+                          {(m.referenceMs / 1000).toFixed(2)}–{(m.referenceEndMs / 1000).toFixed(2)} s
+                        </span>
+                      </td>
+                      <td>
+                        {name(m.source)} @ {(m.sourceIn / rate).toFixed(2)}–{((m.sourceIn + m.duration) / rate).toFixed(2)} s
+                        {m.peak?.source === "audio event" && (
+                          <>
+                            <br />
+                            <span className="re-tag">action peak on audio event at {Math.round(m.peak.fraction * 100)}%</span>
+                          </>
+                        )}
+                        {m.reuse?.intentional && (
+                          <>
+                            <br />
+                            <span className="re-tag">reused: {m.reuse.reason}</span>
+                          </>
+                        )}
+                      </td>
+                      <td>
+                        {Object.entries(match)
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([k, v]) => (
+                            <span key={k} className="re-meter" style={{ marginRight: 8 }}>
+                              {k}
+                              <i>
+                                <b style={{ width: `${v * 100}%` }} />
+                              </i>
+                              {Math.round(v * 100)}%
+                            </span>
+                          ))}
+                        {overall !== undefined && <b> · overall {Math.round(overall * 100)}%</b>}
+                        {m.selection === "local" && <span className="re-tag">local match</span>}
+                      </td>
+                      <td>
+                        {(m.alternatives ?? []).map((alt, k) => (
+                          <button key={k} disabled={!canApply || busy} title={Object.entries(alt.match).map(([x, v]) => `${x} ${Math.round(v * 100)}%`).join(" · ")} onClick={() => chooseTake(i, alt)}>
+                            Choose another take: {name(alt.sourceId)} @ {(alt.inMs / 1000).toFixed(2)} s
+                          </button>
+                        ))}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </details>
           <details>
             <summary>Compare shot timing</summary>
             <table>
@@ -691,7 +845,9 @@ export function ReferenceEditor() {
               )}
             </details>
           )}
-          <button onClick={() => void saveDNA()}>Save Style DNA</button> {saved}
+          <p className="re-row">
+            <button onClick={() => void saveDNA()}>Save Style DNA</button> {saved}
+          </p>
           <div className="reference-compare">
             <figure>
               <figcaption>Reference</figcaption>
@@ -721,7 +877,7 @@ export function ReferenceEditor() {
               />
             </div>
           </div>
-          <p>
+          <p className="re-muted">
             {result.dna.text === null
               ? "Text measurement unavailable"
               : result.dna.text.length + " transient text intervals"}{" "}
@@ -729,15 +885,22 @@ export function ReferenceEditor() {
             accents · {view.clips.filter((c) => c.kind === "text").length}{" "}
             editable text layers.
           </p>
-          <p>
+          <p className="re-muted">
             Reference fades and bounded camera moves can be transferred. Exact
             source speed curves, composited transitions and typefaces require
             additional evidence.
           </p>
-          {result.warnings.map((w) => (
-            <p key={w}>{w}</p>
-          ))}
+          {result.warnings.length > 0 && (
+            <div className="re-notes">
+              {result.warnings.map((w) => (
+                <p key={w}>{w}</p>
+              ))}
+            </div>
+          )}
+          <div className="re-actionbar">
+          <p className="re-summary">Apply adds a new sequence; Undo removes it again.</p>
           <button
+            className="re-primary"
             disabled={!canApply || Object.keys(titleChanges).length > 0}
             onClick={() => {
               try {
@@ -754,7 +917,8 @@ export function ReferenceEditor() {
           >
             Apply recreation
           </button>
-        </>
+          </div>
+        </div>
       )}
     </section>
   );

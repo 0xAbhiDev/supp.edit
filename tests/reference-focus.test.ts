@@ -237,5 +237,7 @@ it("restricts a reference to a focused interval and rejects an oversized one", (
   ]);
   expect(focused.transitions).toHaveLength(1);
   expect(focused.text![0]).toMatchObject({ startMs: 2500, endMs: 3500 });
-  expect(() => restrictReference(dna, { startMs: 0, endMs: 8500 })).toThrow(/eight seconds/);
+  // Intervals are no longer capped at eight seconds; only beyond ten minutes are they refused.
+  expect(restrictReference(dna, { startMs: 0, endMs: 8500 }).shots.length).toBeGreaterThan(0);
+  expect(() => restrictReference(dna, { startMs: 0, endMs: 700000 })).toThrow(/ten minutes/);
 });

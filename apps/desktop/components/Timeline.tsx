@@ -56,6 +56,9 @@ export function Timeline() {
     executeProject = useEditor((s) => s.execute),
     activeComposition = useEditor((s) => s.activeComposition),
     referenceEvents = useEditor((s) => s.project.compositions.find((c) => c.id === s.activeComposition)?.ai?.referenceEvents),
+    audioEventFrames = useEditor((s) => s.project.compositions.find((c) => c.id === s.activeComposition)?.ai?.audioEventFrames),
+    [markerDrag, setMarkerDrag] = useState<{ id: string; x: number; frames: number; moved: boolean } | null>(null),
+    dragEnded = useRef(false),
     select = useEditor((s) => s.select);
   const [zoom, setZoom] = useState(45),
     [snap, setSnap] = useState(true),
@@ -480,13 +483,35 @@ export function Timeline() {
                 <button
                   className={event ? "marker audio-event" : "marker"}
                   key={m.id}
-                  style={{ left: m.frame * px }}
+                  style={{ left: (m.frame + (markerDrag?.id === m.id ? markerDrag.frames : 0)) * px }}
                   aria-label={event ? `Audio event ${m.name}` : undefined}
                   title={
                     event
-                      ? `${m.name} · drives ${event.links.length} layer${event.links.length === 1 ? "" : "s"} · ← → move with linked layers, Alt+← → move the marker alone, Shift moves 10 frames · double-click to delete`
+                      ? `${m.name} · drives ${event.links.length} layer${event.links.length === 1 ? "" : "s"} · drag or ← → to move with linked layers (snaps to detected audio events), Alt to move the marker alone, Shift+← → moves 10 frames · double-click to delete`
                       : `${m.name} · double-click to delete`
                   }
+                  onPointerMove={(e) => {
+                    if (!markerDrag || markerDrag.id !== m.id) return;
+                    const frames = Math.round((e.clientX - markerDrag.x) / px);
+                    if (frames !== markerDrag.frames) setMarkerDrag({ ...markerDrag, frames, moved: true });
+                  }}
+                  onPointerUp={(e) => {
+                    if (!markerDrag || markerDrag.id !== m.id) return;
+                    (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+                    const drag = markerDrag;
+                    setMarkerDrag(null);
+                    if (!drag.moved || !event || !activeComposition) return;
+                    dragEnded.current = true;
+                    // Snap to the nearest detected audio event within about 8 px of the drop point.
+                    let to = m.frame + drag.frames;
+                    const near = (audioEventFrames ?? []).reduce<number | undefined>((best, f) => (Math.abs(f - to) <= 8 / px && (best === undefined || Math.abs(f - to) < Math.abs(best - to)) ? f : best), undefined);
+                    if (near !== undefined) to = near;
+                    if (to === m.frame) return;
+                    executeProject(
+                      e.altKey ? "Move audio event marker" : "Move audio event with linked layers",
+                      moveEvent({ tool: "sequence.moveEvent", sequenceId: activeComposition, markerId: m.id, frames: to - m.frame, linked: !e.altKey }),
+                    );
+                  }}
                   onKeyDown={(e) => {
                     if (!event || !activeComposition || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
                     e.preventDefault();
@@ -502,9 +527,18 @@ export function Timeline() {
                       }),
                     );
                   }}
-                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    if (!event || e.button !== 0) return;
+                    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                    setMarkerDrag({ id: m.id, x: e.clientX, frames: 0, moved: false });
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (dragEnded.current) {
+                      dragEnded.current = false;
+                      return;
+                    }
                     clock.seek(m.frame);
                   }}
                   onDoubleClick={() =>

@@ -1,3 +1,18 @@
+## Resume after audio fidelity 3.1 — 18 November 2026
+
+Last commit: `9da430a` (Audio 3.0 checkpoint). The structural-recreation work (3.1, top of `CURRENT_STATE.md`) is not committed. `bin/supp-edit.exe` is built from it; `bin/supp-edit-audio30.exe` is the 3.0 build.
+
+Reproduce:
+- **Windows cases:** as below. Case 3 now runs 0–12000; case 4 is `test-results/audio31/s3-dialogue-music-inventory/SOURCE.supp` 0 12000 `--audio=reference`; case 5 is `test-results/audio31/s4-beat-montage-inventory/SOURCE.supp` 0 10000 `--audio=recreate`.
+- **Structural fidelity:** `node scripts/measure-av-fidelity.mjs --reference=REF --render=OUT/render.mp4 --start=0 --end=MS --mode=recreate --project=PROJECT.supp`.
+- **Corpus (4 cases):** `node scripts/make-reference-corpus.mjs DIR`.
+
+Next:
+- speech-activity detection, so "cut in a pause" and dialogue sections are measurable without a transcript;
+- merging caption fragments of the same text;
+- the false band title (case 3 "rise");
+- recreate-mode drops when the replacement has none (generate a riser into an impact?).
+
 ## Resume after audio fidelity 3.0 — 18 November 2026
 
 Both milestones are committed: `029a30a` holds the hidden-title / tone-curve milestone (next section) and the audio milestone at the top of `CURRENT_STATE.md`; the "Audio 3.0 multimodal reference reconstruction checkpoint" commit records this state.

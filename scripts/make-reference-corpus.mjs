@@ -73,8 +73,10 @@ function render(name, c) {
     chains = [];
   for (let k = 0; k < bounds.length - 1; k++) {
     const frames = bounds[k + 1] - bounds[k];
-    inputs.push("-f", "lavfi", "-t", String(frames / FPS + 1), "-i", sources[(k + c.sourceShift) % sources.length](pw, ph, k));
-    chains.push(`[${k}:v]trim=end_frame=${frames},setpts=PTS-STARTPTS,format=yuv420p,setsar=1,pad=${c.width}:${c.height}:0:${c.bars ?? 0}:black[s${k}]`);
+    // Playback speed per shot (0.5 = slow motion, 2 = fast): the generator is retimed, then resampled.
+    const speed = c.speeds?.[k] ?? 1;
+    inputs.push("-f", "lavfi", "-t", String((frames / FPS) * speed + 1), "-i", sources[(k + c.sourceShift) % sources.length](pw, ph, k));
+    chains.push(`[${k}:v]setpts=PTS/${speed},fps=${FPS},trim=end_frame=${frames},setpts=PTS-STARTPTS,format=yuv420p,setsar=1,pad=${c.width}:${c.height}:0:${c.bars ?? 0}:black[s${k}]`);
   }
   let graph = chains.join(";\n") + ";\n" + chains.map((_, k) => `[s${k}]`).join("") + `concat=n=${chains.length}:v=1:a=0[cat]`;
   const overlays = [];
@@ -110,6 +112,9 @@ function render(name, c) {
     risers: c.risers ?? [],
     drops: c.drops ?? [],
     words: c.words ?? [],
+    phrases: c.phrases ?? [],
+    ducking: c.ducking ?? [],
+    speedChanges: (c.speeds ?? []).flatMap((v, k) => (v !== 1 ? [{ shot: k, startMs: Math.round(frameMs(bounds[k])), endMs: Math.round(frameMs(bounds[k + 1])), speed: v }] : [])),
     // Cut times are frame-exact; trigger and relation say how each was placed.
     cuts: c.cuts.map((x) => ({ ms: Math.round(frameMs(toFrame(x.ms))), trigger: x.trigger, relation: x.relation })),
     titles: (c.titles ?? []).map((t) => ({ text: t.text, startMs: Math.round(frameMs(toFrame(t.startMs))), endMs: Math.round(frameMs(toFrame(t.endMs))), trigger: t.trigger })),
@@ -215,6 +220,129 @@ function render(name, c) {
       for (const t of impacts) place(left, synthesize("impact", RATE, Math.round(t)), RATE, t, 1);
       place(left, synthesize("riser", RATE, 3, risers[0].endMs - risers[0].startMs), RATE, risers[0].startMs, 0.5);
       for (let i = Math.round((drops[0] * RATE) / 1000); i < left.length; i++) left[i] += 0.18 * Math.sin((2 * Math.PI * 49 * i) / RATE);
+    },
+  });
+}
+/** Speech-like syllables: a gliding voice pitch through vowel formants, a short consonant burst. */
+function speech(ms, seed) {
+  const n = Math.round((RATE * ms) / 1000),
+    v = new Float32Array(n),
+    vowels = [[700, 1200], [300, 2300], [500, 900], [400, 1900], [600, 1000]];
+  let x = seed * 9301 + 49297;
+  const rnd = () => ((x = (x * 9301 + 49297) % 233280) / 233280) * 2 - 1;
+  const [f1, f2] = vowels[seed % vowels.length];
+  for (let i = 0; i < n; i++) {
+    const t = i / RATE,
+      p = i / n,
+      f0 = 125 + 30 * Math.sin(Math.PI * p) + (seed % 3) * 8,
+      env = Math.min(1, t / 0.02) * Math.min(1, (n - i) / (RATE * 0.04));
+    let s = 0;
+    for (let k = 1; k * f0 < 4000; k++) {
+      const hz = k * f0;
+      s += (Math.exp(-(((hz - f1) / 220) ** 2)) + 0.6 * Math.exp(-(((hz - f2) / 380) ** 2)) + 0.05) * Math.sin(2 * Math.PI * hz * t + k);
+    }
+    v[i] = 0.12 * env * s + (t < 0.025 ? 0.15 * rnd() * (1 - t / 0.025) : 0);
+  }
+  return v;
+}
+
+// ---- S3: speech over a ducked music bed, captions per phrase, cuts in the pauses.
+{
+  const bpm = 100,
+    beat = 60000 / bpm,
+    durationMs = 12000;
+  const beats = [];
+  for (let t = 0; t < durationMs - 200; t += beat) beats.push(t);
+  const phrases = [
+    { text: "we start where we stand", startMs: 800, endMs: 2600 },
+    { text: "every rep counts", startMs: 3400, endMs: 5600 },
+    { text: "keep the pace steady", startMs: 6600, endMs: 8800 },
+    { text: "finish strong", startMs: 9600, endMs: 11400 },
+  ];
+  const ducking = phrases.map((p) => ({ startMs: p.startMs - 150, endMs: p.endMs + 150, depthDb: -8 }));
+  render("s3-dialogue-music", {
+    width: 1280,
+    height: 720,
+    sourceShift: 1,
+    durationMs,
+    bpm,
+    beats,
+    phrases,
+    ducking,
+    style: "Speech over a music bed that ducks 8 dB under each phrase; captions per phrase; cuts fall in the pauses between phrases.",
+    cuts: [
+      { ms: 3000, trigger: "pause", relation: "between phrases" },
+      { ms: 6100, trigger: "pause", relation: "between phrases" },
+      { ms: 9200, trigger: "pause", relation: "between phrases" },
+    ],
+    captions: phrases.map((p) => ({ ...p, size: 44, color: "white", border: 3, y: "h-110" })),
+    sound(left) {
+      const music = new Float32Array(left.length);
+      beats.forEach((t, k) => {
+        place(music, synthesize("kick", RATE, k + 1), RATE, t, 0.3);
+        place(music, synthesize("hat", RATE, 40 + k), RATE, t + beat / 2, 0.08);
+      });
+      for (let i = 0; i < music.length; i++) music[i] += 0.04 * (Math.sin((2 * Math.PI * 220 * i) / RATE) + Math.sin((2 * Math.PI * 277 * i) / RATE));
+      // Ducking: 150 ms ramps into and out of −8 dB under each phrase.
+      const duck = 10 ** (-8 / 20);
+      for (let i = 0; i < music.length; i++) {
+        const t = (i * 1000) / RATE;
+        let g = 1;
+        for (const d of ducking) {
+          const into = Math.min(1, Math.max(0, (t - d.startMs) / 150)),
+            out = Math.min(1, Math.max(0, (d.endMs - t) / 150));
+          g = Math.min(g, 1 - (1 - duck) * Math.min(into, out));
+        }
+        left[i] += music[i] * g;
+      }
+      phrases.forEach((p, k) => {
+        const syllables = Math.max(3, Math.round((p.endMs - p.startMs) / 300));
+        const len = (p.endMs - p.startMs) / syllables;
+        for (let j = 0; j < syllables; j++) place(left, speech(len * 0.82, k * 7 + j), RATE, p.startMs + j * len, 0.9);
+      });
+    },
+  });
+}
+
+// ---- S4: beat-heavy montage at 140 BPM: a cut on every beat, an impact into a drop, title hits
+// on downbeats, slow motion before the drop and fast motion on it.
+{
+  const bpm = 140,
+    beat = 60000 / bpm,
+    durationMs = 10000;
+  const beats = [];
+  for (let t = 0; t < durationMs - 200; t += beat) beats.push(t);
+  const drop = beats[12],
+    impacts = [drop];
+  const cuts = beats.slice(1, -1).map((t, k) => ({ ms: t, trigger: Math.abs(t - drop) < 5 ? "impact" : (k + 1) % 4 === 0 ? "downbeat" : "kick", relation: "on" }));
+  const speeds = cuts.map((c) => (Math.abs(c.ms - beats[11]) < 5 ? 0.5 : Math.abs(c.ms - drop) < 5 ? 2 : 1));
+  speeds.unshift(1);
+  render("s4-beat-montage", {
+    width: 720,
+    height: 1280,
+    sourceShift: 3,
+    durationMs,
+    bpm,
+    beats,
+    impacts,
+    drops: [Math.round(drop)],
+    speeds,
+    style: "Vertical; a cut on every beat at 140 BPM; an impact into a drop with a white flash; titles hit downbeats; slow motion on the beat before the drop, fast motion on it.",
+    cuts,
+    flashes: [{ startMs: drop, endMs: drop + 67, trigger: "impact" }],
+    titles: [
+      { text: "GO", startMs: beats[4], endMs: beats[6], size: 170, color: "white", y: "(h-text_h)/2", border: 6, trigger: "downbeat" },
+      { text: "NOW", startMs: drop, endMs: beats[16], size: 170, color: "#ffe14d", y: "(h-text_h)/2", border: 6, trigger: "drop" },
+    ],
+    sound(left) {
+      beats.forEach((t, k) => {
+        const loud = t >= drop ? 1 : 0.7;
+        place(left, synthesize("kick", RATE, k + 1), RATE, t, 0.55 * loud);
+        if (k % 2 === 1) place(left, synthesize("snare", RATE, 60 + k), RATE, t, 0.4 * loud);
+        place(left, synthesize("hat", RATE, 300 + k), RATE, t + beat / 2, 0.12);
+      });
+      place(left, synthesize("impact", RATE, 11), RATE, drop, 1);
+      for (let i = Math.round((drop * RATE) / 1000); i < left.length; i++) left[i] += 0.2 * Math.sin((2 * Math.PI * 47 * i) / RATE);
     },
   });
 }

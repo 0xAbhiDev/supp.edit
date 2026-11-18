@@ -7,7 +7,7 @@
 import type { StyleDNA } from "./dna";
 import { audioAnchors, type EventGraph } from "./event-graph";
 import type { AudioTimeline } from "../audio/timeline";
-import type { SoundKind } from "../audio/synth";
+import { synthesize, type SoundKind } from "../audio/synth";
 import type { BeatMap } from "../media-analysis/model";
 
 /** The measured audio timeline in the beat-map form Smart Adaptation and Creative Remix use. */
@@ -180,31 +180,86 @@ export interface PlannedSound {
   /** Reference-clock time the sound starts. */
   startMs: number;
   durationMs: number;
+  /** Clip gain that reproduces the reference's level relative to its music. */
   gainDb: number;
+  /** Measured in the reference: effect peak over the music just before it. */
+  relativeGainDb: number;
+  attackMs: number;
+  releaseMs: number;
+  balance?: { low: number; mid: number; high: number };
   reason: string;
 }
-/** Effects to generate: sounds the reference ties to visual events that the replacement lacks. */
-export function plannedSounds(graph: EventGraph, reference: AudioTimeline, replacement: AudioTimeline | undefined, alignment: Alignment | undefined, intervalStartMs = 0): PlannedSound[] {
+
+/** Peak 100 ms RMS level (dBFS) of a synthesised effect, as `generatedSound` renders it. */
+const synthPeaks = new Map<SoundKind, number>();
+export function synthPeakDb(kind: SoundKind) {
+  if (!synthPeaks.has(kind)) {
+    const rate = 22050,
+      x = synthesize(kind, rate, 1, kind === "riser" ? 4000 : kind === "whoosh" ? 1000 : undefined),
+      w = Math.round(rate / 10);
+    let peak = 0;
+    for (let i = 0; i + w <= x.length; i += w >> 1) {
+      let s = 0;
+      for (let k = i; k < i + w; k++) s += x[k] * x[k];
+      peak = Math.max(peak, Math.sqrt(s / w));
+    }
+    synthPeaks.set(kind, 20 * Math.log10(Math.max(peak, 1e-6)));
+  }
+  return synthPeaks.get(kind)!;
+}
+
+const median = (xs: number[]) => (xs.length ? [...xs].sort((a, b) => a - b)[xs.length >> 1] : undefined);
+const levels = (a: AudioTimeline, from: number, to: number) => a.loudness.filter((p) => p.timeMs >= from && p.timeMs < to).map((p) => p.db);
+
+/** Effects to generate: sounds the reference ties to visual events that the replacement lacks,
+ * at the reference's measured level relative to its music, with its attack and release. */
+export function plannedSounds(
+  graph: EventGraph,
+  reference: AudioTimeline,
+  replacement: AudioTimeline | undefined,
+  alignment: { map: (refMs: number) => number } | undefined,
+  intervalStartMs = 0,
+  musicGainDb = -12,
+): PlannedSound[] {
   const target = replacement ? audioAnchors(replacement) : [];
   const linkedAnchors = new Set(graph.links.filter((l) => l.anchorId).map((l) => l.anchorId!));
   const out: PlannedSound[] = [];
   for (const e of reference.events) {
     const kind = e.kind === "drop" ? "impact" : e.kind;
     if (!["impact", "bass_hit", "whoosh", "riser"].includes(kind)) continue;
-    const anchorId = e.kind === "whoosh" || e.kind === "riser" ? e.id + "_end" : e.id;
+    const rising = e.kind === "whoosh" || e.kind === "riser";
+    const anchorId = rising ? e.id + "_end" : e.id;
     const linked = linkedAnchors.has(anchorId);
     if (!linked && e.confidence < 0.7) continue;
-    const at = (e.kind === "whoosh" || e.kind === "riser" ? (e.endMs ?? e.timeMs) : e.timeMs) - intervalStartMs;
-    const there = at + (alignment?.offsetMs ?? 0);
+    const at = rising ? (e.endMs ?? e.timeMs) : e.timeMs;
+    if (at < intervalStartMs) continue;
+    const there = alignment ? alignment.map(at) : at - intervalStartMs;
     const covered = target.some((a) => (kind === "impact" || kind === "bass_hit" ? ["impact", "drop", "bass_hit"] : [kind + "_end"]).includes(a.kind) && Math.abs(a.timeMs - there) <= 60);
     if (covered) continue;
-    const durationMs = e.kind === "whoosh" || e.kind === "riser" ? Math.max(150, (e.endMs ?? e.timeMs) - e.timeMs) : kind === "impact" ? 1400 : 900;
+    // Measured in the reference: the effect's peak over the music bed just before it.
+    const peak = Math.max(...levels(reference, at - 100, at + 400), -120);
+    const bed = median(levels(reference, at - 2000, at - 300).filter((v) => v > peak - 60)) ?? median(levels(reference, at + 1500, at + 3000)) ?? peak - 12;
+    const relativeGainDb = Math.max(-12, Math.min(30, peak - bed));
+    const peakAt = reference.loudness.filter((p) => p.timeMs >= at - 100 && p.timeMs <= at + 400).sort((a, b) => b.db - a.db)[0]?.timeMs ?? at;
+    const fallen = reference.loudness.find((p) => p.timeMs > peakAt && p.db <= peak - 20);
+    const releaseMs = Math.max(80, Math.min(3000, (fallen?.timeMs ?? peakAt + 1500) - peakAt));
+    const attackMs = rising ? Math.max(150, (e.endMs ?? e.timeMs) - e.timeMs) : Math.max(5, Math.min(200, peakAt - at));
+    const shares = e.measured as Record<string, number>;
+    const durationMs = rising ? Math.max(150, (e.endMs ?? e.timeMs) - e.timeMs) : Math.min(kind === "impact" ? 1400 : 900, releaseMs + attackMs);
+    // In the replacement: the same relation to its music bed at the mapped time, never above −3 dBFS.
+    const repBed = (replacement ? median(levels(replacement, there - 2000, there - 300)) : undefined) ?? -20;
+    const targetPeak = Math.min(-3, repBed + musicGainDb + relativeGainDb);
+    const gainDb = Math.max(-60, Math.min(12, targetPeak - synthPeakDb(kind as SoundKind)));
     out.push({
       kind: kind as SoundKind,
-      startMs: Math.max(0, (e.kind === "whoosh" || e.kind === "riser" ? at - durationMs : at) + intervalStartMs),
+      startMs: Math.max(0, rising ? at - durationMs : at),
       durationMs,
-      gainDb: Number((-16 + 10 * e.strength).toFixed(1)),
-      reason: `${e.kind} at ${(e.timeMs / 1000).toFixed(3)} s${linked ? " triggers a visual event" : ""}; the replacement has none there`,
+      gainDb: Number(gainDb.toFixed(1)),
+      relativeGainDb: Number(relativeGainDb.toFixed(1)),
+      attackMs: Math.round(attackMs),
+      releaseMs: Math.round(releaseMs),
+      ...(shares.lowShare !== undefined ? { balance: { low: shares.lowShare, mid: shares.midShare ?? 0, high: shares.highShare ?? 0 } } : {}),
+      reason: `${e.kind} at ${(e.timeMs / 1000).toFixed(3)} s${linked ? " triggers a visual event" : ""}; the replacement has none there; reference level ${relativeGainDb >= 0 ? "+" : ""}${relativeGainDb.toFixed(1)} dB over its music`,
     });
   }
   return out;

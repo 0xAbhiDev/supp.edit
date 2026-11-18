@@ -126,7 +126,9 @@ const host = await createServer({ server: { middlewareMode: true, hmr: false, wa
 try {
   const { audioFeatures } = await host.ssrLoadModule("/packages/ai/audio/features.ts");
   const { analyzeAudio } = await host.ssrLoadModule("/packages/ai/audio/timeline.ts");
-  const { buildEventGraph } = await host.ssrLoadModule("/packages/ai/reference/event-graph.ts");
+  const { buildEventGraph, audioAnchors } = await host.ssrLoadModule("/packages/ai/reference/event-graph.ts");
+  const { families } = await host.ssrLoadModule("/packages/ai/reference/structural-alignment.ts");
+  const { beatClock, segmentsOf } = await host.ssrLoadModule("/packages/ai/audio/structure.ts");
   const refFeatures = audioFeatures(pcm(reference, start, span)),
     outFeatures = audioFeatures(pcm(render, 0, span));
   const refAudio = analyzeAudio(refFeatures),
@@ -200,6 +202,84 @@ try {
     const g = buildEventGraph(dna, outAudio);
     const pick = (k) => g.grammar[k] && { count: g.grammar[k].count, on: g.grammar[k].on, before: g.grammar[k].before, after: g.grammar[k].after, offbeat: g.grammar[k].offbeat, unanchored: g.grammar[k].unanchored, onTransient: g.grammar[k].onTransient };
     const onOffsets = g.links.filter((l) => l.relation === "on").map((l) => Math.abs(l.offsetMs)).sort((x, y) => x - y);
+    // ---- Structural fidelity: does each visual event keep its measured relationship (relation and
+    // offset to a sound of the same family) in the exported audio? Judged per visual kind.
+    const anchors = audioAnchors(outAudio);
+    const tolerance = Math.max(45, 1.4 * (1000 / fps));
+    const kept = { cut: [0, 0], title: [0, 0], pulse: [0, 0], other: [0, 0] };
+    const layerById = new Map(c.layers.map((l) => [l.id, l]));
+    for (const e of c.ai?.referenceEvents ?? [])
+      for (const link of e.links) {
+        const layer = layerById.get(link.layerId);
+        if (!layer) continue;
+        const kind = link.visual === "cut" ? "cut" : link.visual.startsWith("title") ? "title" : link.visual === "pulse" ? "pulse" : "other";
+        const want = ms(layer.start) - link.offsetMs,
+          family = families[e.anchorKind] ?? [e.anchorKind];
+        kept[kind][1]++;
+        if (anchors.some((a) => family.includes(a.kind) && Math.abs(a.timeMs - want) <= tolerance)) kept[kind][0]++;
+      }
+    const pct = ([a, b]) => (b ? +(a / b).toFixed(3) : null);
+    const mapping = c.ai?.audioMapping ?? [];
+    // Order: adapted times follow reference order.
+    let inversions = 0;
+    const byRef = [...mapping].sort((x, y) => x.referenceMs - y.referenceMs);
+    for (let i = 1; i < byRef.length; i++) if (byRef[i].adaptedMs < byRef[i - 1].adaptedMs) inversions++;
+    // Phrase position: where each anchored event sits in its bar/phrase, reference vs export.
+    const R = beatClock(refAudio),
+      O = beatClock(outAudio);
+    const phraseErrors = mapping
+      .filter((m) => m.status === "anchored")
+      .map((m) => {
+        const rb = R.barPosition(R.position(m.referenceMs - start)),
+          ob = O.barPosition(O.position(m.adaptedMs - start));
+        if (!rb || !ob) return undefined;
+        const d = Math.abs(rb.phraseProgress - ob.phraseProgress);
+        return Math.min(d, 1 - d);
+      })
+      .filter((v) => v !== undefined)
+      .sort((x, y) => x - y);
+    // Sections heard: labels of the reference excerpt and the export, in order.
+    const labels = (a) => segmentsOf(a).map((sg) => sg.label);
+    // Drops: each reference drop should have one in the export at its adapted time.
+    const toAdapted = (refMs) => {
+      const pts = byRef.map((m) => [m.referenceMs - start, m.adaptedMs - start]);
+      if (!pts.length) return refMs;
+      let lo = pts[0];
+      for (const p of pts) if (p[0] <= refMs) lo = p;
+      const hi = pts.find((p) => p[0] > refMs);
+      return hi ? lo[1] + ((refMs - lo[0]) * (hi[1] - lo[1])) / Math.max(1, hi[0] - lo[0]) : lo[1] + (refMs - lo[0]);
+    };
+    const refDrops = refAudio.events.filter((e) => e.kind === "drop").map((e) => e.timeMs),
+      outDrops = outAudio.events.filter((e) => e.kind === "drop").map((e) => e.timeMs);
+    // Generated effects: measured level over the music in the export vs what the reference had.
+    const sfxErrors = [];
+    for (const note of c.ai?.audioNotes ?? []) {
+      const m = /Generated (\w+) at ([\d.]+) s, (-?[\d.]+) dB \(reference ([+-]?[\d.]+) dB over its music/.exec(note);
+      if (!m) continue;
+      const at = Number(m[2]) * 1000,
+        rising = m[1] === "riser" || m[1] === "whoosh";
+      const layer = c.layers.find((l) => Math.abs(ms(l.start) - at) <= 40 && /supp-generated/.test(project.assets.find((a) => a.id === l.assetId)?.name ?? ""));
+      const peakAt = layer && rising ? ms(layer.start + layer.duration) : at;
+      const lv = (a, b) => outAudio.loudness.filter((p) => p.timeMs >= a && p.timeMs < b).map((p) => p.db).sort((x, y) => x - y);
+      const peak = Math.max(...lv(peakAt - 150, peakAt + 400), -120),
+        bedPts = lv(at - 2000, at - 300),
+        bed = bedPts.length ? bedPts[bedPts.length >> 1] : NaN;
+      if (Number.isFinite(bed)) sfxErrors.push({ kind: m[1], atMs: Math.round(at), referenceRelativeDb: Number(m[4]), exportRelativeDb: +(peak - bed).toFixed(1), errorDb: +(peak - bed - Number(m[4])).toFixed(1) });
+    }
+    cat.structural = {
+      cutsAnchoredCorrectly: pct(kept.cut),
+      titlesAnchoredCorrectly: pct(kept.title),
+      pulsesAnchoredCorrectly: pct(kept.pulse),
+      counts: { cuts: kept.cut, titles: kept.title, pulses: kept.pulse },
+      mappingStatus: Object.fromEntries(["anchored", "no-replacement", "free"].map((k) => [k, mapping.filter((m) => m.status === k).length])),
+      eventOrderInversions: inversions,
+      phrasePositionErrorMedian: phraseErrors.length ? +phraseErrors[phraseErrors.length >> 1].toFixed(3) : null,
+      referenceSections: labels(refAudio).join(" "),
+      exportSections: labels(outAudio).join(" "),
+      drops: { reference: refDrops, export: outDrops, aligned: refDrops.filter((d) => outDrops.some((o) => Math.abs(o - toAdapted(d)) <= 120)).length },
+      sfx: sfxErrors,
+      sfxRelativeLevelErrorMedianDb: sfxErrors.length ? [...sfxErrors].map((x) => Math.abs(x.errorDb)).sort((x, y) => x - y)[sfxErrors.length >> 1] : null,
+    };
     cat.editEventsOnRenderAudio = { cuts: pick("cut"), titlesIn: pick("title_in"), pulses: pick("pulse"), onMedianAbsOffsetMs: onOffsets.length ? onOffsets[onOffsets.length >> 1] : null, links: g.links.map((l) => l.visualId + "@" + (g.visual.find((v) => v.id === l.visualId)?.timeMs ?? "") + ":" + l.relation + "(" + l.inferred.anchor + " " + l.offsetMs + ")").join(" ") };
   }
   if (truthFile) {

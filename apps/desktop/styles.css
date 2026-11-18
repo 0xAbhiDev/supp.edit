@@ -1242,6 +1242,29 @@ dd {
   color: #e3be72;
   padding: 0;
 }
+/* Audio events from a reference: their own colour, draggable, a stem down to the ruler. */
+.marker.audio-event {
+  color: var(--audio);
+  cursor: grab;
+  touch-action: none;
+}
+.marker.audio-event:active {
+  cursor: grabbing;
+}
+.marker.audio-event::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 14px;
+  width: 1px;
+  height: 10px;
+  background: currentColor;
+  opacity: 0.6;
+}
+.marker.audio-event:hover,
+.marker.audio-event:focus-visible {
+  color: var(--accent);
+}
 .track-row {
   height: 65px;
   display: flex;
