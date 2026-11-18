@@ -1,8 +1,6 @@
 ## Resume after audio fidelity 3.0 — 18 November 2026
 
-Last commit: `5e1cfa2`. Nothing after it is committed. The tree holds two milestones:
-- the hidden-title / tone-curve milestone (next section);
-- the audio milestone at the top of `CURRENT_STATE.md`.
+Both milestones are committed: `029a30a` holds the hidden-title / tone-curve milestone (next section) and the audio milestone at the top of `CURRENT_STATE.md`; the "Audio 3.0 multimodal reference reconstruction checkpoint" commit records this state.
 
 `bin/supp-edit.exe` is built from this tree; `bin/supp-edit-before-audio.exe` is the previous build. Read "Audio fidelity and the shared audio/visual event clock" in `AI_ARCHITECTURE.md` first.
 
