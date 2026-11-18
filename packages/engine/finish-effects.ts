@@ -1,8 +1,9 @@
-import type { Effect } from "../effects/model";
+import { grainOf, curvesOf, type Effect } from "../effects/model";
+import { curveTables } from "../effects/curves";
 export type FinishType =
-  "grain" | "vignette" | "sharpen" | "temperature" | "tonalContrast";
+  "grain" | "vignette" | "sharpen" | "temperature" | "tonalContrast" | "curves";
 export const isFinishEffect = (type: string): type is FinishType =>
-  ["grain", "vignette", "sharpen", "temperature", "tonalContrast"].includes(
+  ["grain", "vignette", "sharpen", "temperature", "tonalContrast", "curves"].includes(
     type,
   );
 const clamp = (v: number, min = 0, max = 1) => Math.max(min, Math.min(max, v));
@@ -31,10 +32,23 @@ export function finishPixels(
   frame: number,
   scale = 1,
 ) {
-  const source = type === "sharpen" ? data.slice() : data,
-    size = Math.max(0.25, (parameters?.size ?? 1.2) * scale),
-    softness = parameters?.softness ?? 0.6,
+  const grain = grainOf({ parameters }),
+    source = type === "sharpen" ? data.slice() : data,
+    size = Math.max(0.25, (grain.size ?? 1.2) * scale),
+    softness = grain.softness ?? 0.6,
     seed = Math.floor(frame) >>> 0;
+  if (type === "curves") {
+    const curves = curvesOf({ parameters });
+    if (!curves) return;
+    // Evaluated on the 0–1 level of each 8-bit channel, as the shader evaluates it.
+    const tables = curveTables(curves, value);
+    for (let i = 0; i < data.length; i += 4) {
+      if (!data[i + 3]) continue;
+      for (let ch = 0; ch < 3; ch++)
+        data[i + ch] = Math.round(clamp(tables[ch][data[i + ch]]) * 255);
+    }
+    return;
+  }
   for (let y = 0; y < height; y++)
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;

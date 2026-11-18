@@ -13,6 +13,10 @@ import { spawn, execFileSync } from "node:child_process";
 import { chromium } from "@playwright/test";
 import { mediaEnvironment } from "./runtime.mjs";
 const [projectArg, outArg, start, end, reviewFile] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+// --audio=music|reference|recreate chooses the Audio mode control; --exclude=id,id withholds raw clips.
+const option = (name) => process.argv.find((a) => a.startsWith("--" + name + "="))?.slice(name.length + 3);
+const audioMode = option("audio"),
+  excluded = new Set((option("exclude") ?? "").split(",").filter(Boolean));
 if (!end) throw Error("Supply a project copy, an output directory and the reference in/out milliseconds.");
 const project = path.resolve(projectArg),
   out = path.resolve(outArg),
@@ -35,6 +39,9 @@ const dialog = (file) =>
   );
 async function launch() {
   assert(!running(), "Close the running supp.edit before this verification.");
+  // A crash-recovery snapshot would be restored at launch and turn "Open" into "Save As".
+  const recoverySnapshot = path.join(process.env.APPDATA ?? "", "studio.supp.edit", "recovery-0.json");
+  assert(!fs.existsSync(recoverySnapshot), "supp.edit has a recovery snapshot; open the app and restore or discard it first.");
   const env = mediaEnvironment();
   env.SUPP_AI_MODELS ||= path.resolve("work/ai-models");
   env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=" + port;
@@ -92,12 +99,13 @@ await page.getByRole("button", { name: "AI Studio", exact: true }).click();
 const panel = page.getByRole("region", { name: "Recreate an edit" });
 await panel.getByLabel("Output framing").selectOption("reference");
 await panel.getByLabel("Reference video", { exact: true }).selectOption(assets[0].id);
-for (const a of assets.slice(1).filter((a) => a.kind === "video")) await panel.getByLabel("Add raw video").selectOption(a.id);
+for (const a of assets.slice(1).filter((a) => a.kind === "video" && !excluded.has(a.id))) await panel.getByLabel("Add raw video").selectOption(a.id);
 const music = assets.find((a) => a.kind === "audio");
 if (music) await panel.getByRole("combobox", { name: "Music", exact: true }).selectOption(music.id);
 await panel.getByRole("combobox", { name: "Recreation mode", exact: true }).selectOption("Close Match");
 await panel.getByLabel("Reference text", { exact: true }).selectOption("original");
 await panel.getByLabel("Text layering").selectOption("reference");
+if (audioMode) await panel.getByLabel("Audio mode").selectOption(audioMode);
 await panel.getByText("Style controls", { exact: true }).click();
 await panel.getByLabel("Reconstruct a focused title interval").check();
 await panel.getByLabel("Reference in (seconds)").fill(String(Number(start) / 1000));
@@ -116,7 +124,15 @@ for (;;) {
   if (status && Math.round((Date.now() - began) / 1000) % 30 < 2) log("  ", status.replace("Cancel", "").trim());
   await page.waitForTimeout(2000);
 }
-const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering/.test(t));
+const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music/.test(t));
+// The audio evidence the preview shows, opened as a user would.
+const audioEvidence = panel.getByText(/^Audio events/);
+if (await audioEvidence.count()) {
+  await audioEvidence.first().click();
+  await page.waitForTimeout(500);
+  await audioEvidence.first().scrollIntoViewIfNeeded();
+  await shot(page, "2b-audio-evidence.png");
+}
 step("Preview ready", { seconds: Math.round((Date.now() - began) / 1000), summary });
 await apply.scrollIntoViewIfNeeded();
 await shot(page, "2-preview.png");
@@ -172,6 +188,64 @@ const resaved = read(project);
 assert.deepEqual(resaved.compositions, saved.compositions, "Compositions changed across exit and reopen");
 assert.deepEqual(resaved.assets, saved.assets, "Assets changed across exit and reopen");
 step("Reopened and resaved identically", { layers: target.layers.length, texts: target.layers.filter((l) => l.kind === "text").length });
+
+// In-app playback: the program monitor must advance and show changing pictures.
+await page.locator(".workspace-tabs").getByRole("button", { name: "Edit", exact: true }).click();
+await page.waitForTimeout(1500);
+const monitor = page.getByLabel("Program monitor");
+const clock = page.locator(".timecode").first();
+// Start from the first frame so playback cannot run into the end and loop while the timeline is used.
+for (let i = 0; i < 20 && (await clock.textContent()) !== "00:00:00:00"; i++) {
+  await page.getByRole("button", { name: "Previous edit", exact: true }).click();
+  await page.waitForTimeout(150);
+}
+const before = await clock.textContent();
+const still = await monitor.screenshot();
+await page.getByRole("button", { name: "Play", exact: true }).click();
+await page.waitForTimeout(1200);
+const moving = await monitor.screenshot();
+await page.waitForTimeout(1200);
+const during = await clock.textContent();
+await shot(page, "4b-playing.png");
+await page.getByRole("button", { name: "Pause", exact: true }).click();
+await page.getByRole("button", { name: "Play", exact: true }).waitFor({ timeout: 5000 });
+await page.waitForTimeout(500);
+const after = await clock.textContent();
+assert.notEqual(during, before, "Playback did not advance the timecode");
+assert(!still.equals(moving), "The program monitor did not change during playback");
+step("Played in the program monitor", { from: before, during, pausedAt: after });
+
+// A manual Inspector edit: one tone-curve output level on the first raw shot.
+const first = target.layers.find((l) => l.kind === "media" && l.effectStack.some((e) => e.type === "curves"));
+if (first) {
+  await page.getByRole("combobox", { name: "Active sequence" }).selectOption(target.id);
+  await page.getByLabel("Clip " + first.name).first().click();
+  await page.waitForTimeout(800);
+  const curve = first.effectStack.find((e) => e.type === "curves");
+  const index = first.effectStack.indexOf(curve) + 1;
+  const point = curve.parameters.green.length - 1;
+  const x = Math.round(curve.parameters.green[point][0] * 255);
+  const field = page.getByLabel(`green output at ${x} · effect ${index}`);
+  await field.scrollIntoViewIfNeeded();
+  const original = Number(await field.inputValue());
+  const edited = Math.max(0, original - 20);
+  await field.fill(String(edited));
+  await field.press("Tab");
+  await page.waitForTimeout(800);
+  await shot(page, "4c-inspector-edit.png");
+  await page.getByRole("button", { name: "Save project", exact: true }).click();
+  await page.waitForTimeout(4000);
+  const editedProject = read(project);
+  const layer = editedProject.compositions.at(-1).layers.find((l) => l.id === first.id);
+  const value = layer.effectStack.find((e) => e.id === curve.id).parameters.green[point][1];
+  assert(Math.abs(value * 255 - edited) < 0.6, "The Inspector edit did not reach the saved project");
+  // Nothing else changed.
+  const expected = structuredClone(saved.compositions);
+  expected.at(-1).layers.find((l) => l.id === first.id).effectStack.find((e) => e.id === curve.id).parameters.green[point][1] = value;
+  assert.deepEqual(editedProject.compositions, expected, "The Inspector edit changed more than one value");
+  saved = editedProject;
+  step("Edited a tone-curve level in the Inspector and saved", { layer: first.name, channel: "green", input: x, from: original, to: edited });
+}
 }
 fs.writeFileSync(path.join(out, "native-session.json"), JSON.stringify(report, null, 2));
 }
@@ -185,11 +259,27 @@ dialog(movie);
 const exportBegan = Date.now();
 await page.getByRole("button", { name: /Rendering/ }).waitFor({ timeout: 30000 }).catch(() => {});
 await shot(page, "5-deliver-rendering.png");
-await page.getByRole("button", { name: "Export MP4" }).waitFor({ timeout: 60 * 60000 });
+// The web view can drop the debugging page handle while Deliver runs (the app keeps working);
+// reattach to its window and keep waiting rather than abandoning a running export.
+for (let attempt = 0; ; attempt++) {
+  try {
+    await page.getByRole("button", { name: "Export MP4" }).waitFor({ timeout: 60 * 60000 });
+    break;
+  } catch (e) {
+    if (attempt >= 3 || !/closed/i.test(String(e))) throw e;
+    step("Debugging page handle closed during Deliver; reattaching", { attempt: attempt + 1 });
+    await browser.close().catch(() => {});
+    browser = await chromium.connectOverCDP("http://127.0.0.1:" + port);
+    page = browser.contexts()[0].pages()[0];
+  }
+}
 assert(fs.existsSync(movie), "Deliver did not write the MP4");
 await shot(page, "6-deliver-done.png");
 step("Exported through Deliver", { movie, seconds: Math.round((Date.now() - exportBegan) / 1000), bytes: fs.statSync(movie).size });
 await quit(browser, page);
-report.composition = { name: target.name, settings: target.settings, duration: target.duration, layers: target.layers.map((l) => ({ kind: l.kind, name: l.name, start: l.start, duration: l.duration, blend: l.blendMode, text: l.text && { content: l.text.content, font: l.text.font, weight: l.text.weight, size: l.text.size, color: l.text.color } })) };
+report.composition = { name: target.name, settings: target.settings, duration: target.duration,
+  audio: { mode: target.ai?.audioMode, notes: target.ai?.audioNotes, events: target.ai?.referenceEvents?.length ?? 0, linkedLayers: (target.ai?.referenceEvents ?? []).reduce((n, e) => n + e.links.length, 0), markers: target.markers?.length ?? 0,
+    tracks: target.tracks.filter((t) => t.kind === "audio").map((t) => ({ name: t.name, clips: target.layers.filter((l) => l.trackId === t.id).map((l) => ({ asset: saved.assets.find((a) => a.id === l.assetId)?.name, start: l.start, sourceIn: l.sourceIn, duration: l.duration, gain: l.gain })) })) },
+  layers: target.layers.map((l) => ({ kind: l.kind, name: l.name, start: l.start, duration: l.duration, blend: l.blendMode, text: l.text && { content: l.text.content, font: l.text.font, weight: l.text.weight, size: l.text.size, color: l.text.color } })) };
 fs.writeFileSync(path.join(out, "native-verification.json"), JSON.stringify(report, null, 2));
 log("Native verification complete:", path.join(out, "native-verification.json"));

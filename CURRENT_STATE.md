@@ -1,3 +1,55 @@
+## Audio fidelity 3.0: shared audio/visual event clock and three audio modes — 18 November 2026
+
+References are now measured for sound as well as picture, on one millisecond clock: typed audio events, drifting beats, sections, sweeps, silences, words. An event graph links every cut, title, pulse and flash to the sound that triggers it, keeping the measured offset apart from the inferred relation. The Recreate panel has an Audio control:
+- *Supplied music*.
+- *Use reference audio*: the reference soundtrack, extracted natively, becomes an editable audio clip.
+- *Recreate audio structure*: the supplied music is offset and the linked visual events are moved onto its matching events; sounds it lacks are synthesised locally as editable clips.
+
+Linked events become markers that move their layers (←/→), and the preview shows the measured events, the inferred grammar and each link. Shot matches record why they were chosen. A letterboxed reference keeps its measured bars as editable layers. Details: `AI_ARCHITECTURE.md` (top section); evidence: `docs/REFERENCE_STYLE_CAPABILITIES.md`.
+
+| Evidence | Location |
+| --- | --- |
+| Windows cases (full UI flow: preview, Apply/Undo/Redo, save, exit, reopen, play, Inspector edit, Deliver) | `test-results/audio3/native/case{1,2,3}/`: `native-verification.json`, screenshots, `render.mp4`, `compare-av.mp4`, `av-metrics.json` |
+| Earlier and failed attempts, kept as evidence | `test-results/audio3/native/earlier/` |
+| Generated corpus with ground truth | `test-results/audio3/corpus/` (`truth.json`, `self-metrics.json`, `detector-summary.json`) |
+
+Measured:
+- **Reference audio, reference 55 (case 1):** the exported soundtrack matches the reference with loudness correlation 1.00, lag 0 ms, drift 0 ms, beats F 1.00 and onsets F 0.94. The edit's cuts are 2/2 on audio events and its titles 57%.
+- **Recreate on `music.wav` with the squat withheld (case 2):** a 3.48 s offset, 20 events moved and 8 kept, and a riser and a bass hit generated and audible. Measured on the export, cuts are 1/2 on audio events and titles 29% against the reference's 73%, so structure transfers only partly.
+- **Generated letterbox/lyric reference (case 3):** the bars are reproduced as editable layers, the audio matches F 1.00 with 0 ms lag, and the cut relations (on the sweep peak, after the impact) are kept. The NEW HEIGHTS title is missing.
+- **Detectors on the generated ground truth:** beats F 0.97–0.98, tempo within 1 BPM, impacts 3/3 with no false ones, sweep peaks 2/2, cut relations 14/14. Drops are wrong on both cases, and downbeats are withheld on S1.
+
+Tests: 203 TypeScript, 42 native.
+
+Open:
+- drop detection;
+- weak-accent downbeats;
+- octave errors on short or vocal-heavy windows;
+- recreate mode only moving events within 150 ms of a same-family event;
+- generated effects mixed loud against the music;
+- titles over dense backgrounds (NEW HEIGHTS);
+- the empty default "Music" track left in the reference/recreate modes;
+- audio-event markers move by keys only, not by drag;
+- whip blur still recreated as a cut;
+- a focused interval is at most 8 s.
+
+## Hidden, colored and decorative titles; measured tone curves — 18 November 2026
+
+The second reference's 0–7.967 s now exports from the rebuilt Windows application with all fifteen titles. Twelve are read automatically. MOUTH (twice) and the red HONORABLE are reconstructed from reviewed wording: the preview lists exactly what was seen and never guesses hidden letters. HONORABLE sits behind the athlete by measured depth; the script *Tiger* is an editable traced shape of the measured letterforms; the grade is a new editable per-channel **Tone curve** effect matched to five measured percentiles of the part of each shot actually shown. Not acceptance of autonomous recreation.
+
+| Evidence | Location |
+| --- | --- |
+| Windows exports | `test-results/focus55/native-final/render.mp4` (all clips), `test-results/focus55/native-other/render.mp4` (row, deadlift, squat) |
+| Full native sequence incl. program-monitor playback and an Inspector tone-curve edit | `native-verification.json`, `run.log`, screenshots in the same folders |
+| Reference / previous Windows export / new export | `comparison.jpg` in the same folders |
+| Measurements | `fidelity/title-fidelity.json` in the same folders |
+| Export timeout root cause and repeat exports | `test-results/focus55/native-p2d/repeat` (4 failures before) and `repeat-typed` (4 identical successes after) |
+| Generalization runs | `test-results/focus55/generalize/{smart,remix,vertical,otherclips,ref54}` |
+
+Measured on 0–7.967 s against the previous Windows export: mean title overlap 0.445 → 0.512 (0.589 with the other clips), tone error per shot 12.5/13.0/7.9 → 7.9/7.6/5.3. Deliver's intermittent "Timed out waiting for decoded media frame" was traced and fixed. Tests: 191 TypeScript, 42 native.
+
+Open: subject flash shape follows the raw person contour; available raw clips do not match the reference's standing, low-angle gym shots; MOUTH's per-letter motion and the blurred transition are not reproduced; Smart Adaptation and Creative Remix cut HONORABLE; the 9:16 policy leaves wide shots small; reference 54's stacked layouts are only partly covered. Details: `docs/REFERENCE_FIDELITY_BREAKTHROUGH.md`, sections "Hidden, colored and decorative titles" and "Generalization".
+
 ## Focused title reconstruction verified in the Windows app — 17 November 2026
 
 The opening of the second gym reference (0–3.967 s) now exports from the rebuilt Windows application with all nine reference words as editable difference-blend titles, a measured highlight and shadow cast, and a filled frame. A 0–7.967 s run adds IS, IN and ITS and keeps the two-frame MOUTH flash flagged for review. Both runs passed Open, Recreate, Preview, Apply, Undo, Redo, Save, full exit, reopen with identical compositions and assets, and Deliver export. This is **not acceptance of autonomous reference recreation**.

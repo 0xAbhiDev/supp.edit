@@ -1,6 +1,10 @@
 import { measuredColor, type VisualFrame } from "./visual";
 import type { Aperture } from "./aperture";
-import { castTreatment, medianTone, type ToneSample } from "./tone";
+import { medianTone, spanTone, type ToneSample } from "./tone";
+import { matchingCurve } from "../../effects/curves";
+import type { AudioTimeline } from "../audio/timeline";
+import type { SoundKind } from "../audio/synth";
+import { alignReplacement, beatMapOf, plannedSounds, retimeDna, retimer, type Alignment } from "./audio-structure";
 import { editablePersonMask, type PersonSample } from "./subject-mask";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
@@ -35,6 +39,10 @@ export interface Controls {
   reviewedTitleCues?:string;
   interval?: {startMs:number;endMs:number};
   format?: "vertical" | "reference";
+  /** music: supplied music as today. reference: the reference's own soundtrack as an editable
+   * clip. recreate: supplied music aligned to the reference's audio structure, with generated
+   * effects for linked sounds it lacks. */
+  audio?: "music" | "reference" | "recreate";
   subjectLayering?: "flat" | "behind-people" | "reference";
 }
 export const defaults: Controls = {
@@ -72,7 +80,11 @@ export function buildRecreation(
   map?: BeatMap,
   voice?: Asset,
   voiceTranscript?: Project["transcripts"][number],
+  /** reference/music: measured timelines. soundtrack: the reference's audio extracted to its own
+   * audio asset (the reference video itself never enters the timeline). sounds: generated effects. */
+  audioPlan: { reference?: AudioTimeline; music?: AudioTimeline; soundtrack?: Asset; sounds?: Partial<Record<SoundKind, Asset>>; referenceAperture?: Aperture } = {},
 ) {
+  const measuredDna = dna;
   const rate = fps(p),
     id = uid(),
     video = uid(),
@@ -87,6 +99,8 @@ export function buildRecreation(
       duration: number;
       referenceMs: number;
       referenceEndMs: number;
+      /** The matcher's scoring terms for the chosen range. */
+      why?: Record<string, number>;
     }[] = [];
   if (
     !sources.length ||
@@ -111,7 +125,42 @@ export function buildRecreation(
     controls.format === "vertical"
       ? 1920
       : Math.max(64, 2 * Math.round((dna.height * refScale) / 2));
-  const tintTrack=uid(), balanceTrack=uid();
+  const tintTrack=uid();
+  // ---- Content aperture: where the reference shows picture. Bars it adds are reproduced as
+  // editable black layers, and footage covers the content box rather than the whole frame.
+  const ap = audioPlan.referenceAperture;
+  const barsBox =
+    controls.format !== "vertical" && ap && (ap.top + ap.bottom >= 0.04 || ap.left + ap.right >= 0.04)
+      ? { w: width * (1 - ap.left - ap.right), h: height * (1 - ap.top - ap.bottom), cx: ((ap.left - ap.right) * width) / 2, cy: ((ap.top - ap.bottom) * height) / 2 }
+      : undefined;
+  // ---- Audio mode. Reference timing comes first in Close Match; recreate moves linked visual
+  // events onto the replacement's corresponding events.
+  const audioNotes: string[] = [];
+  let audioMode = controls.audio ?? "music";
+  if (audioMode === "reference" && (!reference.hasAudio || !audioPlan.soundtrack)) {
+    audioNotes.push(reference.hasAudio ? "The reference soundtrack could not be extracted; supplied music is used instead." : "The reference has no audio stream; supplied music is used instead.");
+    audioMode = "music";
+  }
+  if (audioMode === "recreate" && (!music || !audioPlan.music || !measuredDna.eventGraph)) {
+    audioNotes.push("Recreating the audio structure needs supplied music and a measured reference soundtrack; supplied music is used as is.");
+    audioMode = "music";
+  }
+  const intervalStart = measuredDna.shots[0]?.startMs ?? 0;
+  let alignment: Alignment | undefined,
+    retime = (t: number) => t;
+  if (audioMode === "recreate" && audioPlan.music && measuredDna.eventGraph) {
+    const span = (measuredDna.shots.at(-1)?.endMs ?? 0) - intervalStart;
+    alignment = alignReplacement(measuredDna.eventGraph, audioPlan.music, span, intervalStart);
+    if (controls.mode === "Close Match") {
+      retime = retimer(alignment.moves, 34, intervalStart);
+      dna = retimeDna(measuredDna, retime);
+    }
+    audioNotes.push(
+      `Replacement music starts ${(alignment.offsetMs / 1000).toFixed(3)} s in, where its events best match the reference's (score ${alignment.score}). ${alignment.moves.length} linked visual events moved onto replacement events (largest shift ${Math.max(0, ...alignment.moves.map((m) => Math.abs(m.toMs - m.fromMs)))} ms); ${alignment.kept.length} kept their reference time.`,
+    );
+  }
+  // Smart Adaptation and Creative Remix regularise cuts onto beats of the audio actually used.
+  if (audioMode === "reference" && audioPlan.reference) map = beatMapOf(audioPlan.reference);
   // Grade layers are placed after color pulses so their tracks sit directly above the footage
   // and below any pulse: a negative pulse then inverts the graded picture, as in the reference.
   const grade: EditorToolCall[] = [];
@@ -252,9 +301,9 @@ export function buildRecreation(
       startFrame: cursor,
       sourceIn,
       duration,
-      gain: voice ? -60 : music ? -20 : 0,
+      gain: voice || audioMode === "reference" ? -60 : music ? -20 : 0,
     });
-    // Measured tone on both sides: rebuild the grade as one gain plus a shadow cast.
+    // Tone of the raw range actually used, from samples two per second.
     const rangeTone = medianTone(
       (s.source.tone ?? [])
         .filter(
@@ -264,30 +313,17 @@ export function buildRecreation(
         )
         .map((t) => t.tone),
     );
-    const cast =
-      close && !keepColor && controls.color > 0 && ref.tone && rangeTone
-        ? // Close Match at the default color strength applies the whole measured grade.
-          castTreatment(rangeTone, ref.tone, controls.color / defaults.color)
-        : undefined;
-    if (cast)
-      for (const [treatment, color] of [
-        ["highlight-cast", cast.highlight],
-        ["shadow-cast", cast.shadow],
-      ] as const) {
-        // A cast within a few levels of white changes nothing visible.
-        if ([1, 3, 5].every((i) => parseInt(color.slice(i, i + 2), 16) >= 247)) continue;
-        grade.push({
-          tool: "sequence.plateTint",
-          sequenceId: id,
-          id: uid(),
-          trackId: treatment === "shadow-cast" ? tintTrack : balanceTrack,
-          sourceId: clipId,
-          color,
-          strength: cast.strength,
-          treatment,
-        });
-      }
-    else if (close && controls.interval && !keepColor && controls.color>0 && ref.plateTint)grade.push({tool:"sequence.plateTint",sequenceId:id,id:uid(),trackId:tintTrack,sourceId:clipId,color:ref.plateTint,strength:clamp(controls.color,0,1)});
+    // Measured tone on both sides: map each channel's five percentiles of the raw range onto
+    // the reference shot's with one editable tone curve. Close Match at the default color
+    // strength applies the whole measured mapping.
+    // The curve itself is built once framing has decided which part of the raw frame is shown;
+    // its place as the clip's first effect is kept here.
+    // Close Match and Smart Adaptation keep the reference's measured look; Creative Remix does not.
+    const curves = !remix && !keepColor && controls.color > 0 && ref.tone && rangeTone ? ref.tone : undefined;
+    const curveSlot = command.length;
+    if (curves) {
+      /* inserted after framing */
+    } else if (close && controls.interval && !keepColor && controls.color>0 && ref.plateTint)grade.push({tool:"sequence.plateTint",sequenceId:id,id:uid(),trackId:tintTrack,sourceId:clipId,color:ref.plateTint,strength:clamp(controls.color,0,1)});
     const sourceColor = measuredColor(
       s.source.visual ?? [],
       (sourceIn * 1000) / rate,
@@ -298,28 +334,29 @@ export function buildRecreation(
       const from = s.source.color,
         to = targetColor,
         k = controls.color;
-      effect(
-        clipId,
-        "brightness",
-        cast
-          ? cast.gain
-          : referenceGain(
-              sourceColor?.luma ?? from.meanLuma,
-              to.luma,
-              k,
-              0.06,
-              1.8,
-            ),
-      );
-      effect(
-        clipId,
-        "tonalContrast",
-        clamp(
-          1 + (to.contrast - (sourceColor?.contrast ?? from.contrastStd)) * k,
-          0.8,
-          1.25,
-        ),
-      );
+      // A measured tone curve already sets brightness, contrast and channel balance.
+      if (!curves) {
+        effect(
+          clipId,
+          "brightness",
+          referenceGain(
+            sourceColor?.luma ?? from.meanLuma,
+            to.luma,
+            k,
+            0.06,
+            1.8,
+          ),
+        );
+        effect(
+          clipId,
+          "tonalContrast",
+          clamp(
+            1 + (to.contrast - (sourceColor?.contrast ?? from.contrastStd)) * k,
+            0.8,
+            1.25,
+          ),
+        );
+      }
       const saturation = referenceGain(
         sourceColor?.saturation ?? from.meanSaturation,
         to.saturation,
@@ -327,13 +364,13 @@ export function buildRecreation(
         0.12,
         1.6,
       );
-      // A measured cast supplies the reference's chroma; boosting the raw colors under it
+      // The tone curve moves each channel toward the reference; boosting the raw colors as well
       // would count that chroma twice.
-      effect(clipId, "saturation", cast ? Math.min(1, saturation) : saturation);
+      effect(clipId, "saturation", curves ? Math.min(1, saturation) : saturation);
       const sourceTemperature =
         sourceColor?.temperature ?? from.neutralTemperature;
-      // The shadow cast already carries the measured hue.
-      if (!cast && to.temperature !== null && sourceTemperature !== null)
+      // The tone curve already carries the measured channel balance.
+      if (!curves && to.temperature !== null && sourceTemperature !== null)
         effect(
           clipId,
           "temperature",
@@ -439,9 +476,13 @@ export function buildRecreation(
         close &&
         controls.format !== "vertical" &&
         (camera?.letterbox ?? 0) < 0.03;
+      // Bars baked into the raw footage are not picture: cover the frame with the measured content.
+      const content = fill ? s.source.aperture : undefined;
+      const contentW = 1 - (content?.left ?? 0) - (content?.right ?? 0),
+        contentH = 1 - (content?.top ?? 0) - (content?.bottom ?? 0);
       baseScale = clamp(
         fill
-          ? cover
+          ? Math.max(width / (sw * Math.max(0.2, contentW)), height / (sh * Math.max(0.2, contentH)))
           : Math.min(
               cover,
               (width * 0.86) / (box.width * sw),
@@ -460,15 +501,22 @@ export function buildRecreation(
             (index + 1) +
             " fills the reference frame; the outer edge of the detected subject area is cropped.",
         );
+      // Keep the shown area inside the source, or inside its measured content when bars are baked in.
+      const edges = {
+        left: content?.left ?? 0,
+        right: content?.right ?? 0,
+        top: content?.top ?? 0,
+        bottom: content?.bottom ?? 0,
+      };
       const x = clamp(
         (0.5 - box.x - box.width / 2) * baseScale * sw,
-        -Math.max(0, (baseScale * sw - width) / 2),
-        Math.max(0, (baseScale * sw - width) / 2),
+        Math.min(0, width / 2 - (0.5 - edges.right) * sw * baseScale),
+        Math.max(0, -width / 2 - (edges.left - 0.5) * sw * baseScale),
       );
       const y = clamp(
         (0.5 - box.y - box.height / 2) * baseScale * sh,
-        -Math.max(0, (baseScale * sh - height) / 2),
-        Math.max(0, (baseScale * sh - height) / 2),
+        Math.min(0, height / 2 - (0.5 - edges.bottom) * sh * baseScale),
+        Math.max(0, -height / 2 - (edges.top - 0.5) * sh * baseScale),
       );
       // Zoom keys animate around the same fixed offset as the base frame.
       // Bound both corners of the union of all observed subjects.
@@ -517,7 +565,56 @@ export function buildRecreation(
           if (c.property === "x" || c.property === "y") c.value = 0;
         }
     }
+    if (barsBox) {
+      const f0 = Math.min(width / asset.width, height / asset.height),
+        sw = asset.width * f0,
+        sh = asset.height * f0,
+        s0 = clamp(Math.max(barsBox.w / sw, barsBox.h / sh, 1), 1, 10);
+      // Keep the subject (if measured) centred, but never uncover the content box.
+      const xr = Math.max(0, (s0 * sw - barsBox.w) / 2),
+        yr = Math.max(0, (s0 * sh - barsBox.h) / 2),
+        want = box ? { x: (0.5 - box.x - box.width / 2) * s0 * sw, y: (0.5 - box.y - box.height / 2) * s0 * sh } : { x: 0, y: 0 };
+      const values = { scale: s0, x: barsBox.cx + clamp(want.x, -xr, xr), y: barsBox.cy + clamp(want.y, -yr, yr) };
+      for (const property of ["scale", "x", "y"] as const) {
+        const key = command.find((c) => c.tool === "sequence.keyframe" && c.clipId === clipId && c.frame === cursor && c.property === property);
+        if (key && key.tool === "sequence.keyframe") key.value = values[property];
+        else command.push({ tool: "sequence.keyframe", sequenceId: id, clipId, property, frame: cursor, value: values[property], easing: "linear" });
+      }
+      baseScale = s0;
+      safeScale = Math.max(1, Math.min(safeScale, s0 * 1.15));
+    }
     const fit = Math.min(width / asset.width, height / asset.height);
+    if (curves && rangeTone) {
+      // Horizontal span of the raw frame that the composition shows after scale and offset.
+      const shownX =
+        [...command].reverse().find(
+          (c) => c.tool === "sequence.keyframe" && c.clipId === clipId && c.property === "x" && c.frame === cursor,
+        ) as { value: number } | undefined;
+      const sw = asset.width * fit * baseScale,
+        half = Math.min(0.5, width / 2 / sw),
+        center = 0.5 - (shownX?.value ?? 0) / sw;
+      const shown = spanTone(
+        (s.source.tone ?? []).filter(
+          (t) => t.timeMs >= (sourceIn * 1000) / rate - 250 && t.timeMs <= ((sourceIn + duration) * 1000) / rate + 250,
+        ),
+        Math.max(0, center - half),
+        Math.min(1, center + half),
+      );
+      const from = shown ?? rangeTone;
+      command.splice(curveSlot, 0, {
+        tool: "sequence.effect",
+        sequenceId: id,
+        clipId,
+        effectId: uid(),
+        type: "curves",
+        value: clamp(controls.color / defaults.color, 0, 1),
+        parameters: {
+          red: matchingCurve(from.map((q) => q[0]), curves.map((q) => q[0])),
+          green: matchingCurve(from.map((q) => q[1]), curves.map((q) => q[1])),
+          blue: matchingCurve(from.map((q) => q[2]), curves.map((q) => q[2])),
+        },
+      });
+    }
     const aperture = s.source.aperture;
     if (
       controls.format === "vertical" &&
@@ -627,6 +724,7 @@ export function buildRecreation(
       duration,
       referenceMs: ref.startMs,
       referenceEndMs: ref.endMs,
+      why: candidate.terms,
     });
     cursor += duration;
     consumeRange(pool, s, sourceIn, duration);
@@ -696,7 +794,8 @@ export function buildRecreation(
       strength: clamp(measured.strength, 0.05, 1),
     });
   }
-  const pulseTrack = uid();
+  const pulseTrack = uid(),
+    pulseLayers = new Map<object, string>();
   for (const pulse of dna.colorPulses ?? []) {
     if (keepColor || controls.color <= 0) break;
     const shot = matches.find(
@@ -726,10 +825,66 @@ export function buildRecreation(
       duration: Math.max(1, at(pulse.endMs) - start),
       ...pulse.palette,
     });
+    pulseLayers.set(pulse, (command.at(-1) as { id: string }).id);
   }
   command.push(...grade);
+  if (barsBox && ap && cursor > 0)
+    command.push({ tool: "sequence.letterbox", sequenceId: id, trackId: uid(), id: uid(), start: 0, duration: cursor, top: Math.min(0.45, ap.top), bottom: Math.min(0.45, ap.bottom), left: Math.min(0.45, ap.left), right: Math.min(0.45, ap.right) });
+  // Reference-clock milliseconds to a frame of this sequence, through the shot matches (which
+  // carry pace and Smart/Remix length changes).
+  const toFrame = (ms: number) => {
+    const m = matches.find((m) => ms >= m.referenceMs && ms < m.referenceEndMs) ?? (ms < (matches[0]?.referenceMs ?? 0) ? matches[0] : matches.at(-1));
+    if (!m) return -1;
+    return m.start + Math.round(((ms - m.referenceMs) * m.duration) / Math.max(1, m.referenceEndMs - m.referenceMs));
+  };
+  const assetAdds: EditorToolCall[] = [];
+  if (audioMode === "reference" && audioPlan.soundtrack) {
+    // The reference's own soundtrack, as one ordinary audio clip: it can be muted, trimmed,
+    // moved, regained or replaced like any other. Its clock is the reference's, so the interval
+    // start is its Source In.
+    const soundtrack = audioPlan.soundtrack,
+      trackId = uid(),
+      clipId = uid(),
+      sourceIn = Math.round((intervalStart * rate) / 1000);
+    assetAdds.push({ tool: "asset.add", asset: soundtrack });
+    command.push({ tool: "sequence.audioTrack", sequenceId: id, trackId, name: "Reference audio" });
+    const duration = Math.min(cursor, Math.floor(soundtrack.duration * rate) - sourceIn);
+    if (duration > 0)
+      command.push({ tool: "sequence.insert", sequenceId: id, clipId, trackId, assetId: soundtrack.id, fingerprint: soundtrack.fingerprint, startFrame: 0, sourceIn, duration, gain: 0 });
+    audioNotes.push(`Reference soundtrack from ${(intervalStart / 1000).toFixed(3)} s on its own track; raw clip audio at −60 dB; supplied music left out.`);
+  }
+  if (audioMode === "recreate" && audioPlan.reference && measuredDna.eventGraph) {
+    const sounds = plannedSounds(measuredDna.eventGraph, audioPlan.reference, audioPlan.music, alignment, intervalStart);
+    const trackId = uid();
+    let made = 0;
+    for (const sound of sounds) {
+      const asset = audioPlan.sounds?.[sound.kind];
+      if (!asset) {
+        audioNotes.push(`No generated ${sound.kind} available: ${sound.reason}.`);
+        continue;
+      }
+      if (!assetAdds.some((c) => c.tool === "asset.add" && c.asset.id === asset.id)) assetAdds.push({ tool: "asset.add", asset });
+      if (!made++) command.push({ tool: "sequence.audioTrack", sequenceId: id, trackId, name: "Recreated SFX" });
+      const rising = sound.kind === "whoosh" || sound.kind === "riser",
+        assetFrames = Math.floor(asset.duration * rate),
+        startAt = toFrame(retime(sound.startMs)),
+        endAt = toFrame(retime(sound.startMs + sound.durationMs)),
+        planned = Math.max(1, endAt - startAt);
+      let duration = Math.min(planned, assetFrames),
+        at = rising ? endAt - duration : startAt;
+      if (at < 0) {
+        duration += at;
+        at = 0;
+      }
+      duration = Math.min(duration, cursor - at);
+      if (duration < 1) continue;
+      command.push({ tool: "sequence.insert", sequenceId: id, clipId: uid(), trackId, assetId: asset.id, fingerprint: asset.fingerprint, startFrame: at, sourceIn: rising ? Math.max(0, assetFrames - duration) : 0, duration, gain: sound.gainDb });
+      audioNotes.push(`Generated ${sound.kind} at ${(at / rate).toFixed(3)} s: ${sound.reason}.`);
+    }
+  }
   for (const asset of [music, voice]) {
     if (!asset) continue;
+    if (audioMode === "reference" && asset === music) continue;
     const trackId = asset === voice && music ? uid() : audio;
     if (trackId !== audio)
       command.push({
@@ -749,8 +904,8 @@ export function buildRecreation(
       assetId: asset.id,
       fingerprint: asset.fingerprint,
       startFrame: 0,
-      sourceIn: 0,
-      duration,
+      sourceIn: asset === music && alignment ? Math.round((alignment.offsetMs * rate) / 1000) : 0,
+      duration: asset === music && alignment ? Math.min(duration, Math.floor(asset.duration * rate) - Math.round((alignment.offsetMs * rate) / 1000)) : duration,
       gain: asset === music ? (voice ? -20 : -12) : 0,
     });
     const transcript =
@@ -793,6 +948,8 @@ export function buildRecreation(
       })),
     },
   });
+  // Generated sounds enter the library before anything uses them.
+  command.unshift(...assetAdds);
   const plan = {
     id: uid(),
     projectId: p.id,
@@ -841,7 +998,8 @@ export function buildRecreation(
   let omitted = 0;
   const graphics = uid();
   const frontGraphics = uid();
-  const frontTitles: EditorToolCall[] = [];
+  const frontTitles: EditorToolCall[] = [],
+    titleLayers = new Map<object, string>();
   const overlays =
     dna.text?.filter((t) => t.role === "persistent-overlay").length ?? 0;
   if (overlays && controls.wording !== "omit")
@@ -1076,6 +1234,27 @@ export function buildRecreation(
         );
     }
     const aboveMask = controls.subjectLayering === "reference" && !behind;
+    if (close && controls.wording === "original" && appearance.outline && picture && content === appearance.content) {
+      const pw = picture.right - picture.left,
+        ph = picture.bottom - picture.top;
+      (aboveMask ? frontTitles : command).push({
+        tool: "sequence.tracedTitle",
+        sequenceId: id,
+        id: uid(),
+        trackId: aboveMask ? frontGraphics : graphics,
+        content,
+        start,
+        duration: end - start,
+        color: (appearance.differenceInk ?? appearance.foreground ?? "#ffffff").toLowerCase(),
+        blend: appearance.differenceInk ? "difference" : "normal",
+        outline: appearance.outline.map((o) => ({
+          hole: o.hole,
+          points: o.points.map(([x, y]) => [(picture.left + x * pw) / width, (picture.top + y * ph) / height] as [number, number]),
+        })),
+      });
+      titleLayers.set(appearance, ((aboveMask ? frontTitles : command).at(-1) as { id: string }).id);
+      continue;
+    }
     (aboveMask ? frontTitles : command).push({
       tool: "sequence.text",
       sequenceId: id,
@@ -1083,6 +1262,7 @@ export function buildRecreation(
       trackId: aboveMask ? frontGraphics : graphics,
       content,
       ...(measuredInk && appearance.differenceInk ? {differenceInk:appearance.differenceInk} : {}),
+      ...(measuredInk && appearance.rotation ? { rotation: appearance.rotation } : {}),
       ...(measuredInk && appearance.inkMetrics
         ? {
             face: {
@@ -1140,6 +1320,7 @@ export function buildRecreation(
       y: band.y,
       layout: { x: band.x, width: band.width },
     });
+    titleLayers.set(appearance, ((aboveMask ? frontTitles : command).at(-1) as { id: string }).id);
   }
   if (omitted)
     warnings.push(
@@ -1203,6 +1384,51 @@ export function buildRecreation(
       }
     }
   }
+  // ---- Linked audio events as sequence markers, with the layers each drives.
+  const referenceEvents: NonNullable<NonNullable<Project["compositions"][number]["ai"]>["referenceEvents"]> = [];
+  const graph = measuredDna.eventGraph;
+  if (graph) {
+    const filtered = (measuredDna.text ?? []).filter((t) => t.content && t.role !== "persistent-overlay" && t.evidence?.status !== "uncertain");
+    const workingText = (dna.text ?? []).filter((t) => t.content && t.role !== "persistent-overlay" && t.evidence?.status !== "uncertain");
+    const layerFor = (visualId: string): string | undefined => {
+      const cut = /^cut_(\d+)$/.exec(visualId);
+      if (cut) return matches[Number(cut[1])]?.clipId;
+      const title = /^title_(\d+)_(in|out)$/.exec(visualId);
+      if (title) return titleLayers.get(workingText[Number(title[1]) - 1] ?? filtered[Number(title[1]) - 1]);
+      const pulse = /^pulse_(\d+)$/.exec(visualId);
+      if (pulse) return pulseLayers.get(dna.colorPulses[Number(pulse[1]) - 1]);
+      return undefined;
+    };
+    const visualKind = new Map(graph.visual.map((v) => [v.id, v.kind]));
+    const byAnchor = new Map<string, typeof graph.links>();
+    for (const l of graph.links) if (l.anchorId && l.relation !== "unanchored" && l.confidence >= 0.2) byAnchor.set(l.anchorId, [...(byAnchor.get(l.anchorId) ?? []), l]);
+    const anchors = new Map(graph.anchors.map((a) => [a.id, a]));
+    for (const [anchorId, links] of [...byAnchor].slice(0, 120)) {
+      const anchor = anchors.get(anchorId);
+      if (!anchor) continue;
+      const frame = toFrame(retime(anchor.timeMs));
+      if (frame < 0 || frame >= cursor) continue;
+      const markerId = uid(),
+        kinds = [...new Set(links.map((l) => visualKind.get(l.visualId) ?? "visual"))];
+      command.push({ tool: "sequence.marker", sequenceId: id, id: markerId, frame, name: `${links[0].inferred.anchor} → ${kinds.join(", ")}`.slice(0, 256) });
+      referenceEvents.push({
+        markerId,
+        anchorKind: String(links[0].inferred.anchor).slice(0, 32),
+        anchorMs: Math.round(anchor.timeMs),
+        confidence: Math.max(...links.map((l) => l.confidence)),
+        links: links
+          .flatMap((l) => {
+            const layerId = layerFor(l.visualId);
+            return layerId ? [{ layerId, visual: visualKind.get(l.visualId) ?? "visual", relation: l.relation as "on" | "before" | "after" | "offbeat", offsetMs: Math.max(-10000, Math.min(10000, l.offsetMs)) }] : [];
+          })
+          .slice(0, 16),
+      });
+    }
+  }
+  const create = command.find((c) => c.tool === "sequence.create");
+  if (create && create.tool === "sequence.create")
+    create.ai = { ...create.ai, audioMode, ...(audioNotes.length ? { audioNotes: audioNotes.slice(0, 64) } : {}), ...(referenceEvents.length ? { referenceEvents } : {}) };
+  warnings.push(...audioNotes.filter((n) => /^(No generated|The reference has no|Recreating the audio)/.test(n)));
   command.push(...frontTitles);
   if (command.length !== preview.plan.commands.length || warnings.length)
     preview = previewEditPlan(plan, p, revision);

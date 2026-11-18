@@ -1,3 +1,4 @@
+import { identityCurves } from "../effects/curves";
 import { editable, type Edit } from "./index";
 import {
   effectInfo,
@@ -32,6 +33,7 @@ export function addEffect(
         enabled: true,
         value: effectInfo[type].initial,
         keys: [],
+        ...(type === "curves" ? { parameters: identityCurves() } : {}),
       },
     ]);
   };

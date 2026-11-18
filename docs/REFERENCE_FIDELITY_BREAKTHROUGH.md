@@ -164,3 +164,74 @@ Negative pulse, Windows 0–8 s export: mean RGB of frames 139, 140, 143, 144 is
 | Other references and modes | Reference 54, vertical framing, Smart Adaptation and Creative Remix were not rerun with these changes. Cover framing and tone casts apply to any Close Match with measured tone; only this reference has native evidence. |
 
 Harness note: Playwright's pinned Chromium is not installed on this machine. `scripts/runtime.mjs` falls back to installed Chrome or Edge; nothing is downloaded.
+
+## Hidden, colored and decorative titles; measured tone curves — 18 November 2026
+
+Continues the focused reconstruction of the second gym reference, now over 0–7.967 s. Verified through the rebuilt Windows application. This is **not acceptance of autonomous reference recreation**; the limits below still apply.
+
+### What changed and why
+
+| Reference behaviour | Previous result | Change |
+| --- | --- | --- |
+| Plate: lifted blacks (≈7–12), bright upper midtones from fixtures, teal cast | Two global casts matched median and highlights only; shadows crushed, upper midtones dark | New editable **Tone curve** effect (`packages/effects/curves.ts`): a monotone cubic per channel through five measured percentile pairs. CPU and WebGL evaluate the same curve (max 0.017/255 apart). Native schema validates it; the Inspector edits each output level. Close Match measures the raw tone over the part of the frame the shot actually shows (stripe histograms, `spanTone`) and bounds extrapolation above the brightest measured level. |
+| Red serif HONORABLE spans the frame, partly behind the athlete | Absent | Second, independent pass for flat colored lettering (`distinctInk`: colors concentrated in the title band but rare elsewhere). Full-width band with dominant-cluster selection. Pixels inside the reference person contour are excluded from the vote (`exposedVote`), so the word is assembled from the frames where each part is exposed. Depth is measured (`lettingDepth`): lettering that vanishes inside the contour but stays outside is placed behind the editable foreground person copy. |
+| MOUTH twice, larger than the other words, second time turned ≈4° | Absent | Reviewed words keep their own measured size when it fits; a repeated word reuses its clearest occurrence's lettering; baseline angle is measured from the ink's upper and lower edges and becomes an editable rotation. |
+| Script *Tiger* in a hand no installed face resembles | Segoe Script | When no face fits (fit < 0.3) and at least six frames agree, the measured letterforms become an editable **traced lettering** shape: outer contours add, counters subtract (`title-outline.ts`, `sequence.tracedTitle`). Contours are traced from a smoothed, 2× field. |
+| Serif letters joined by serifs | Decoder could not partition | Strokes wider than a letter split at hairline columns; a letter may rejoin up to four pieces. |
+| A title cut in during a blurred transition | Started after the blur | An accepted title absorbs an immediately preceding unreadable run in the same place. |
+| Subject pose | Not considered | Shot ranking adds a body-shape term from reference and raw person contours (`subject-shape.ts`). It is a tie-breaker (weight 1.0): the available contours do not separate lying and standing reliably, and a stronger weight chose an outdoor clip. |
+
+Unreadable lettering is never guessed. The preview names each moment and what was seen, for example *"Lettering at 5.10–7.97 s … (letter shapes read "HON6RAF" with 1 letter mostly hidden; OCR saw "HON"; OCR saw "RABLE"; OCR saw "HOFORABLE")"*. Words entered under **Visually reviewed words** are reconstructed from the measured color, face, size, position, angle and depth. In this run MOUTH (twice) and HONORABLE were supplied that way (`test-results/focus55/p2/review.txt`); the other twelve words are read automatically.
+
+### Export reliability fix
+
+Deliver could stop with *Timed out waiting for decoded media frame*. New diagnostics in the error identified the cause on real exports: the seek had completed at the exact requested time with decoded data (`readyState 4`), but WebView2 never delivered a presentation callback for that frame. A second case, a seek to the time already shown (as after preview playback), never presents a new frame at all and was reproduced deterministically (`scripts/inspect-same-time-seek.mjs`). `seekMedia` now returns at once when already settled on the time, and otherwise accepts a settled seek after a 400 ms grace if no callback arrives. With the same project and session, four consecutive exports failed before the change and four succeeded after it, byte-identical to each other (`native-p2d/repeat`, `native-p2d/repeat-typed`). Astra's 32 cold-seek inspection still shows no stale or black frame.
+
+### Windows application evidence
+
+`scripts/verify-native-focused.mjs` (bin/supp-edit.exe rebuilt from this tree) now also plays the sequence in the program monitor and edits one tone-curve output level in the Inspector before Deliver. Run `test-results/focus55/native-final` (byte-identical to the earlier verified `native-p2e` export):
+
+Open → Recreate → Preview → Apply → Undo → Redo → Save → full exit → reopen → identical resave → playback 00:00 → 02:28, paused at 03:20 → Inspector edit (incline.webm, green output at 255: 158 → 138, saved, nothing else changed) → Deliver. `render.mp4`: 464×368, 239 H.264 frames, AAC, no black frames, preview-to-export error 1.61–2.14/255, identical to four repeat exports. Screenshots `0-launched.png` … `6-deliver-done.png`, `native-verification.json`.
+
+The file-dialog helper now types the path as characters. Plain `WM_SETTEXT` left a Save dialog's own name in place; earlier native exports were unaffected only because the default location equalled the requested path.
+
+### Measurements (0–7.967 s, Windows exports)
+
+`scripts/measure-title-fidelity.mjs`: intersection over union of isolated lettering in reference and export at each title's midpoint (white/difference titles by negative ink, flat colored ones by concentrated color), and tone error averaged over five frames per shot outside color pulses. These measure those attributes only.
+
+| | Previous Windows export (`native-long`) | This export (`native-final`) |
+| --- | ---: | ---: |
+| Mean title overlap (15 titles) | 0.445 | 0.512 |
+| Tiger | 0.078 | 0.536 |
+| MOUTH / MOUTH | 0 / 0 | 0.575 / 0.166 |
+| HONORABLE | 0.070 | 0.358 |
+| Tone error, shots 1 / 2 / 3 | 12.5 / 13.0 / 7.9 | 7.9 / 7.6 / 5.3 |
+| Negative pulse, frames 139–144 mean RGB | 199, 146, 54 | 197–207, 152–156, 43–49 (reference 201–202, 138–140, 53–54) |
+
+Aligned sheet: `native-final/comparison.jpg` (reference │ previous Windows export │ this export).
+
+### Unresolved
+
+| Attribute | Status |
+| --- | --- |
+| Review needed | MOUTH appears for two frames between pulses and its H is damaged; HONORABLE has one letter hidden in every frame. Both are reconstructed only from reviewed wording. |
+| MOUTH motion | Each letter turns separately in the reference; one overall angle is reproduced. The second MOUTH measures −2.3° against roughly −4° by eye. |
+| HONORABLE occlusion | Follows the raw athlete, who lies on a bench, so different letters are hidden than in the reference. |
+| Subject flash | Color and timing match; the shape is the low-resolution PP-HumanSeg contour of a reclined athlete. |
+| Raw footage | No supplied clip shows a standing lifter in a dark gym; the incline and bench clips carry burned-in labels. Pose matching cannot fix this. |
+| Traced *Tiger* | Parts of the T swash and g tail are missing where the shirt behind defeated the ink model. |
+| Transition | The directional blur at 4.97 s is not reproduced. |
+
+### Generalization
+
+The focused pass and grade run through the same production planner for other modes, framing, raw footage and the first reference. Harness runs use the production compositor and native encoder; the other-clips case was also run through the Windows application.
+
+| Case | Evidence | Execution | Result |
+| --- | --- | --- | --- |
+| Other raw clips (row, deadlift, squat; incline and bench withheld) | `focus55/native-other` | Windows app: full sequence incl. playback, Inspector edit (row.webm), Deliver | 239 frames, AAC, no black frames, preview-to-export ≤ 2.54/255. Mean title overlap 0.589; tone 7.6 / 7.6 / 10.8. The standing row athlete gives a subject flash close to the reference's standing silhouette; HONORABLE passes behind the standing squatter. The squat clip's baked-in bars are now cropped using its measured content aperture. |
+| Smart Adaptation | `focus55/generalize/smart` | Harness | 268 frames. Now carries the measured tone curve. Titles keep generic placement and an installed script for Tiger (measured placement and traced lettering are Close Match only). **Defect:** HONORABLE is cut to "HONOR". Retimed shots make per-frame scores meaningless. |
+| Creative Remix | `focus55/generalize/remix` | Harness | 254 frames. Ungraded by design; pulse kept; generic placement; HONORABLE also partly cut. |
+| 9:16 Close Match | `focus55/generalize/vertical` | Harness | 1080×1920, 239 frames, grade applied. The portrait policy keeps wide raw footage whole, small in a blurred field, so titles are small. Unchanged. |
+| Reference 54, 9.3–12.4 s | `focus55/generalize/ref54` | Harness | Stacked lyric words rebuilt at measured positions: TO 0.94, YOU 0.77, EVERYWHERE 0.58, LEAVE 0.51, HARD 0.22. A stacked "I" under WHEN is missing (the focused band follows one line), and the matcher chose the bright beach clip for a night exterior (tone 11.2). |
+
+Nothing in the implementation names these references' words, times or colors; review text is supplied per run.

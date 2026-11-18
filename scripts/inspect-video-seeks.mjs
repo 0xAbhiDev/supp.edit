@@ -4,7 +4,7 @@ import path from "node:path";
 import { createServer } from "vite";
 import { chromium } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { mediaEnvironment } from "./runtime.mjs";
+import { mediaEnvironment, launchBrowser } from "./runtime.mjs";
 const [input, out, seconds = "5.2"] = process.argv.slice(2);
 if (!input || !out) throw Error("Supply a video and report path");
 const env = mediaEnvironment(),
@@ -38,12 +38,13 @@ const server = await createServer({
   },
 });
 await server.listen();
-const browser = await chromium.launch();
+const browser = await launchBrowser(chromium);
 try {
   const page = await browser.newPage();
-  await page.goto(new URL("favicon.ico", server.resolvedUrls.local[0]).href, {
-    waitUntil: "commit",
-  });
+  // A blank same-origin page; installed Chrome rejects the 404 the pinned shell tolerated.
+  const origin = new URL("seek-harness.html", server.resolvedUrls.local[0]).href;
+  await page.route(origin, (r) => r.fulfill({ contentType: "text/html", body: "<!doctype html><title>Seek harness</title>" }));
+  await page.goto(origin);
   const report = await page.evaluate(
     async ({ bytes, name, metadata, seconds }) => {
       const { newProject, newClip } =

@@ -16,10 +16,13 @@ export interface TitleShape {
   mask: Uint8Array;
   stride: number;
   box: { x: number; y: number; width: number; height: number };
+  /** 1 where the pixel was observed at least a few times. Pixels always hidden behind a subject
+   * or a recurring label are unknown, and no reading is scored on them. */
+  known?: Uint8Array;
 }
 export interface Candidate {
   content: string;
-  origin: "review" | "seed" | "speech" | "glyphs";
+  origin: "review" | "seed" | "speech" | "glyphs" | "fragment" | "combined";
 }
 export interface Reading extends Candidate, Face {
   fit: number;
@@ -102,6 +105,7 @@ function resample(
   box: TitleShape["box"],
   w: number,
   h: number,
+  source: Uint8Array = shape.mask,
 ) {
   const out = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
@@ -112,16 +116,21 @@ function resample(
         x1 = Math.max(x0 + 1, box.x + Math.floor(((x + 1) * box.width) / w));
       let hits = 0;
       for (let yy = y0; yy < y1; yy++)
-        for (let xx = x0; xx < x1; xx++) hits += shape.mask[yy * shape.stride + xx];
+        for (let xx = x0; xx < x1; xx++) hits += source[yy * shape.stride + xx];
       if (hits * 2 >= (x1 - x0) * (y1 - y0)) out[y * w + x] = 1;
     }
   }
   return out;
 }
-function overlap(a: Uint8Array, b: Uint8Array) {
+/** Grid cells observed often enough to score; all cells when nothing was hidden. */
+function knownGrid(shape: TitleShape, box: TitleShape["box"], w: number, h: number) {
+  return shape.known ? resample(shape, box, w, h, shape.known) : undefined;
+}
+function overlap(a: Uint8Array, b: Uint8Array, known?: Uint8Array) {
   let both = 0,
     any = 0;
   for (let i = 0; i < a.length; i++) {
+    if (known && !known[i]) continue;
     both += a[i] & b[i];
     any += a[i] | b[i];
   }
@@ -143,7 +152,7 @@ export function wordFit(shape: TitleShape, content: string, face: Face) {
   const template = raster(content, face, w, h);
   if (!template) return 0;
   return (
-    overlap(resample(shape, shape.box, w, h), template.bits) *
+    overlap(resample(shape, shape.box, w, h), template.bits, knownGrid(shape, shape.box, w, h)) *
     proportion(template.ratio, shape.box.width / shape.box.height, 0.3)
   );
 }
@@ -196,6 +205,7 @@ export function rankReadings(
   if (!context()) return [];
   const { w, h } = grid(shape.box),
     observed = resample(shape, shape.box, w, h),
+    known = knownGrid(shape, shape.box, w, h),
     ratio = shape.box.width / shape.box.height;
   const seen = new Set<string>(),
     out: Reading[] = [];
@@ -209,7 +219,7 @@ export function rankReadings(
     for (const face of script && scripts.length ? scripts : faces) {
       const template = raster(content, face, w, h);
       if (!template) continue;
-      const fit = overlap(observed, template.bits) * proportion(template.ratio, ratio, 0.3);
+      const fit = overlap(observed, template.bits, known) * proportion(template.ratio, ratio, 0.3);
       if (!best || fit > best.fit) best = { ...candidate, content, ...face, fit };
     }
     if (best) out.push(best);
@@ -228,19 +238,33 @@ const LW = 16,
 export function decodeCapitals(shape: TitleShape, faces = installedFaces()) {
   if (!context() || !faces.length) return;
   const { box, mask, stride } = shape;
-  const filled: boolean[] = [];
+  const ink: number[] = [];
   for (let x = 0; x < box.width; x++) {
-    let any = false;
-    for (let y = 0; y < box.height && !any; y++)
-      any = !!mask[(box.y + y) * stride + box.x + x];
-    filled.push(any);
+    let n = 0;
+    for (let y = 0; y < box.height; y++) n += mask[(box.y + y) * stride + box.x + x];
+    ink.push(n);
   }
   const strokes: { x: number; end: number }[] = [];
   for (let x = 0; x < box.width; x++) {
-    if (!filled[x]) continue;
+    if (!ink[x]) continue;
     const last = strokes.at(-1);
     if (last && last.end === x) last.end = x + 1;
     else strokes.push({ x, end: x + 1 });
+  }
+  // Serifs and tight spacing join neighboring letters through thin columns. Split a stroke wider
+  // than a letter at columns holding only a hairline of ink; a letter split this way (the bar of
+  // an H) is rejoined below.
+  const hairline = Math.max(1, Math.round(box.height * 0.08));
+  for (let k = 0; k < strokes.length; k++) {
+    const q = strokes[k];
+    if (q.end - q.x <= box.height * 0.75) continue;
+    for (let x = q.x + 2; x < q.end - 2; x++) {
+      if (ink[x] > hairline) continue;
+      const window = ink.slice(Math.max(q.x, x - 3), Math.min(q.end, x + 4));
+      if (ink[x] > Math.min(...window)) continue;
+      strokes.splice(k, 1, { x: q.x, end: x }, { x: x + 1, end: q.end });
+      break;
+    }
   }
   if (!strokes.length || strokes.length > 40) return;
   // Tight vertical extent of a horizontal span.
@@ -256,15 +280,24 @@ export function decodeCapitals(shape: TitleShape, faces = installedFaces()) {
         }
     return { x: box.x + x, y: box.y + top, width: end - x, height: bottom - top + 1 };
   };
-  const groups: { from: number; to: number; box: TitleShape["box"]; bits: Uint8Array }[] = [];
+  const groups: {
+    from: number;
+    to: number;
+    box: TitleShape["box"];
+    bits: Uint8Array;
+    known?: Uint8Array;
+  }[] = [];
   for (let from = 0; from < strokes.length; from++)
-    for (let to = from; to < Math.min(strokes.length, from + 3); to++) {
+    for (let to = from; to < Math.min(strokes.length, from + 4); to++) {
       const b = span(strokes[from].x, strokes[to].end);
       // A letter is never much wider than the line is tall.
       if (b.width > box.height * 1.6 || b.height < box.height * 0.55) continue;
-      groups.push({ from, to, box: b, bits: resample(shape, b, LW, LH) });
+      groups.push({ from, to, box: b, bits: resample(shape, b, LW, LH), known: knownGrid(shape, b, LW, LH) });
     }
-  let best: { content: string; fit: number; weakest: number; face: Face } | undefined;
+  let best: { content: string; fit: number; weakest: number; hidden: number; face: Face } | undefined;
+  // A letter mostly hidden behind a subject is matched on its visible strokes but cannot be
+  // required to match convincingly; it is counted so the reading can be flagged for review.
+  const exposure = groups.map((g) => (g.known ? g.known.reduce((t, v) => t + v, 0) / g.known.length : 1));
   for (const face of faces) {
     const templates = [...LETTERS].map((ch) => raster(ch, face, LW, LH));
     const score = groups.map((g) => {
@@ -273,7 +306,7 @@ export function decodeCapitals(shape: TitleShape, faces = installedFaces()) {
       const ratio = g.box.width / g.box.height;
       templates.forEach((t, i) => {
         if (!t) return;
-        const fit = overlap(g.bits, t.bits) * proportion(t.ratio, ratio, 0.5);
+        const fit = overlap(g.bits, t.bits, g.known) * proportion(t.ratio, ratio, 0.5);
         if (fit > top) {
           top = fit;
           letter = LETTERS[i];
@@ -297,17 +330,19 @@ export function decodeCapitals(shape: TitleShape, faces = installedFaces()) {
     if (total[strokes.length] === -Infinity) continue;
     let content = "",
       width = 0,
-      weakest = 1;
+      weakest = 1,
+      hidden = 0;
     for (let end = strokes.length; end > 0; ) {
       const i = via[end];
       content = score[i].letter + content;
       width += groups[i].box.width;
-      weakest = Math.min(weakest, score[i].top);
+      if (exposure[i] < 0.6) hidden++;
+      else weakest = Math.min(weakest, score[i].top);
       end = groups[i].from;
     }
     const fit = total[strokes.length] / Math.max(1, width);
-    if (weakest >= 0.3 && content.length <= 24 && (!best || fit > best.fit))
-      best = { content, fit, weakest, face };
+    if (weakest >= 0.3 && hidden <= Math.floor(content.length / 4) && content.length <= 24 && (!best || fit > best.fit))
+      best = { content, fit, weakest, hidden, face };
   }
   return best;
 }
@@ -322,4 +357,23 @@ export function sharedFace(shapes: { shape: TitleShape; content: string }[]) {
     if (!best || fit > best.fit) best = { ...face, fit };
   }
   return best;
+}
+
+/** Wordings built letter by letter from two equally long readings of the same lettering, taking
+ * each differing letter from one or the other. Every letter of every result was read by some
+ * measurement; none is invented. At most four differing positions are combined. */
+export function letterCombinations(a: string, b: string) {
+  if (a.length !== b.length || a === b) return [];
+  const differ = [...a].flatMap((ch, i) => (ch !== b[i] ? [i] : []));
+  if (differ.length > 4) return [];
+  const out: string[] = [];
+  for (let mask = 0; mask < 1 << differ.length; mask++) {
+    const letters = [...a];
+    differ.forEach((i, k) => {
+      if (mask & (1 << k)) letters[i] = b[i];
+    });
+    const word = letters.join("");
+    if (word !== a && word !== b) out.push(word);
+  }
+  return out;
 }

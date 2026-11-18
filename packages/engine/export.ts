@@ -79,6 +79,8 @@ export async function exportMp4(
     else throw error;
     return null;
   } finally {
-    await renderer.dispose();
+    // The file is already written; cleanup gets a bounded wait so a stuck release cannot hold
+    // Deliver in "Rendering…".
+    await Promise.race([renderer.dispose(), new Promise((resolve) => setTimeout(resolve, 3000))]);
   }
 }

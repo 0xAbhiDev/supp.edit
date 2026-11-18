@@ -142,6 +142,20 @@ export function titleStrokes(
       keep: n >= minimum && y <= centerY + reach && bottom >= centerY - reach,
     });
   }
+  // A title is one horizontal cluster of strokes. Scenery at the same height elsewhere in the
+  // frame is separated from it by more than a line height; keep the cluster with the most ink.
+  const lineGap = 2.5 * reach;
+  const ordered = groups.filter((g) => g.keep).sort((a, b) => a.x - b.x),
+    clusters: (typeof groups)[] = [];
+  for (const g of ordered) {
+    const last = clusters.at(-1);
+    if (last && g.x - Math.max(...last.map((q) => q.right)) <= lineGap) last.push(g);
+    else clusters.push([g]);
+  }
+  const chosen = clusters.sort(
+    (a, b) => b.reduce((t, g) => t + g.n, 0) - a.reduce((t, g) => t + g.n, 0),
+  )[0];
+  for (const g of groups) if (g.keep && !chosen?.includes(g)) g.keep = false;
   const anchors = groups.filter((g) => g.keep);
   if (anchors.length) {
     const box = {
@@ -179,6 +193,10 @@ export function titleStrokes(
 export interface InkSample {
   timeMs: number;
   mask: Uint8Array;
+  /** Band pixels hidden this frame by a measured person contour. */
+  person?: Uint8Array;
+  /** Band pixels hidden every frame by a recurring label. */
+  label?: Uint8Array;
   /** The whole frame is briefly recolored (a negative pulse); its mask is not comparable. */
   pulsed?: boolean;
 }
@@ -239,10 +257,13 @@ export function inkRuns(samples: InkSample[], endMs: number, minimumInk: number)
       continue;
     }
     const prior = samples[i - 1 - bridged.length];
+    // Lettering that vanished leaves sparse static scenery, which agrees with itself frame to
+    // frame. Much less ink than the run's consensus ends the run.
     const same =
       !!last &&
       !!reference &&
       !!prior &&
+      count(sample.mask) >= count(reference) * 0.4 &&
       last.endMs === (bridged[0]?.timeMs ?? sample.timeMs) &&
       (agreement(sample.mask, prior.mask) > 0.5 || agreement(sample.mask, reference) > 0.5);
     if (same) {
@@ -314,4 +335,243 @@ export function glyphRows(
     }
     return bits >>> 0;
   });
+}
+
+/** One byte per band pixel: 1 where a saturated color is far more common inside the band than in
+ * the rest of the frame. A flat colored title (red serif, yellow caption) is concentrated in the
+ * band; the scenery it covers continues outside it. Neutral pixels carry no evidence: white and
+ * black lettering is left to the negative and luminance models. */
+export function distinctInk(
+  data: Uint8Array | Uint8ClampedArray,
+  w: number,
+  h: number,
+  channels: 3 | 4,
+  band: InkBand,
+  plate = plateColors(data, w, h, channels, band),
+) {
+  const inside = new Float32Array(BINS ** 3);
+  let total = 0;
+  for (let y = 0; y < band.height; y++)
+    for (let x = 0; x < band.width; x++) {
+      const i = ((band.y + y) * w + band.x + x) * channels;
+      inside[bin(data[i], data[i + 1], data[i + 2])]++;
+      total++;
+    }
+  const out = new Uint8Array(band.width * band.height);
+  for (let y = 0; y < band.height; y++)
+    for (let x = 0; x < band.width; x++) {
+      const i = ((band.y + y) * w + band.x + x) * channels,
+        r = data[i],
+        g = data[i + 1],
+        b = data[i + 2];
+      if (Math.max(r, g, b) - Math.min(r, g, b) < 60) continue;
+      const k = bin(r, g, b),
+        density = inside[k] / Math.max(1, total);
+      if (density > 3e-4 && density > 12 * plate[k]) out[y * band.width + x] = 1;
+    }
+  return out;
+}
+
+/** Vote that ignores a pixel in frames where something covers it. A title partly behind a moving
+ * athlete is assembled from the frames in which each part is exposed. `known` marks pixels
+ * observed in enough frames to decide either way. */
+export function exposedVote(frames: InkSample[], share = 0.4) {
+  const n = frames[0]?.mask.length ?? 0,
+    seen = new Uint16Array(n),
+    hits = new Uint16Array(n),
+    ink = new Uint8Array(n),
+    known = new Uint8Array(n);
+  for (const f of frames)
+    for (let i = 0; i < n; i++) {
+      if (f.person?.[i] || f.label?.[i]) continue;
+      seen[i]++;
+      hits[i] += f.mask[i];
+    }
+  const need = Math.max(2, Math.ceil(frames.length * 0.15));
+  let hidden = 0;
+  for (let i = 0; i < n; i++) {
+    if (seen[i] < Math.min(need, frames.length)) {
+      hidden++;
+      continue;
+    }
+    known[i] = 1;
+    if (hits[i] >= seen[i] * share) ink[i] = 1;
+  }
+  return { ink, known: hidden ? known : undefined };
+}
+
+/** Whether lettering passes in front of or behind a person. For each frame where the person
+ * covers part of the expected lettering, compare how much of that part is still visible with
+ * how much of the rest is. Lettering in front survives inside the contour; lettering behind
+ * disappears there while remaining outside it. */
+export function lettingDepth(frames: InkSample[], expected: Uint8Array) {
+  let total = 0;
+  for (let i = 0; i < expected.length; i++) total += expected[i];
+  const observations: { timeMs: number; insideRetention: number; outsideRetention: number }[] = [];
+  for (const f of frames) {
+    if (!f.person) continue;
+    let inside = 0,
+      insideKept = 0,
+      outside = 0,
+      outsideKept = 0;
+    for (let i = 0; i < expected.length; i++) {
+      if (!expected[i] || f.label?.[i]) continue;
+      if (f.person[i]) {
+        inside++;
+        insideKept += f.mask[i];
+      } else {
+        outside++;
+        outsideKept += f.mask[i];
+      }
+    }
+    if (inside < Math.max(20, total * 0.03) || outside < 20) continue;
+    observations.push({
+      timeMs: f.timeMs,
+      insideRetention: insideKept / inside,
+      outsideRetention: outsideKept / outside,
+    });
+  }
+  const mid = (v: number[]) => v.sort((a, b) => a - b)[v.length >> 1] ?? 0;
+  const inside = mid(observations.map((o) => o.insideRetention)),
+    outside = mid(observations.map((o) => o.outsideRetention));
+  const relation: "front" | "behind" | "unknown" =
+    observations.length < 3 || outside < 0.5
+      ? "unknown"
+      : inside < 0.25 && inside < outside * 0.4
+        ? "behind"
+        : inside > outside * 0.6
+          ? "front"
+          : "unknown";
+  return { relation, observations: observations.slice(0, 128) };
+}
+
+/** Band pixels inside a person contour (normalized frame coordinates), widened by `pad` pixels
+ * on each side: the measured outline is low resolution. */
+export function personCover(points: readonly (readonly number[])[], band: InkBand, w: number, h: number, pad: number) {
+  const out = new Uint8Array(band.width * band.height);
+  for (let y = 0; y < band.height; y++) {
+    const py = (band.y + y) / h,
+      xs: number[] = [];
+    for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+      const a = points[i],
+        b = points[j];
+      if (a[1] > py !== b[1] > py) xs.push(((b[0] - a[0]) * (py - a[1])) / (b[1] - a[1]) + a[0]);
+    }
+    xs.sort((a, b) => a - b);
+    for (let k = 0; k + 1 < xs.length; k += 2) {
+      const x0 = Math.max(0, Math.floor(xs[k] * w) - band.x - pad),
+        x1 = Math.min(band.width, Math.ceil(xs[k + 1] * w) - band.x + pad);
+      if (x1 > x0) out.fill(1, y * band.width + x0, y * band.width + x1);
+    }
+  }
+  return out;
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+/** Baseline angle of lettering in degrees clockwise, from straight lines fitted to the lowest
+ * and highest ink of each column. Outlying columns (descenders, accents, swashes) are dropped
+ * before the final fit. Returns 0 unless both edges agree on the angle. */
+export function baselineAngle(mask: Uint8Array, width: number, box: Box) {
+  const lower: [number, number][] = [],
+    upper: [number, number][] = [];
+  for (let x = box.x; x < box.x + box.width; x++) {
+    let top = -1,
+      bottom = -1;
+    for (let y = box.y; y < box.y + box.height; y++)
+      if (mask[y * width + x]) {
+        if (top < 0) top = y;
+        bottom = y;
+      }
+    if (top >= 0) {
+      upper.push([x, top]);
+      lower.push([x, bottom]);
+    }
+  }
+  const fit = (points: [number, number][]) => {
+    let kept = points;
+    let slope = 0;
+    for (let pass = 0; pass < 3 && kept.length >= 8; pass++) {
+      const mx = kept.reduce((t, p) => t + p[0], 0) / kept.length,
+        my = kept.reduce((t, p) => t + p[1], 0) / kept.length;
+      let sxy = 0,
+        sxx = 0;
+      for (const [x, y] of kept) {
+        sxy += (x - mx) * (y - my);
+        sxx += (x - mx) ** 2;
+      }
+      slope = sxy / Math.max(1, sxx);
+      const residual = kept.map(([x, y]) => Math.abs(y - (my + slope * (x - mx))));
+      const limit = [...residual].sort((a, b) => a - b)[Math.floor(residual.length * 0.7)];
+      kept = kept.filter((_, i) => residual[i] <= limit);
+    }
+    return (Math.atan(slope) * 180) / Math.PI;
+  };
+  if (lower.length < 12) return 0;
+  const a = fit(lower),
+    b = fit(upper);
+  return Math.abs(a - b) <= 2.5 ? (a + b) / 2 : 0;
+}
+
+/** Turn a band-sized mask by -degrees about a point, so lettering set at an angle reads level. */
+export function levelMask(mask: Uint8Array, width: number, height: number, degrees: number, cx: number, cy: number) {
+  const out = new Uint8Array(mask.length),
+    r = (degrees * Math.PI) / 180,
+    cos = Math.cos(r),
+    sin = Math.sin(r);
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++) {
+      // Sample the source where this level pixel came from.
+      const dx = x - cx,
+        dy = y - cy,
+        sx = Math.round(cx + dx * cos - dy * sin),
+        sy = Math.round(cy + dx * sin + dy * cos);
+      if (sx >= 0 && sy >= 0 && sx < width && sy < height) out[y * width + x] = mask[sy * width + sx];
+    }
+  return out;
+}
+
+/** Drop top and bottom rows that hold only specks; the letters' own rows remain. */
+export function trimRows(mask: Uint8Array, width: number, box: Box): Box {
+  const rows: number[] = [];
+  for (let y = box.y; y < box.y + box.height; y++) {
+    let n = 0;
+    for (let x = box.x; x < box.x + box.width; x++) n += mask[y * width + x];
+    rows.push(n);
+  }
+  const floor = Math.max(1, Math.max(...rows) * 0.04);
+  let top = 0,
+    bottom = rows.length - 1;
+  while (top < bottom && rows[top] < floor) top++;
+  while (bottom > top && rows[bottom] < floor) bottom--;
+  return { x: box.x, y: box.y + top, width: box.width, height: bottom - top + 1 };
+}
+
+/** Widen a box through columns that were never observed (a recurring label, a person who never
+ * moved away): the lettering may continue under them. Stops at observed columns without ink. */
+export function extendIntoHidden(mask: Uint8Array, known: Uint8Array, width: number, box: Box): Box {
+  const hidden = (x: number) => {
+    let unseen = 0,
+      ink = 0;
+    for (let y = box.y; y < box.y + box.height; y++) {
+      unseen += 1 - known[y * width + x];
+      ink += mask[y * width + x];
+    }
+    return { unseen: unseen >= box.height * 0.3, ink: ink > 0 };
+  };
+  let left = box.x,
+    right = box.x + box.width - 1;
+  if (right + 1 < width && hidden(right + 1).unseen)
+    while (right + 1 < width) {
+      const h = hidden(right + 1);
+      if (!h.unseen && !h.ink) break;
+      right++;
+    }
+  if (left > 0 && hidden(left - 1).unseen)
+    while (left > 0) {
+      const h = hidden(left - 1);
+      if (!h.unseen && !h.ink) break;
+      left--;
+    }
+  return { x: left, y: box.y, width: right - left + 1, height: box.height };
 }

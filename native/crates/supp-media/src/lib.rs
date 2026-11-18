@@ -269,3 +269,23 @@ mod tests {
         assert!(validate_path(Path::new("Cargo.toml")).is_err());
     }
 }
+
+/// Decoded audio for local analysis: interleaved stereo 16-bit PCM at `rate`, at most
+/// `max_seconds` long. Mono sources are duplicated to two channels by FFmpeg.
+pub fn decode_pcm(path: &Path, rate: u32, max_seconds: f64) -> Result<Vec<u8>, String> {
+    let asset = inspect(path, "decode-pcm".into())?;
+    if !asset.has_audio {
+        return Err("Source has no audio stream".into());
+    }
+    let seconds = asset.duration.min(max_seconds).max(0.);
+    let limit = (seconds * f64::from(rate) * 4.) as usize + 65536;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    analysis::execute(
+        command("ffmpeg")
+            .args(["-v", "error", "-nostdin", "-threads", "2", "-protocol_whitelist", "file,pipe", "-i"])
+            .arg(path)
+            .args(["-map", "0:a:0", "-vn", "-ac", "2", "-ar", &rate.to_string(), "-t", &format!("{seconds:.3}"), "-f", "s16le", "pipe:1"]),
+        &cancel,
+        limit,
+    )
+}

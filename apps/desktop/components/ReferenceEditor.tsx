@@ -6,6 +6,7 @@ import {
   useMemo,
 } from "react";
 import { useEditor } from "../../../packages/editor-state";
+import { AudioEvidence } from "./AudioEvidence";
 import { type Asset, fps } from "../../../packages/project-schema";
 import {
   desktop,
@@ -445,6 +446,18 @@ export function ReferenceEditor() {
             </select>
           </label>
           <label>
+            Audio
+            <select
+              aria-label="Audio mode"
+              value={controls.audio ?? "music"}
+              onChange={(e) => update({ audio: e.target.value as Controls["audio"] })}
+            >
+              <option value="music">Supplied music</option>
+              <option value="reference">Use reference audio · editable clip</option>
+              <option value="recreate">Recreate audio structure with supplied music</option>
+            </select>
+          </label>
+          <label>
             Text layering
             <select
               aria-label="Text layering"
@@ -557,6 +570,7 @@ export function ReferenceEditor() {
               : "Color measurements unavailable"}{" "}
             · {result.matches.length} matched source ranges
           </p>
+          <AudioEvidence dna={result.dna} commands={result.preview.plan.commands} />
           {!!result.dna.transitions.length && (
             <details>
               <summary>Transition evidence</summary>
@@ -585,6 +599,7 @@ export function ReferenceEditor() {
                   <th>Reference</th>
                   <th>Generated</th>
                   <th>Raw source</th>
+                  <th>Chosen for</th>
                 </tr>
               </thead>
               <tbody>
@@ -596,6 +611,15 @@ export function ReferenceEditor() {
                     <td>
                       {project.assets.find((a) => a.id === m.source)?.name} ·{" "}
                       {(m.sourceIn / fps(view)).toFixed(2)}s
+                    </td>
+                    <td>
+                      {Object.entries(m.why ?? {})
+                        .filter(([, v]) => v > 0.05)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 4)
+                        .map(([k, v]) => k + " " + v.toFixed(2))
+                        .join(" · ")}
+                      {Object.entries(m.why ?? {}).some(([, v]) => v < 0) ? " · penalty " + Object.entries(m.why ?? {}).filter(([, v]) => v < 0).map(([k]) => k).join(", ") : ""}
                     </td>
                   </tr>
                 ))}

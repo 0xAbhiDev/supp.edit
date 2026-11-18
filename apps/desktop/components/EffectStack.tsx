@@ -8,8 +8,11 @@ import {
 import {
   effectTypes,
   effectInfo,
+  grainOf,
+  curvesOf,
   type EffectType,
 } from "../../../packages/effects/model";
+import { CURVE_CHANNELS } from "../../../packages/effects/curves";
 import { effectValue } from "../../../packages/effects/evaluate";
 import {
   addEffect,
@@ -134,14 +137,14 @@ export function EffectStack({ clip }: { clip: Clip }) {
                     min={0.5}
                     max={8}
                     step={0.1}
-                    value={e.parameters?.size ?? 1.2}
+                    value={grainOf(e).size ?? 1.2}
                     onChange={(v) =>
                       execute(
                         "Change grain size",
                         editEffect(clip.id, e.id, (e) => {
                           e.parameters = {
                             size: v,
-                            softness: e.parameters?.softness ?? 0.6,
+                            softness: grainOf(e).softness ?? 0.6,
                           };
                         }),
                       )
@@ -152,19 +155,49 @@ export function EffectStack({ clip }: { clip: Clip }) {
                     min={0}
                     max={1}
                     step={0.05}
-                    value={e.parameters?.softness ?? 0.6}
+                    value={grainOf(e).softness ?? 0.6}
                     onChange={(v) =>
                       execute(
                         "Change grain softness",
                         editEffect(clip.id, e.id, (e) => {
                           e.parameters = {
-                            size: e.parameters?.size ?? 1.2,
+                            size: grainOf(e).size ?? 1.2,
                             softness: v,
                           };
                         }),
                       )
                     }
                   />
+                </div>
+              )}
+              {curvesOf(e) && (
+                <div className="effect-curves">
+                  {CURVE_CHANNELS.map((channel) => (
+                    <div key={channel} className="effect-curve-row">
+                      <span>{channel}</span>
+                      {curvesOf(e)![channel].map(([x, y], p) => (
+                        <NumberField
+                          key={p}
+                          label={`${channel} output at ${Math.round(x * 255)} · effect ${i + 1}`}
+                          min={0}
+                          max={255}
+                          step={1}
+                          value={Math.round(y * 255)}
+                          onChange={(v) =>
+                            execute(
+                              "Change tone curve",
+                              editEffect(clip.id, e.id, (e) => {
+                                const curves = curvesOf(e);
+                                if (!curves) return;
+                                const points = curves[channel];
+                                points[p] = [points[p][0], Math.max(0, Math.min(255, v)) / 255];
+                              }),
+                            )
+                          }
+                        />
+                      ))}
+                    </div>
+                  ))}
                 </div>
               )}
               {e.keys.length > 0 && (

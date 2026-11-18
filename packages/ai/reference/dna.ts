@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { toneSchema } from "./tone";
+import { subjectShapeSchema } from "./subject-shape";
+import { audioTimelineSchema } from "../audio/timeline";
+import { eventGraphSchema } from "./event-graph";
 import { assessReferenceText } from "./text-evidence";
 import type { Transcript } from "../transcript";
 import {
@@ -45,6 +48,7 @@ export const dnaSchema = z
             color: measuredColorSchema.nullable().optional(),
             plateTint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
             tone: toneSchema.optional(),
+            subjectShape: subjectShapeSchema.optional(),
             layout: z.array(unit).length(16).nullable().optional(),
             embedding: z
               .array(z.number().finite().min(-1).max(1))
@@ -78,6 +82,9 @@ export const dnaSchema = z
       .min(1)
       .max(2000),
     transitions: z.array(transitionSchema).max(1999).default([]),
+    /** The reference's soundtrack measured on the shared clock, and its links to visual events. */
+    audio: audioTimelineSchema.optional(),
+    eventGraph: eventGraphSchema.optional(),
     personFlashes: z.array(z.object({startMs:z.number().int().nonnegative(),endMs:z.number().int().positive(),color:z.string().regex(/^#[0-9a-f]{6}$/i)}).strict().refine(f=>f.endMs>f.startMs)).max(300).optional(),
     colorPulses: z
       .array(

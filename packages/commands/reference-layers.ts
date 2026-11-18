@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { newClip, newTrack } from "../project-schema";
-import { bezierMaskSchema } from "../masks/model";
+import { bezierMaskSchema, newMask, vertex } from "../masks/model";
+import { outlineTangents } from "../ai/reference/title-outline";
 import { editable, type Edit } from "./index";
 import { resolveClip } from "../animation";
 
@@ -167,5 +168,59 @@ export function referenceLayer(
       }
     }
     p.clips.push(copy);
+  };
+}
+
+/** Lettering traced from the reference, as an editable filled shape: outer contours add,
+ * counters subtract. Points are composition-normalized. */
+export const tracedTitleSchema = z
+  .object({
+    tool: z.literal("sequence.tracedTitle"),
+    sequenceId: z.string().min(1).max(128),
+    id: z.string().min(1).max(128),
+    trackId: z.string().min(1).max(128),
+    content: z.string().min(1).max(120),
+    start: z.number().int().nonnegative(),
+    duration: z.number().int().positive(),
+    color: z.string().regex(/^#[0-9a-f]{6}$/i),
+    blend: z.enum(["normal", "difference"]),
+    outline: z
+      .array(z.object({ hole: z.boolean(), points: z.array(z.tuple([z.number().finite(), z.number().finite()])).min(3).max(128) }).strict())
+      .min(1)
+      .max(32),
+  })
+  .strict();
+export function referenceTracedTitle(input: z.infer<typeof tracedTitleSchema>): Edit {
+  const call = tracedTitleSchema.parse(input);
+  return (p) => {
+    if (p.clips.some((c) => c.id === call.id)) throw Error("Traced lettering already exists.");
+    let track = p.tracks.find((t) => t.id === call.trackId);
+    if (track && (track.locked || track.kind !== "video")) throw Error("Choose an unlocked video track for the lettering.");
+    if (!track) {
+      track = { ...newTrack("video", p.tracks.length + 1), id: call.trackId, name: "Traced lettering" };
+      p.tracks.unshift(track);
+    }
+    const layer = newClip(track.id, call.start, call.duration, "shape");
+    layer.id = call.id;
+    layer.name = "Traced lettering · " + call.content;
+    layer.blendMode = call.blend;
+    layer.shape = { type: "rectangle", color: call.color, width: p.settings.width, height: p.settings.height };
+    // Larger contours first, so each counter is subtracted after the letter that holds it.
+    layer.masks = call.outline.map((o, i) => {
+      const tangents = outlineTangents(o.points.map(([x, y]) => [x * p.settings.width, y * p.settings.height]));
+      const m = newMask(
+        o.points.map(([x, y], k) => {
+          const v = vertex(x, y);
+          v.in = { x: -tangents[k][0] / p.settings.width, y: -tangents[k][1] / p.settings.height };
+          v.out = { x: tangents[k][0] / p.settings.width, y: tangents[k][1] / p.settings.height };
+          return v;
+        }),
+      );
+      m.name = (o.hole ? "Counter " : "Letterform ") + (i + 1);
+      m.mode = i === 0 ? "add" : o.hole ? "subtract" : "add";
+      m.feather = 0.6;
+      return m;
+    });
+    p.clips.push(layer);
   };
 }

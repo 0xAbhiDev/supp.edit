@@ -36,8 +36,11 @@ public static class SuppDialog {
       return true;
     }, IntPtr.Zero);
     if (edit == IntPtr.Zero) return false;
-    SendMessage(edit, 0x000C, IntPtr.Zero, path);       // WM_SETTEXT
-    System.Threading.Thread.Sleep(250);
+    // Type the path as characters so the dialog receives its normal change notifications;
+    // WM_SETTEXT alone leaves a Save dialog's own file name in place.
+    SendMessage(edit, 0x000C, IntPtr.Zero, "");          // WM_SETTEXT: clear
+    foreach (char ch in path) PostMessage(edit, 0x0102, (IntPtr)ch, IntPtr.Zero); // WM_CHAR
+    System.Threading.Thread.Sleep(400);
     PostMessage(dialog, 0x0111, (IntPtr)1, IntPtr.Zero); // WM_COMMAND, IDOK
     return true;
   }

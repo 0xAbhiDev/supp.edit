@@ -3,6 +3,7 @@ import { personMasks } from "./subject-mask";
 import { traceTitles } from "./focus";
 import { sourceTone } from "./source-tone";
 import { medianTone } from "./tone";
+import { annotateSubjects } from "./subject-shape";
 import { measureTextDepth } from "./text-depth";
 import { sourceAperture } from "./aperture";
 import type { Project, Asset } from "../../project-schema";
@@ -15,6 +16,11 @@ import {
 import { nativeColorBackend } from "../rough-cut/matching";
 import { extractDNA, type StyleDNA } from "./dna";
 import { buildRecreation, type Controls, type SourceEvidence } from "./planner";
+import { audioTimeline, generatedSound, soundtrackAsset } from "../audio/service";
+import type { AudioTimeline } from "../audio/timeline";
+import type { SoundKind } from "../audio/synth";
+import { buildEventGraph } from "./event-graph";
+import { alignReplacement, plannedSounds } from "./audio-structure";
 export interface RecreationInputs {
   reference: string;
   raw: string[];
@@ -133,7 +139,7 @@ export function recreate(
         if (
           !transcript &&
           reference.hasAudio &&
-          text?.length &&
+          (text?.length || (controls.audio ?? "music") !== "music") &&
           caps.model?.installed
         ) {
           try {
@@ -162,14 +168,30 @@ export function recreate(
         profile && controls.wording !== "original"
           ? profile
           : await measureReference();
+      let referencePeople:Awaited<ReturnType<typeof personMasks>>=[];
       if(controls.interval){
         const contours=caps.personModel?.installed ? await personMasks(reference,quiet) : [];
+        referencePeople=contours;
         const focused=await traceTitles(reference,dna,controls.interval,contours,referenceTranscript,quiet,undefined,controls.reviewedTitleCues);
         dna=focused.dna;
         warnings.push(...focused.warnings);
       }
       const closeMatch = controls.mode === "Close Match";
-      if (closeMatch && dna.shots.some((shot) => !shot.tone)) {
+      // Modes that keep the reference's measured look need its tone and the footage's.
+      const keepsLook = controls.mode !== "Creative Remix";
+      // Pose-aware shot choice: the reference subject's shape per shot.
+      if (caps.personModel?.installed && controls.mode !== "Creative Remix") {
+        try {
+          if (!referencePeople.length) referencePeople = await personMasks(reference, quiet);
+          const annotated = { ...dna, shots: dna.shots.map((shot) => ({ ...shot })) };
+          annotateSubjects(annotated, referencePeople, reference.width / Math.max(1, reference.height));
+          dna = annotated;
+        } catch (e) {
+          await job.checkpoint();
+          warnings.push("Reference subject shape unavailable: " + String(e).slice(0, 160));
+        }
+      }
+      if (keepsLook && dna.shots.some((shot) => !shot.tone)) {
         try {
           const samples = await sourceTone(reference, quiet);
           dna = {
@@ -189,14 +211,29 @@ export function recreate(
           warnings.push("Reference tone could not be measured: " + String(e).slice(0, 160));
         }
       }
+      // The reference's soundtrack on the same clock as its pictures, and the links between them.
+      if (reference.hasAudio) {
+        try {
+          const transcript =
+            referenceTranscript ??
+            project.transcripts.find((t) => t.assetId === reference.id && t.sourceFingerprint === reference.fingerprint);
+          const words = (transcript?.segments ?? []).flatMap((s) => s.words ?? []).map((w) => ({ text: w.text, startMs: w.startMs, endMs: w.endMs, confidence: w.confidence }));
+          const audio = await audioTimeline(reference, words);
+          if (audio) dna = { ...dna, audio, eventGraph: buildEventGraph(dna, audio, 1000 / Math.max(1, reference.fps || 30)) };
+        } catch (e) {
+          await job.checkpoint();
+          warnings.push("Reference audio could not be measured: " + String(e).slice(0, 160));
+        }
+      }
       stage(1, "Extracted Style DNA");
       const sources: SourceEvidence[] = [];
       for (const a of raw) {
         stage(1 + sources.length, "Understanding " + a.name);
         const evidence: SourceEvidence = await visuals(a);
-        if (controls.format === "vertical")
+        // Portrait delivery crops to the content; Close Match fill framing crops baked bars.
+        if (controls.format === "vertical" || closeMatch)
           evidence.aperture = await sourceAperture(a, quiet);
-        if (closeMatch) {
+        if (keepsLook) {
           try {
             evidence.tone = await sourceTone(a, quiet);
           } catch (e) {
@@ -205,6 +242,7 @@ export function recreate(
           }
         }
         if (
+          (caps.personModel?.installed && dna.shots.some((shot) => shot.subjectShape)) ||
           controls.subjectLayering === "behind-people" ||
           (controls.subjectLayering === "reference" &&
             (!!dna.personFlashes?.length || dna.text?.some(
@@ -251,6 +289,43 @@ export function recreate(
         warnings.push(
           "Word transcription requires an installed speech model or an existing transcript.",
         );
+      // Recreating the audio structure: measure the replacement and generate the linked sounds it lacks.
+      let musicAudio: AudioTimeline | undefined,
+        soundtrack: Asset | undefined,
+        referenceAperture: Awaited<ReturnType<typeof sourceAperture>> | undefined;
+      // Where the reference shows picture: its bars are reproduced, not filled with footage.
+      if (controls.format !== "vertical") {
+        try {
+          referenceAperture = await sourceAperture(reference, quiet);
+        } catch (e) {
+          await job.checkpoint();
+          warnings.push("The reference picture area could not be measured: " + String(e).slice(0, 160));
+        }
+      }
+      if (controls.audio === "reference" && reference.hasAudio) {
+        try {
+          soundtrack = await soundtrackAsset(reference);
+        } catch (e) {
+          await job.checkpoint();
+          warnings.push("The reference soundtrack could not be extracted: " + String(e).slice(0, 160));
+        }
+      }
+      const sounds: Partial<Record<SoundKind, Asset>> = {};
+      if (controls.audio === "recreate" && music && dna.audio && dna.eventGraph) {
+        try {
+          musicAudio = await audioTimeline(music);
+          if (musicAudio) {
+            const start = dna.shots[0]?.startMs ?? 0,
+              span = (dna.shots.at(-1)?.endMs ?? 0) - start;
+            const alignment = alignReplacement(dna.eventGraph, musicAudio, span, start);
+            for (const kind of new Set(plannedSounds(dna.eventGraph, dna.audio, musicAudio, alignment, start).map((s) => s.kind)))
+              sounds[kind] = await generatedSound(kind);
+          }
+        } catch (e) {
+          await job.checkpoint();
+          warnings.push("The replacement music could not be measured: " + String(e).slice(0, 160));
+        }
+      }
       stage(raw.length + 2, "Matching shots and building editable timeline");
       await job.checkpoint();
       const edit = buildRecreation(
@@ -264,6 +339,7 @@ export function recreate(
         beatMap,
         voice,
         voiceTranscript,
+        { reference: dna.audio, music: musicAudio, soundtrack, sounds, referenceAperture },
       );
       stage(total, "Ready to preview");
       return { ...edit, dna, warnings: [...edit.warnings, ...warnings] };

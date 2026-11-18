@@ -1,3 +1,38 @@
+## Resume after audio fidelity 3.0 — 18 November 2026
+
+Last commit: `5e1cfa2`. Nothing after it is committed. The tree holds two milestones:
+- the hidden-title / tone-curve milestone (next section);
+- the audio milestone at the top of `CURRENT_STATE.md`.
+
+`bin/supp-edit.exe` is built from this tree; `bin/supp-edit-before-audio.exe` is the previous build. Read "Audio fidelity and the shared audio/visual event clock" in `AI_ARCHITECTURE.md` first.
+
+Reproduce:
+1. Build: `npm run build`, then `cargo build -p supp-desktop --features tauri/custom-protocol`, then copy `target/debug/supp-edit.exe` to `bin/supp-edit.exe` with the app closed.
+2. Windows cases. Copy the `SOURCE.supp` first; the driver saves the copy in place.
+   - `node scripts/verify-native-focused.mjs COPY.supp OUT 0 7967 test-results/focus55/p2/review.txt --audio=reference` (reference soundtrack).
+   - The same with `--audio=recreate --exclude=probe-1` (supplied music restructured, squat withheld).
+   - `node scripts/verify-native-focused.mjs S1COPY.supp OUT 4000 12000 --audio=reference` with `test-results/audio3/s1-inventory/SOURCE.supp` (generated letterbox/lyric reference; focused intervals are at most 8 s).
+   - The driver refuses to start while a crash-recovery snapshot exists, and reattaches if its debugging page handle closes during Deliver.
+3. Measurements: `node scripts/measure-av-fidelity.mjs --reference=REF --render=OUT/render.mp4 --start=0 --end=7967 --mode=reference|recreate --out=OUT/av-metrics.json`.
+4. Side by side with switchable audio: `node scripts/compare-av.mjs REF 0 7967 OUT/render.mp4 OUT/compare-av.mp4`.
+5. Ground-truth corpus: `node scripts/make-reference-corpus.mjs DIR`, then `measure-av-fidelity.mjs --reference=X --render=X --truth=DIR/CASE/truth.json` for detector accuracy.
+6. Inspect a soundtrack: `node scripts/inspect-audio-events.mjs FILE [all]`.
+7. Offline plan check: `node scripts/verify-focused-reference.mjs test-results/fidelity2/55 test-results/fidelity-breakthrough/55/final/dna.json NEW_DIR 0 7967 test-results/focus55/p2/review.txt --audio=reference`.
+
+Next, by audible/visible effect: let recreate mode move an event to any replacement beat or onset when no same-family event is within reach (case 2: titles 29% on events against the reference's 73%); titles over dense backgrounds (S1 NEW HEIGHTS); the beat octave on short or vocal windows; drop detection (wrong on both generated cases); downbeats when bar accents are weak; recreated SFX loudness relative to the music; remove the empty default "Music" track when another audio mode carries the sound; drag (not only keys) for audio-event markers; transitions measured as events (the whip blur at 5 s is still a cut).
+
+## Resume after the hidden-title and tone-curve milestone — 18 November 2026
+
+Last commit: `5e1cfa2`. The working tree holds the verified milestone described at the top of `CURRENT_STATE.md`; `bin/supp-edit.exe` is built from it (previous builds: `bin/supp-edit-milestone1.exe`, `bin/supp-edit-before-focus.exe`).
+
+Reproduce:
+1. `node scripts/verify-native-focused.mjs COPY.supp OUT 0 7967 test-results/focus55/p2/review.txt` (copy `test-results/fidelity2/55/SOURCE.supp` first; remove assets from the copy to test another raw pool). Plays, edits a tone-curve level, and exports through Deliver.
+2. `node scripts/repeat-native-export.mjs PROJECT.supp OUT 4` repeats Deliver in one session.
+3. `bash test-results/focus55/p2/generalize.sh` (`ONLY="smart vertical"` to select) runs the harness matrix.
+4. `node scripts/measure-title-fidelity.mjs REFERENCE MOVIE DNA OUT` and `node scripts/compare-title-interval.mjs …` for measurements and sheets.
+
+Next, by visible effect: reconstruct titles in Smart Adaptation and Creative Remix from the same measurements (HONORABLE is cut there); extend the focused band to several lines for stacked layouts like reference 54; a sharper person contour for subject flashes; per-letter title motion; the directional-blur transition; a portrait framing option that crops wide shots around subject and equipment. Pose matching is a weak tie-breaker; do not raise its weight without better contours (a stronger weight picked an outdoor clip).
+
 ## Resume after the focused Windows verification — 17 November 2026
 
 The working tree holds the focused title reconstruction, verified through `bin/supp-edit.exe` (rebuilt from this tree). Nothing is committed yet; `ce71503` is still the last commit. Read the "Focused title reconstruction" section of `docs/REFERENCE_FIDELITY_BREAKTHROUGH.md` before changing fidelity code.

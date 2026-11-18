@@ -4,7 +4,7 @@ import type { JobContext } from "../../jobs";
 import { sourceUrl } from "../../platform";
 import { seekMedia } from "../../engine/seek-media";
 import { readDerived, writeDerived } from "../../platform/derived";
-import { frameTone, toneSampleSchema, type ToneSample } from "./tone";
+import { frameStripes, frameTone, toneSampleSchema, type ToneSample } from "./tone";
 
 /** Sampled tone of a local video, two frames a second. Cached by content fingerprint. */
 export async function sourceTone(
@@ -12,7 +12,7 @@ export async function sourceTone(
   job: Pick<JobContext, "checkpoint">,
   url?: string,
 ): Promise<ToneSample[]> {
-  const key = "source-tone-v1:" + asset.id + ":" + asset.fingerprint,
+  const key = "source-tone-v2:" + asset.id + ":" + asset.fingerprint,
     validate = z.array(toneSampleSchema).max(600);
   const cached = validate.safeParse(await readDerived(key).catch(() => undefined));
   if (cached.success && cached.data.length) return cached.data;
@@ -49,6 +49,7 @@ export async function sourceTone(
       samples.push({
         timeMs: Math.round(t * 1000),
         tone: frameTone(ctx.getImageData(0, 0, w, h).data, w, h, 4),
+        stripes: frameStripes(ctx.getImageData(0, 0, w, h).data, w, h, 4),
       });
     }
   } finally {

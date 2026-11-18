@@ -35,7 +35,7 @@ const frame = (file, ms) => {
 fs.mkdirSync(destination, { recursive: true });
 const vite = await createServer({ server: { middlewareMode: true, hmr: false, watch: null } });
 try {
-  const { negativeInk, titleStrokes, inkBounds } = await vite.ssrLoadModule("/packages/ai/reference/title-ink.ts");
+  const { negativeInk, distinctInk, titleStrokes, inkBounds } = await vite.ssrLoadModule("/packages/ai/reference/title-ink.ts");
   const { frameTone } = await vite.ssrLoadModule("/packages/ai/reference/tone.ts");
   const titles = (dna.text ?? []).filter((t) => t.content && t.role !== "persistent-overlay" && t.evidence?.status !== "uncertain");
   const rows = [],
@@ -51,7 +51,11 @@ try {
     band.width = Math.min(w, Math.ceil((cx + t.width * 0.75) * w)) - band.x;
     band.height = Math.min(h, Math.ceil((cy + t.height * 1.1) * h)) - band.y;
     const masks = [frame(reference, ms), frame(output, ms - offset)].map((data) => {
-      const ink = negativeInk(data, w, h, 3, band);
+      // A flat colored title is isolated by its concentrated color; white or difference lettering
+      // by its negative.
+      const rgb = [1, 3, 5].map((i) => parseInt((t.foreground ?? "#ffffff").slice(i, i + 2), 16));
+      const flat = !t.differenceInk && Math.max(...rgb) - Math.min(...rgb) >= 60;
+      const ink = flat ? distinctInk(data, w, h, 3, band) : negativeInk(data, w, h, 3, band);
       return titleStrokes(ink, band.width, band.height, cy * h - band.y, t.height * h * 0.5, Math.max(6, band.width * band.height * 0.0002));
     });
     let both = 0,
@@ -87,12 +91,20 @@ try {
           return { x: 0, y: Math.max(0, Math.floor(top * h)), width: w, height: Math.ceil((bottom - top) * h) };
         })()
       : undefined;
-    const [a, b] = [frameTone(frame(reference, ms), w, h, 3, skip), frameTone(frame(output, ms - offset), w, h, 3, skip)];
+    // Five frames spread across the shot (avoiding its first and last tenth), skipping any
+    // frame where the reference is in a full-frame color pulse.
+    const times = [0.1, 0.3, 0.5, 0.7, 0.9]
+      .map((q) => Math.round(shot.startMs + q * (shot.endMs - shot.startMs)))
+      .filter((t) => !(dna.colorPulses ?? []).some((p) => t >= p.startMs - 40 && t < p.endMs + 40));
+    const pairs = times.map((t) => [frameTone(frame(reference, t), w, h, 3, skip), frameTone(frame(output, t - offset), w, h, 3, skip)]);
+    const errors = pairs.map(([a, b]) => a.flat().reduce((s, v, i) => s + Math.abs(v - b.flat()[i]), 0) / 15);
+    const [a, b] = pairs[pairs.length >> 1];
     return {
       referenceMs: ms,
+      framesMs: times,
       reference: a,
       export: b,
-      meanAbsoluteLevels: Number((a.flat().reduce((s, v, i) => s + Math.abs(v - b.flat()[i]), 0) / 15).toFixed(2)),
+      meanAbsoluteLevels: Number((errors.reduce((s, v) => s + v, 0) / Math.max(1, errors.length)).toFixed(2)),
     };
   });
   const report = {
@@ -101,7 +113,7 @@ try {
     titles: rows,
     meanTitleOverlap: Number((rows.reduce((s, r) => s + r.overlap, 0) / Math.max(1, rows.length)).toFixed(3)),
     tone,
-    note: "Overlap is intersection over union of isolated lettering in the reference and export frames. Tone is the mean absolute difference of five per-channel percentiles on a 0-255 scale.",
+    note: "Overlap is intersection over union of isolated lettering in the reference and export frames. Tone is the mean absolute difference of five per-channel percentiles on a 0-255 scale, averaged over five frames per shot outside color pulses.",
   };
   fs.writeFileSync(path.join(destination, "title-fidelity.json"), JSON.stringify(report, null, 2));
   if (tiles.length) {

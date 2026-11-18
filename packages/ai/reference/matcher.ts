@@ -7,6 +7,7 @@ import {
 } from "./visual";
 import type { SourceEvidence } from "./planner";
 import { describeShots } from "./dna";
+import { shapeFit, shapeOver } from "./subject-shape";
 
 interface Range {
   source: SourceEvidence;
@@ -49,6 +50,8 @@ export function matchRange(
         score: number;
         timingCoverage: number;
         motion: number | null;
+        /** Each scoring term's contribution: why this range was chosen. */
+        terms: Record<string, number>;
       }
     | undefined;
   // An early trim can split the only take long enough for a later hold.
@@ -151,25 +154,33 @@ export function matchRange(
         ref.layout,
         measuredLayout(source.visual ?? [], t0, t1),
       );
-      const score =
-        (4 * length) / target +
-        visibility * 0.8 +
-        (visualFit === null ? 0.5 : (visualFit + 1) / 2) *
-          (mode === "Creative Remix" ? 0.3 : 1.2) +
-        (compositionFit ?? 0.5) * (mode === "Creative Remix" ? 0.25 : 0.8) +
-        (framing && ref.framing === framing ? 0.55 : 0) +
-        (sameSubject ? 0.3 : 0) +
-        motionFit * (mode === "Creative Remix" ? 0.2 : 0.9) +
-        (mode === "Creative Remix" ? action * 1.7 : 0) +
-        reserve * 0.8 -
-        (repeat ? 0.42 : 0) -
-        (continuous && !chronological ? 0.8 : 0);
+      // Pose: does the raw range show a person standing, bending or lying as the reference does?
+      const rangeShape =
+        ref.subjectShape && source.people?.length
+          ? shapeOver(source.people, t0, t1, source.asset.width / Math.max(1, source.asset.height))
+          : undefined;
+      const poseFit = ref.subjectShape && rangeShape ? shapeFit(ref.subjectShape, rangeShape) : null;
+      const terms: Record<string, number> = {
+        length: (4 * length) / target,
+        visibility: visibility * 0.8,
+        look: (visualFit === null ? 0.5 : (visualFit + 1) / 2) * (mode === "Creative Remix" ? 0.3 : 1.2),
+        composition: (compositionFit ?? 0.5) * (mode === "Creative Remix" ? 0.25 : 0.8),
+        framing: framing && ref.framing === framing ? 0.55 : 0,
+        subject: sameSubject ? 0.3 : 0,
+        pose: poseFit === null ? 0 : poseFit * (mode === "Creative Remix" ? 0.3 : 1.0),
+        motion: motionFit * (mode === "Creative Remix" ? 0.2 : 0.9),
+        action: mode === "Creative Remix" ? action * 1.7 : 0,
+        reserve: reserve * 0.8,
+        repeat: repeat ? -0.42 : 0,
+        continuity: continuous && !chronological ? -0.8 : 0,
+      };
+      const score = Object.values(terms).reduce((a, b) => a + b, 0);
       if (
         !best ||
         timingCoverage > best.timingCoverage ||
         (timingCoverage === best.timingCoverage && score > best.score)
       )
-        best = { range, first: start, length, score, timingCoverage, motion };
+        best = { range, first: start, length, score, timingCoverage, motion, terms: Object.fromEntries(Object.entries(terms).map(([k, v]) => [k, Number(v.toFixed(3))])) };
     }
   }
   return best;

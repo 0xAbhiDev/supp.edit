@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { keyframeSchema } from "../animation/schema";
+import { MAX_CURVE_POINTS, type CurveSet } from "./curves";
 import type { Project } from "../project-schema";
 export const effectTypes = [
   "blur",
@@ -11,6 +12,7 @@ export const effectTypes = [
   "grain",
   "vignette",
   "sharpen",
+  "curves",
 ] as const;
 export type EffectType = (typeof effectTypes)[number];
 export const effectInfo = {
@@ -41,12 +43,24 @@ export const effectInfo = {
     step: 0.02,
     initial: 0.1,
   },
+  curves: { label: "Tone curve", min: 0, max: 1, step: 0.01, initial: 1 },
 };
 export const grainParametersSchema = z
   .object({
     size: z.number().finite().min(0.5).max(8),
     softness: z.number().finite().min(0).max(1),
   })
+  .strict();
+const level = z.number().finite().min(0).max(1);
+const curvePoints = z
+  .array(z.tuple([level, level]))
+  .min(2)
+  .max(MAX_CURVE_POINTS)
+  .refine((points) => points.every((p, i) => !i || p[0] > points[i - 1][0]), {
+    message: "Curve points must increase in input level",
+  });
+export const curveParametersSchema = z
+  .object({ red: curvePoints, green: curvePoints, blue: curvePoints })
   .strict();
 export const effectSchema = z
   .object({
@@ -55,13 +69,19 @@ export const effectSchema = z
     enabled: z.boolean(),
     value: z.number().finite(),
     keys: z.array(keyframeSchema).max(1000).default([]),
-    parameters: grainParametersSchema.optional(),
+    parameters: z.union([grainParametersSchema, curveParametersSchema]).optional(),
   })
   .superRefine((e, ctx) => {
-    if (e.parameters && e.type !== "grain")
+    const curves = !!e.parameters && "red" in e.parameters;
+    if (e.parameters && !curves && e.type !== "grain")
       ctx.addIssue({
         code: "custom",
         message: "Grain parameters require a grain effect",
+      });
+    if (curves !== (e.type === "curves"))
+      ctx.addIssue({
+        code: "custom",
+        message: "A tone curve needs its curve points",
       });
     const { min, max } = effectInfo[e.type];
     if (
@@ -103,3 +123,11 @@ export function assertEffectStacks(p: Project) {
     }
   }
 }
+
+export type GrainParameters = z.infer<typeof grainParametersSchema>;
+/** Grain parameters of an effect, when it has them. */
+export const grainOf = (e: Pick<Effect, "parameters">): Partial<GrainParameters> =>
+  e.parameters && "size" in e.parameters ? e.parameters : {};
+/** Curve points of a tone curve effect, when it has them. */
+export const curvesOf = (e: Pick<Effect, "parameters">): CurveSet | undefined =>
+  e.parameters && "red" in e.parameters ? e.parameters : undefined;

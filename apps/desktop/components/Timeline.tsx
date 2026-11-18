@@ -47,11 +47,15 @@ import {
   useDerivedRevision,
 } from "../../../packages/platform";
 import { IconButton } from "./Controls";
+import { moveEvent } from "../../../packages/commands/reference-events";
 export function Timeline() {
   useDerivedRevision();
   const project = useEditor(editorProject),
     selected = useEditor((s) => s.selected),
     execute = useEditor((s) => s.executeScoped),
+    executeProject = useEditor((s) => s.execute),
+    activeComposition = useEditor((s) => s.activeComposition),
+    referenceEvents = useEditor((s) => s.project.compositions.find((c) => c.id === s.activeComposition)?.ai?.referenceEvents),
     select = useEditor((s) => s.select);
   const [zoom, setZoom] = useState(45),
     [snap, setSnap] = useState(true),
@@ -470,12 +474,34 @@ export function Timeline() {
                     :{(sec % 60).toString().padStart(2, "0")}
                   </span>
                 ))}
-              {project.markers.map((m) => (
+              {project.markers.map((m) => {
+                const event = referenceEvents?.find((e) => e.markerId === m.id);
+                return (
                 <button
-                  className="marker"
+                  className={event ? "marker audio-event" : "marker"}
                   key={m.id}
                   style={{ left: m.frame * px }}
-                  title={`${m.name} · double-click to delete`}
+                  aria-label={event ? `Audio event ${m.name}` : undefined}
+                  title={
+                    event
+                      ? `${m.name} · drives ${event.links.length} layer${event.links.length === 1 ? "" : "s"} · ← → move with linked layers, Alt+← → move the marker alone, Shift moves 10 frames · double-click to delete`
+                      : `${m.name} · double-click to delete`
+                  }
+                  onKeyDown={(e) => {
+                    if (!event || !activeComposition || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    executeProject(
+                      e.altKey ? "Move audio event marker" : "Move audio event with linked layers",
+                      moveEvent({
+                        tool: "sequence.moveEvent",
+                        sequenceId: activeComposition,
+                        markerId: m.id,
+                        frames: (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 10 : 1),
+                        linked: !e.altKey,
+                      }),
+                    );
+                  }}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -489,7 +515,8 @@ export function Timeline() {
                 >
                   <Flag size={12} />
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
           {project.tracks.map((track, index) => (

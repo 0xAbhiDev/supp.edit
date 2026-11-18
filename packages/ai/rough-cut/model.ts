@@ -46,6 +46,35 @@ export const aiEditMetadataSchema = z
       .max(512),
     warnings: z.array(z.string().max(1000)).max(64),
     generated: z.array(treatmentSchema).max(512).optional(),
+    /** Reference audio events placed as markers, and the layers each one drives. */
+    referenceEvents: z
+      .array(
+        z
+          .object({
+            markerId: z.string().min(1).max(128),
+            anchorKind: z.string().min(1).max(32),
+            anchorMs: z.number().int().nonnegative(),
+            confidence: z.number().min(0).max(1),
+            links: z
+              .array(
+                z
+                  .object({
+                    layerId: z.string().min(1).max(128),
+                    visual: z.string().min(1).max(32),
+                    relation: z.enum(["on", "before", "after", "offbeat"]),
+                    offsetMs: z.number().int().min(-10000).max(10000),
+                  })
+                  .strict(),
+              )
+              .max(16),
+          })
+          .strict(),
+      )
+      .max(2000)
+      .optional(),
+    /** Which audio the plan used and why. */
+    audioMode: z.enum(["music", "reference", "recreate"]).optional(),
+    audioNotes: z.array(z.string().max(400)).max(64).optional(),
   })
   .strict();
 export type AIEditMetadata = z.infer<typeof aiEditMetadataSchema>;

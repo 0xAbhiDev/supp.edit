@@ -2,9 +2,10 @@ import { z } from "zod";
 import {
   backgroundFillSchema,
   subjectLayerSchema,
-  referenceLayer, plateTintSchema, referencePlateTint,
+  referenceLayer, plateTintSchema, referencePlateTint, tracedTitleSchema, referenceTracedTitle,
 } from "../../commands/reference-layers";
 import { addColorPulse, colorPulseSchema } from "../../commands/color-pulse";
+import { addAsset, addLetterbox, assetAddSchema, letterboxSchema, moveEvent, moveEventSchema } from "../../commands/reference-events";
 import {
   referenceTransitionSchema,
   addReferenceTransition,
@@ -31,6 +32,7 @@ import {
   effectTypes,
   effectInfo,
   grainParametersSchema,
+  curveParametersSchema,
 } from "../../effects/model";
 import { properties, propertyNames } from "../../animation";
 import { transcriptSchema } from "../transcript";
@@ -65,7 +67,7 @@ const id = z.string().min(1).max(128),
 export const toolCallSchema = z.discriminatedUnion("tool", [
   backgroundFillSchema,
   subjectLayerSchema,
-  colorPulseSchema, plateTintSchema,
+  colorPulseSchema, plateTintSchema, tracedTitleSchema, assetAddSchema, moveEventSchema, letterboxSchema,
   typographyCommandSchema,
   referenceTransitionSchema,
   typographyCommandSchema
@@ -178,7 +180,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       effectId: id,
       type: z.enum(effectTypes),
       value,
-      parameters: grainParametersSchema.optional(),
+      parameters: z.union([grainParametersSchema, curveParametersSchema]).optional(),
     })
     .strict(),
   z
@@ -237,7 +239,7 @@ export const toolCallSchema = z.discriminatedUnion("tool", [
       effectId: id,
       type: z.enum(effectTypes),
       value,
-      parameters: grainParametersSchema.optional(),
+      parameters: z.union([grainParametersSchema, curveParametersSchema]).optional(),
     })
     .strict(),
   z
@@ -378,6 +380,10 @@ function range(v: number, min: number, max: number) {
 export function toolEdit(input: unknown): Edit {
   const call = toolCallSchema.parse(input);
   if(call.tool==="sequence.plateTint") return inComposition(call.sequenceId,referencePlateTint(call));
+  if (call.tool === "sequence.tracedTitle") return inComposition(call.sequenceId, referenceTracedTitle(call));
+  if (call.tool === "asset.add") return addAsset(call);
+  if (call.tool === "sequence.moveEvent") return moveEvent(call);
+  if (call.tool === "sequence.letterbox") return inComposition(call.sequenceId, addLetterbox(call));
   if (call.tool === "sequence.colorPulse")
     return inComposition(call.sequenceId, addColorPulse(call));
   if (

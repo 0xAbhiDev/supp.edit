@@ -9,7 +9,16 @@ const level = z.number().finite().min(0).max(255);
 /** RGB at the 3rd, 25th, 50th, 75th and 97th percentile of each channel. */
 export const toneSchema = z.array(z.array(level).length(3)).length(5);
 export type Tone = z.infer<typeof toneSchema>;
-export const toneSampleSchema = z.object({ timeMs: z.number().int().nonnegative(), tone: toneSchema }).strict();
+export const STRIPES = 8,
+  TONE_BINS = 32;
+/** Per vertical stripe, per channel, a coarse histogram: lets the tone of any horizontal span
+ * of the frame be recovered later, once framing has decided which part is shown. */
+const stripesSchema = z
+  .array(z.array(z.array(z.number().int().nonnegative()).length(TONE_BINS)).length(3))
+  .length(STRIPES);
+export const toneSampleSchema = z
+  .object({ timeMs: z.number().int().nonnegative(), tone: toneSchema, stripes: stripesSchema.optional() })
+  .strict();
 export type ToneSample = z.infer<typeof toneSampleSchema>;
 
 export function frameTone(
@@ -92,4 +101,45 @@ export function castTreatment(source: Tone, target: Tone, mix = 1) {
     strength: k,
     predicted: [through(source[2]), through(source[4])],
   };
+}
+
+export function frameStripes(data: Uint8Array | Uint8ClampedArray, w: number, h: number, channels: 3 | 4) {
+  const out = Array.from({ length: STRIPES }, () => [0, 1, 2].map(() => new Array<number>(TONE_BINS).fill(0)));
+  for (let y = 0; y < h; y += 2)
+    for (let x = y % 4 ? 1 : 0; x < w; x += 2) {
+      const stripe = Math.min(STRIPES - 1, Math.floor((x * STRIPES) / w)),
+        i = (y * w + x) * channels;
+      for (let c = 0; c < 3; c++) out[stripe][c][data[i + c] >> 3]++;
+    }
+  return out;
+}
+
+/** Percentiles of the span [left, right) of the frame width (0–1), from stripe histograms.
+ * Partly covered stripes count in proportion; levels interpolate within a bin. */
+export function spanTone(samples: { stripes?: number[][][] }[], left: number, right: number): Tone | undefined {
+  const hist = [0, 1, 2].map(() => new Array<number>(TONE_BINS).fill(0));
+  let used = 0;
+  for (const sample of samples) {
+    if (!sample.stripes) continue;
+    used++;
+    sample.stripes.forEach((stripe, k) => {
+      const a = k / STRIPES,
+        b = (k + 1) / STRIPES,
+        weight = Math.max(0, Math.min(b, right) - Math.max(a, left)) * STRIPES;
+      if (weight > 0) for (let c = 0; c < 3; c++) for (let v = 0; v < TONE_BINS; v++) hist[c][v] += stripe[c][v] * weight;
+    });
+  }
+  if (!used) return;
+  return TONE_QUANTILES.map((q) =>
+    hist.map((bins) => {
+      const total = bins.reduce((t, v) => t + v, 0),
+        want = q * total;
+      let seen = 0;
+      for (let v = 0; v < TONE_BINS; v++) {
+        if (seen + bins[v] >= want && bins[v] > 0) return Math.min(255, (v + (want - seen) / bins[v]) * (256 / TONE_BINS));
+        seen += bins[v];
+      }
+      return 255;
+    }),
+  );
 }

@@ -7,16 +7,20 @@ import {sourceUrl} from "../../platform";
 import {seekMedia} from "../../engine/seek-media";
 import {inspectTitleFrame,titleBand,type InkFrame} from "./title-surface";
 import {chromaTitles} from "./focus-titles";
-import {negativeInk} from "./title-ink";
+import {negativeInk,distinctInk,plateColors,personCover} from "./title-ink";
 import {inkTitles,COLOR_STRIDE,type InkFrame as InkSampleFrame} from "./ink-titles";
 import {frameTone,medianTone,type Tone} from "./tone";
+import {annotateSubjects} from "./subject-shape";
 import {restrictReference,type ReferenceInterval} from "./interval";
 
 export { restrictReference, type ReferenceInterval } from "./interval";
 
 export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterval,people:PersonSample[],transcript:Transcript|undefined,job:Pick<JobContext,"checkpoint">,url?:string,reviewText=""){
   const focused=restrictReference(dna,range), seeds=focused.text??[];
-  const seed=seeds.filter(t=>t.role!=="persistent-overlay" && t.evidence?.status!=="uncertain" && t.content).sort((a,b)=>b.width-a.width)[0];
+  // Only the band's position comes from OCR here, not its words: an uncertain observation of
+  // lettering may anchor it when nothing in the interval was read with confidence.
+  const lettering=seeds.filter(t=>t.role!=="persistent-overlay" && t.content);
+  const seed=[...lettering.filter(t=>t.evidence?.status!=="uncertain"),...lettering].sort((a,b)=>Number(a.evidence?.status==="uncertain")-Number(b.evidence?.status==="uncertain")||b.width-a.width)[0];
   if(!seed) return {dna:focused,warnings:["No confirmed title band in the selected interval."]};
   const video=document.createElement("video"), canvas=document.createElement("canvas");
   video.muted=true;video.preload="auto";video.crossOrigin="anonymous";
@@ -25,9 +29,15 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
   if(!ctx)throw Error("Decoded title analysis needs a readable canvas.");
   const frames:InkFrame[]=[];
   // Full-resolution negative-ink evidence beside the earlier chroma measurements.
-  const band=titleBand(seed,w,h), inks:InkSampleFrame[]=[], tones:{shot:number;tone:Tone}[]=[];
+  // Titles share a center line but not a width: a long word can span the whole frame.
+  const tall=titleBand(seed,w,h), band={x:Math.floor(w*.01),y:tall.y,width:w-2*Math.floor(w*.01),height:tall.height};
+  const inks:InkSampleFrame[]=[], tones:{shot:number;tone:Tone}[]=[];
   const overlays=seeds.filter(t=>t.role==="persistent-overlay").map(t=>({x:Math.floor((t.x-t.width*.15)*w)-band.x,y:Math.floor((t.y-t.height*.3)*h)-band.y,right:Math.ceil((t.x+t.width*1.15)*w)-band.x,bottom:Math.ceil((t.y+t.height*1.3)*h)-band.y}));
   const cw=Math.ceil(band.width/COLOR_STRIDE), ch=Math.ceil(band.height/COLOR_STRIDE);
+  const label=new Uint8Array(band.width*band.height);
+  for(const o of overlays)for(let y=Math.max(0,o.y);y<Math.min(band.height,o.bottom);y++)label.fill(1,y*band.width+Math.max(0,Math.min(band.width,o.x)),y*band.width+Math.max(0,Math.min(band.width,o.right)));
+  // Band pixels inside a person contour, widened slightly: the measured outline is low resolution.
+  const coverOf=(p:PersonSample|undefined,timeMs:number)=>!p?.points.length||Math.abs(p.timeMs-timeMs)>100?undefined:personCover(p.points,band,w,h,Math.max(2,Math.round(w*.008)));
   const rate=Math.min(60,asset.fps||30);
   try{
     const src=url??await sourceUrl(asset);
@@ -49,19 +59,23 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
       const mask=visible.reduce<PersonSample|undefined>((a,b)=>!a||Math.abs(b.timeMs-timeMs)<Math.abs(a.timeMs-timeMs)?b:a,undefined);
       const data=ctx.getImageData(0,0,w,h).data, inspected=inspectTitleFrame(data,w,h,4,seed,timeMs,mask);
       frames.push(inspected);
-      const ink=negativeInk(data,w,h,4,band);
-      // A recurring handle or logo is not part of the title.
-      for(const o of overlays)for(let y=Math.max(0,o.y);y<Math.min(band.height,o.bottom);y++)ink.fill(0,y*band.width+Math.max(0,Math.min(band.width,o.x)),y*band.width+Math.max(0,Math.min(band.width,o.right)));
+      // White lettering composited in difference mode, or a flat colored fill.
+      const plate=plateColors(data,w,h,4,band), ink=negativeInk(data,w,h,4,band,plate);
+      // A flat subject flash is itself a concentrated color; only negative ink is read over it.
+      const flat=inspected.flash?undefined:distinctInk(data,w,h,4,band,plate);
+      for(let k=0;k<ink.length;k++)if(label[k]){ink[k]=0;if(flat)flat[k]=0;}
       const colors=new Uint8Array(cw*ch*3);
       for(let y=0;y<ch;y++)for(let x=0;x<cw;x++){
         const from=((band.y+y*COLOR_STRIDE)*w+band.x+x*COLOR_STRIDE)*4, to=(y*cw+x)*3;
         colors[to]=data[from];colors[to+1]=data[from+1];colors[to+2]=data[from+2];
       }
       const shot=focused.shots.findIndex(q=>timeMs>=q.startMs&&timeMs<q.endMs);
-      inks.push({timeMs,mask:ink,colors,shot,flash:!!inspected.flash,pulsed:focused.colorPulses.some(q=>timeMs>=q.startMs&&timeMs<q.endMs)});
+      const person=coverOf(mask,timeMs);
+      inks.push({timeMs,mask:ink,flat:flat??new Uint8Array(ink.length),colors,shot,flash:!!inspected.flash,pulsed:focused.colorPulses.some(q=>timeMs>=q.startMs&&timeMs<q.endMs),label,...(person?{person}:{})});
       if(!inspected.flash)tones.push({shot,tone:frameTone(data,w,h,4,band)});
     }
   }finally{video.removeAttribute("src");video.load();}
+  annotateSubjects(focused,people,asset.width/Math.max(1,asset.height));
   focused.shots.forEach((shot,index)=>{
     // The median frame is unaffected by a brief full-frame pulse.
     const tone=medianTone(tones.filter(t=>t.shot===index).map(t=>t.tone));
@@ -82,7 +96,15 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
     return {timeMs,content:m[2]};
   });
   const cy=(seed.y+seed.height/2)*h-band.y;
-  const read=await inkTitles({samples:inks,band,frame:{w,h},endMs:range.endMs,centerY:cy,reach:seed.height*h*.43,seeds,transcript,reviews});
+  // White and difference lettering, then flat colored lettering, each from its own evidence.
+  // Moving skin or clothing can look like a concentrated color; mixing the two would let it
+  // damage the white words. The first pass wins where both read something at the same time.
+  const common={band,frame:{w,h},endMs:range.endMs,centerY:cy,reach:seed.height*h*.43,seeds,transcript,reviews};
+  const white=await inkTitles({...common,samples:inks});
+  const colored=await inkTitles({...common,samples:inks.map(f=>({...f,mask:f.flat!}))});
+  const during=(a:{startMs:number;endMs:number},b:{startMs:number;endMs:number})=>Math.min(a.endMs,b.endMs)-Math.max(a.startMs,b.startMs)>(b.endMs-b.startMs)*.3;
+  const titles=[...white.titles,...colored.titles.filter(t=>!white.titles.some(q=>during(q,t)))];
+  const read={titles,unread:[...white.unread,...colored.unread].filter(u=>!titles.some(t=>during(t,u))),notes:[...white.notes,...colored.notes]};
   let measured=read.titles;
   // Lettering the negative model cannot isolate (a flat colored fill) keeps the chroma-band reading.
   const chroma=(await chromaTitles(frames,range.endMs,seeds,w/h,transcript,reviews)).filter(c=>!measured.some(m=>Math.min(m.endMs,c.endMs)-Math.max(m.startMs,c.startMs)>(c.endMs-c.startMs)*.3));
@@ -97,8 +119,8 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
     if(last && last.endMs===f.timeMs && [1,3,5].every(c=>Math.abs(parseInt(last.color.slice(c,c+2),16)-parseInt(f.flash!.slice(c,c+2),16))<=5))last.endMs=end;
     else flashes.push({startMs:f.timeMs,endMs:end,color:f.flash});
   }
-  return {dna:{...focused,text:[...preserved,...measured].sort((a,b)=>a.startMs-b.startMs),personFlashes:flashes},warnings:[...(measured.length?[]:["Dense title analysis could not corroborate additional lettering."]),
+  return {dna:{...focused,text:[...preserved,...measured].sort((a,b)=>a.startMs-b.startMs),personFlashes:flashes},warnings:[...(measured.length?[]:["Dense title analysis could not corroborate additional lettering."]),...read.notes,
     // Name the moments rather than guess the words; the reviewer can supply them.
-    ...(read.unread.filter(u=>!measured.some(m=>m.startMs<u.endMs&&m.endMs>u.startMs)).length?["Lettering at "+read.unread.filter(u=>!measured.some(m=>m.startMs<u.endMs&&m.endMs>u.startMs)).map(u=>(u.startMs/1000).toFixed(2)+"–"+(u.endMs/1000).toFixed(2)+" s").join(", ")+" was isolated but not read with enough evidence. Enter it under visually reviewed words to include it."]:[])]};
+    ...read.unread.filter(u=>!measured.some(m=>m.startMs<u.endMs&&m.endMs>u.startMs)).map(u=>"Lettering at "+(u.startMs/1000).toFixed(2)+"–"+(u.endMs/1000).toFixed(2)+" s was isolated but not read with enough evidence"+(u.hints.length?" ("+u.hints.join("; ")+")":"")+". Enter it under visually reviewed words to include it.")]};
 }
 

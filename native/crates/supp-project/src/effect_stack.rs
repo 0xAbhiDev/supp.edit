@@ -9,6 +9,25 @@ pub struct GrainParameters {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct CurveParameters {
+    pub red: Vec<[f64; 2]>,
+    pub green: Vec<[f64; 2]>,
+    pub blue: Vec<[f64; 2]>,
+}
+/// Grain and tone-curve effects carry different parameter shapes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EffectParameters {
+    Grain(GrainParameters),
+    Curves(CurveParameters),
+}
+fn valid_curve(points: &[[f64; 2]]) -> bool {
+    (2..=8).contains(&points.len())
+        && points.iter().all(|p| range(p[0], 0., 1.) && range(p[1], 0., 1.))
+        && points.windows(2).all(|w| w[0][0] < w[1][0])
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Effect {
     pub id: String,
     #[serde(rename = "type")]
@@ -18,7 +37,7 @@ pub struct Effect {
     #[serde(default)]
     pub keys: Vec<Keyframe>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<GrainParameters>,
+    pub parameters: Option<EffectParameters>,
 }
 pub fn validate(stack: &[Effect], visual: bool) -> Result<(), Error> {
     ensure(
@@ -39,6 +58,7 @@ pub fn validate(stack: &[Effect], visual: bool) -> Result<(), Error> {
                 "grain",
                 "vignette",
                 "sharpen",
+                "curves",
             ]
             .contains(&e.kind.as_str()),
             "Unknown effect type",
@@ -47,20 +67,26 @@ pub fn validate(stack: &[Effect], visual: bool) -> Result<(), Error> {
             "blur" => (0., 100.),
             "grain" => (0., 0.2),
             "vignette" => (0., 0.8),
-            "sharpen" => (0., 1.),
+            "sharpen" | "curves" => (0., 1.),
             "temperature" => (-1., 1.),
             "tonalContrast" => (0.5, 1.5),
             "saturation" => (0., 8.),
             _ => (0., 3.),
         };
         ensure(range(e.value, min, max), "Invalid effect value")?;
-        if let Some(parameters) = &e.parameters {
-            ensure(
-                e.kind == "grain"
-                    && range(parameters.size, 0.5, 8.)
-                    && range(parameters.softness, 0., 1.),
+        match &e.parameters {
+            Some(EffectParameters::Grain(p)) => ensure(
+                e.kind == "grain" && range(p.size, 0.5, 8.) && range(p.softness, 0., 1.),
                 "Invalid grain parameters",
-            )?;
+            )?,
+            Some(EffectParameters::Curves(c)) => ensure(
+                e.kind == "curves"
+                    && valid_curve(&c.red)
+                    && valid_curve(&c.green)
+                    && valid_curve(&c.blue),
+                "Invalid tone curve",
+            )?,
+            None => ensure(e.kind != "curves", "A tone curve needs its curve points")?,
         }
         let mut times = HashSet::new();
         ensure(
@@ -93,6 +119,29 @@ pub fn validate(stack: &[Effect], visual: bool) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tone_curves_require_ordered_points_and_their_own_parameters() {
+        let curve = |red: serde_json::Value| -> Vec<Effect> {
+            serde_json::from_value(serde_json::json!([{
+                "id": "tone", "type": "curves", "enabled": true, "value": 1.0,
+                "parameters": {"red": red, "green": [[0.0, 0.0], [1.0, 1.0]], "blue": [[0.0, 0.05], [0.5, 0.4], [1.0, 0.9]]}
+            }]))
+            .unwrap()
+        };
+        assert!(validate(&curve(serde_json::json!([[0.0, 0.02], [0.3, 0.1], [1.0, 0.6]])), true).is_ok());
+        assert!(validate(&curve(serde_json::json!([[0.5, 0.2], [0.3, 0.1]])), true).is_err());
+        assert!(validate(&curve(serde_json::json!([[0.0, 1.5], [1.0, 1.0]])), true).is_err());
+        let missing: Vec<Effect> = serde_json::from_value(serde_json::json!([
+            {"id": "tone", "type": "curves", "enabled": true, "value": 1.0}
+        ]))
+        .unwrap();
+        assert!(validate(&missing, true).is_err());
+        let grain_on_curve: Vec<Effect> = serde_json::from_value(serde_json::json!([
+            {"id": "tone", "type": "curves", "enabled": true, "value": 1.0, "parameters": {"size": 1.0, "softness": 0.5}}
+        ]))
+        .unwrap();
+        assert!(validate(&grain_on_curve, true).is_err());
+    }
     use crate::{read, save, Project};
     #[test]
     fn finishing_effects_preserve_parameters_and_reject_invalid_ranges() {
@@ -113,9 +162,13 @@ mod tests {
             serde_json::to_value(read(&file).unwrap()).unwrap(),
             serde_json::to_value(&p).unwrap()
         );
-        p.clips[0].effect_stack[2].parameters.as_mut().unwrap().size = 0.;
+        if let Some(EffectParameters::Grain(g)) = p.clips[0].effect_stack[2].parameters.as_mut() {
+            g.size = 0.;
+        }
         assert!(p.validate().is_err());
-        p.clips[0].effect_stack[2].parameters.as_mut().unwrap().size = 2.4;
+        if let Some(EffectParameters::Grain(g)) = p.clips[0].effect_stack[2].parameters.as_mut() {
+            g.size = 2.4;
+        }
         p.clips[0].effect_stack[2].value = 0.3;
         assert!(p.validate().is_err());
     }

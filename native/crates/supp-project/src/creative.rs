@@ -79,6 +79,24 @@ pub struct Evidence {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventLink {
+    pub layer_id: String,
+    pub visual: String,
+    pub relation: String,
+    pub offset_ms: i64,
+}
+/// A reference audio event placed as a marker, and the generated layers it drives.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReferenceEvent {
+    pub marker_id: String,
+    pub anchor_kind: String,
+    pub anchor_ms: u64,
+    pub confidence: f64,
+    pub links: Vec<EventLink>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AiEditMetadata {
     pub planner_version: String,
     pub created_at: String,
@@ -87,10 +105,40 @@ pub struct AiEditMetadata {
     pub warnings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generated: Option<Vec<crate::generated::Treatment>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_events: Option<Vec<ReferenceEvent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_notes: Option<Vec<String>>,
 }
 impl AiEditMetadata {
     pub fn validate(&self) -> Result<(), Error> {
         let b = &self.brief;
+        if let Some(events) = &self.reference_events {
+            ensure(
+                events.len() <= 2000
+                    && events.iter().all(|e| {
+                        crate::valid_id(&e.marker_id)
+                            && (1..=32).contains(&e.anchor_kind.len())
+                            && e.anchor_ms <= 2_000_000_000
+                            && (0. ..=1.).contains(&e.confidence)
+                            && e.links.len() <= 16
+                            && e.links.iter().all(|l| {
+                                crate::valid_id(&l.layer_id)
+                                    && (1..=32).contains(&l.visual.len())
+                                    && ["on", "before", "after", "offbeat"].contains(&l.relation.as_str())
+                                    && (-10000..=10000).contains(&l.offset_ms)
+                            })
+                    }),
+                "Invalid reference event links",
+            )?;
+        }
+        ensure(
+            self.audio_mode.as_deref().is_none_or(|m| ["music", "reference", "recreate"].contains(&m))
+                && self.audio_notes.as_ref().is_none_or(|n| n.len() <= 64 && n.iter().all(|s| s.chars().count() <= 400)),
+            "Invalid audio plan notes",
+        )?;
         if let Some(values) = &self.generated {
             crate::generated::validate(values)?;
         }

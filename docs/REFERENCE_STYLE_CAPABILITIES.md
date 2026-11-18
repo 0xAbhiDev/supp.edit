@@ -1,5 +1,64 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**18 November audio fidelity (3.0).** References now carry a measured audio timeline and an audio/visual event graph on one millisecond clock (see `AI_ARCHITECTURE.md`). There are three audio modes: supplied music, the reference soundtrack as an editable clip, and the reference's audio structure recreated on supplied music with generated effects.
+
+### Detector accuracy on generated ground truth
+
+`scripts/make-reference-corpus.mjs` generates two structurally different references from ffmpeg generators and synthesised sound; nothing is downloaded or copyrighted:
+- **S1**: 1280 × 720 letterbox, 96 BPM, sung syllables as word captions, a whoosh into a title, one offbeat cut, one cut 66 ms after an impact, a silence.
+- **S2**: 720 × 1280, 128 BPM, a cut every two beats, white flashes on impacts, a riser into a drop, titles on downbeats.
+
+Scores come from `scripts/measure-av-fidelity.mjs --truth` (`test-results/audio3/corpus/*/self-metrics.json`):
+
+| Category | S1 | S2 |
+| --- | --- | --- |
+| Beats (±70 ms) | F 0.97, median error 25 ms | F 0.98, 24 ms |
+| Tempo (median) | 96.8 BPM (truth 96) | 127.7 BPM (truth 128) |
+| Downbeats | none reported (phase evidence below threshold) | 6/6 |
+| Impacts (±50 ms) | 1/1, no false impacts | 2/2, no false impacts |
+| Sweep peak (±150 ms) | 1/1, 0 ms | 1/1, 100 ms |
+| Silence edges (±120 ms) | 2/2, median 26 ms (plus the real trailing silence) | – |
+| Drops | 1 false (music re-entering after the silence) | wrong: reported at the first impact, missed at the riser climax |
+| Cuts / flashes from pixels | 4/4, 0 ms | 10/10 and 2/2, 0 ms |
+| Cut relation to audio (event graph vs. how the cut was placed) | 4/4 (on, offbeat, on sweep peak, after impact) | 10/10 |
+
+Before this pass, the same corpus exposed four errors:
+- S1 tempo was doubled (193 BPM), because the off-beat hats were tracked as beats.
+- Five sung notes that started on a kick were called impacts.
+- The whoosh was compared at its tail, not its peak.
+- A track that simply ended was called a fade.
+
+Flatness, the octave check, sub-band ring and gradual-fade tests fixed these.
+
+### Windows application cases
+
+Each case below runs in the rebuilt `bin/supp-edit.exe`, driven through its own interface by `scripts/verify-native-focused.mjs`: preview with audio evidence, Apply, Undo, Redo, save, exit, reopen, playback in the program monitor, an Inspector edit, then Deliver. Results are in `test-results/audio3/native/<case>/`: `native-verification.json`, screenshots, `render.mp4`, `compare-av.mp4` (side by side, audio track 1 the recreation, track 2 the reference) and `av-metrics.json`.
+
+**Case 1: reference 55, original raw pool, reference audio (0–7.967 s).**
+- *Plan:* the soundtrack is extracted to its own WAV asset on a "Reference audio" track at Source In 0, the reference video never enters the timeline, and 18 audio-event markers drive 22 layers.
+- *Export audio against the reference:* loudness-envelope correlation 1.00, mean level −0.03 dB, lag 0 ms, drift 0 ms, beats F 1.00, onsets F 0.94. One of 4 reference transients is not re-detected in the export.
+- *Pixel cuts:* F 0.95, median error 0 ms.
+- *The edit's own events (layer times) against its exported audio:* both cuts on an audio event, 57% of title entrances, 1 of 2 pulses; median offset 23 ms.
+- *Repeatability:* the export from the final build is byte-identical to the export from the build before it.
+
+**Case 2: reference 55, squat withheld, recreate audio structure on `music.wav`.**
+- *Plan:* the music is offset 3.48 s, and 20 linked events move onto replacement events (largest shift 140 ms) while 8 keep their reference time. A riser (trimmed from its start so it peaks on its event) and a bass hit are generated as WAV assets on "Recreated SFX"; both are audible in the export: a −5.8 / −10.3 dB peak against −20.6 dB music-only.
+- *How the edit's own events (layer times) relate to the exported audio:* 1 of 2 cuts on an audio event, 29% of title entrances (the reference has 73% on its own soundtrack), pulses one after and one offbeat. The replacement is 120 BPM against the reference's 160, and events only move to a same-family event within 150 ms, so the structure transfers only partly. This is a measured shortfall, not a pass.
+
+**Case 3: generated reference S1, letterbox and lyric captions, reference audio (4.0–12.0 s; focused reconstruction accepts at most 8 s).**
+- *App analysis of S1:* 4 measured shots (0.7 / 1.0 / 3.4 / 2.9 s, matching the placed cuts), 92–98 BPM (truth 96), one whoosh, one impact, two silences. Cut grammar: one on the sweep peak, one after the impact, one offbeat, exactly as placed.
+- *Plan:* the reference content box is measured, bars are reproduced on "Letterbox · top" and "Letterbox · bottom" tracks with footage covering the box, the soundtrack starts at Source In 4.000 s, and 3 audio-event markers drive 3 layers.
+- *Export audio against the reference:* onsets, beats and transients F 1.00; loudness correlation 1.00; +0.18 dB; lag 0 ms; drift 0 ms. Pixel cuts 3/3 within a frame.
+- *The edit's own events against its exported audio:* the cut on the sweep peak (0 ms), the cut after the impact (+77 ms; placed +67 ms), the caption "tonight" on a kick.
+- *Not reproduced:* the NEW HEIGHTS title over the dense cellular-automaton picture, and the caption "fall", which was flagged for review with OCR's partial reading rather than guessed.
+- *Detector fragility:* the metric script re-analyses only the 8 s excerpt, and there the tracker doubles to 194 BPM; the app's analysis of the whole 12 s gives 92–98 BPM. The octave check is not yet robust on short, vocal-heavy windows.
+
+**Process notes.**
+- The first case 2 run failed its single-value assertion. Playback started near the end and looped, so a timeline click landed on a track's mute button. The driver now starts from frame 0 and confirms the pause.
+- A force-closed run left a crash-recovery snapshot that the next launch restored. The driver now refuses to start when one exists.
+- One Deliver run stayed on "Rendering…" after the file was complete. The front end awaited media cleanup (`AudioContext.close()`) indefinitely; cleanup now has a bounded wait.
+- In the final case 3 run the app reported "Export complete · 35.8 s", but the driver lost its debugging page handle. The step is recorded from the reattached window, and the driver now reattaches by itself.
+
 **16 November fidelity increment (not style acceptance).** Both supplied gym references now have actual 1080 × 1920 Windows Close Match exports in `test-results/fidelity-breakthrough/{54,55}/final`. Every frame decodes; permitted raw sources only, no detected black frames or dark side bars, and zero measured music lag in three windows. Measured installed-font ink geometry places text within the foreground footage. Cast-aware OCR recovers YOU, CANNOT and REASON in the second reference, and conservative depth analysis correctly leaves REASON in front. Missing ornate words, coarse timing, excessive background blur, subject scale and green-tinted grading remain failures. See `REFERENCE_FIDELITY_BREAKTHROUGH.md` for before/after diagnostics and mode-specific verification; no overall similarity percentage is claimed.
 
 **14 November portrait evidence.** The first supplied gym Reel produced an eight-shot 1080 × 1920 Close Match Windows export. All 506 frames decode with audible AAC, no fully black frames, no detected dark side bars and at most 8.34 ms cut-start error. The render graph contains only the selected raw footage and supplied music. Frame 340 confirms removal of the baked squat letterbox. Inspect `test-results/fidelity2/54/windows-close/{render.mp4,comparison.json,comparison.png,frame-340.png}`. The blurred background preserves the visible exercise equipment but differs substantially from the reference composition.

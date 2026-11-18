@@ -273,8 +273,11 @@ export class ResourcePool {
     this.frames.clear();
     this.releaseFrames();
     for (const [key, e] of this.entries) this.remove(key, e);
-    await this.context?.close();
+    // AudioContext.close() can stay pending in the desktop web view (observed after a completed
+    // Deliver export); releasing resources must not wait on it indefinitely.
+    const closing = this.context?.close().catch(() => {});
     this.context = null;
+    await Promise.race([closing, new Promise((resolve) => setTimeout(resolve, 2000))]);
     this.limiter = null;
   }
 }

@@ -4,6 +4,18 @@ const glyph = z.array(z.number().int().min(0).max(0xffffffff)).length(16);
 export const appearanceSchema = z
   .object({
     differenceInk: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+    /** Measured baseline angle in degrees, clockwise; x/y/width/height describe the unrotated box. */
+    rotation: z.number().finite().min(-45).max(45).optional(),
+    /** Traced lettering in normalized frame coordinates, for words no installed face resembles. */
+    outline: z
+      .array(
+        z
+          .object({ hole: z.boolean(), points: z.array(z.tuple([unit, unit])).min(3).max(128) })
+          .strict(),
+      )
+      .min(1)
+      .max(32)
+      .optional(),
     startMs: z.number().int().nonnegative(),
     templateRows: glyph.optional(),
     depth: z

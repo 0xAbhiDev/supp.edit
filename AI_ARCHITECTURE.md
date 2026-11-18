@@ -1,5 +1,34 @@
 # Reference-to-Edit
 
+## Audio fidelity and the shared audio/visual event clock (3.0)
+
+**One clock.** `packages/ai/audio/features.ts` decodes any soundtrack (natively through `decode_audio_pcm` in the desktop app, through Web Audio elsewhere) to 22.05 kHz stereo and measures it every 10 ms: RMS (mono, left, right, side), log energy and half-wave spectral flux in five bands (sub < 120 Hz, low, mid, high, air), spectral centroid, and spectral flatness between 300 Hz and 8 kHz. Reference visual analysis already reports milliseconds of the same file, so every audio and visual event shares one millisecond clock.
+
+**Typed audio timeline.** `packages/ai/audio/timeline.ts` turns those features into `AudioTimeline` (`dna.audio`):
+- onsets, refined to the steepest linear-energy rise and classified by band shares, decay rate, sub-band ring and flatness (kick, snare, hat, impact, bass hit, plain onset);
+- beats by dynamic programming over the onset envelope with a locally estimated period (tempo may drift; nothing is quantised to a grid), with an octave check on alternating beat strength;
+- downbeats from the sub-bass accent phase (4/4 assumed, withheld when the phase evidence is weak);
+- sections and drops, risers and whooshes (the anchor is where the sweep peaks), filter sweeps, silences, gradual fades, persistent level changes, stereo width changes;
+- transcript words with their measured timing.
+
+Every event keeps `measured` values (dB, decay, shares, flatness) apart from `inferred` labels. `capabilities.notMeasured` states what is not analysed: reverb, distortion, pitch, reverse, stutter, general EQ, source separation and other time signatures.
+
+**Event graph.** `packages/ai/reference/event-graph.ts` lists visual events (cuts with their transition kind, title in/out, colour pulses, subject flashes) and audio anchors (beats, downbeats, typed events, word starts and ends, sweep peaks, silence edges). It links each visual event to its most plausible trigger by an affinity table × anchor strength × distance. The measured offset is kept, and the relation is classified as on (within about a frame), before, after, offbeat (half a beat between) or unanchored. `grammar` summarises the fractions per visual kind (on transients, on downbeats, on lyrics, beats per shot). The graph is stored in `dna.eventGraph`. Nothing in it names a reference, a word or a genre.
+
+**Audio modes** (`Controls.audio`, the *Audio* control in Recreate an edit):
+- *Supplied music*: as before.
+- *Use reference audio*: the native `extract_reference_audio` command writes the reference soundtrack as a 48 kHz WAV in app data and imports it as an ordinary audio asset. The planner places it on a "Reference audio" track with Source In = the interval start, so pictures and sound share the reference clock. Raw clip audio drops to −60 dB and supplied music is left out. The reference video itself never enters the timeline.
+- *Recreate audio structure*: the supplied music is measured with the same analysis. `alignReplacement` scans offsets (10 ms) for the one where the replacement's events best stand in for the reference's linked anchors: same kind first, an equivalent family member at a clear discount, best match not first match. Each linked visual event moves onto its stand-in (keeping its measured offset). `retimer` makes a monotonic piecewise-linear retime pinned at the interval start, and Close Match applies it to the whole DNA before shots are matched. Sounds the reference ties to visual events but the replacement lacks (impacts, bass hits, whooshes, risers) become locally synthesised WAV assets (`synth.ts` → `import_generated_audio`) on a "Recreated SFX" track. Rising sounds are trimmed from their start so they still peak on the event. Smart Adaptation and Creative Remix snap to the measured beats of the audio actually used.
+
+**Editable events.** Each linked anchor becomes a sequence marker; `ai.referenceEvents` records the layers it drives (cut clips, titles, pulses) with relation and measured offset. `sequence.moveEvent` moves a marker alone, or with its layers: a linked cut is rolled so both shots stay in sync with their sources; titles, pulses and their companion layers (`-ink`, `-blur`) move without changing length. In the timeline, an audio-event marker takes ←/→ (Shift: 10 frames, Alt: marker only); every move is one history entry. `audioMode` and `audioNotes` record what the plan did and why. Both TypeScript and native schemas validate and round-trip these fields.
+
+**Multimodal shot evidence and content aperture.** The matcher now returns each scoring term's contribution (length, visibility, look, composition, framing, subject, pose, motion, action, reserve, repeat and continuity penalties); the preview's shot table shows why each range was chosen. Outside portrait delivery, the reference's own content box is measured with the raw-footage aperture analysis. Footage covers that box rather than the full frame, and `sequence.letterbox` reproduces the bars as editable black rectangles, one top-of-stack track per bar so no track holds overlapping clips. Deliver no longer waits indefinitely on media-resource cleanup (an `AudioContext.close()` that never settled held a finished export in "Rendering…").
+
+**Verification tools.**
+- `scripts/make-reference-corpus.mjs` generates structurally different references from ffmpeg generators and synthesised sound, with exact ground truth (`truth.json`); no copyrighted or downloaded media is involved.
+- `scripts/measure-av-fidelity.mjs` scores a render against its reference per category: onset/beat/transient F-measures, loudness envelope correlation, A/V lag and drift, cut and flash agreement, cut-to-audio relation agreement, and detector accuracy against ground truth.
+- `scripts/inspect-audio-events.mjs` prints what the analysis finds in any file.
+
 ## Measured typography and depth reconstruction
 
 The `reference-text-v8` local OCR result carries bounded, timestamped normalized glyph boxes and 32×16 ink samples. Installed-font matching adds measured ink extents and centers. Close Match transforms those boxes through the visible foreground footage rectangle, aperture crop and animated parent transform, then creates ordinary text size/position/scale keys through the existing command history. Reviewed word changes remeasure the selected font. Saved style profiles strip wording and observed/template glyph pixels; projects retain editable text and provenance, not reference video frames in the render graph.

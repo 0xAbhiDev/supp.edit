@@ -12,6 +12,8 @@ import {
 } from "../animation/affine";
 import { LruCache } from "./lru";
 import { blendModes, matteModes } from "../compositing/model";
+import { grainOf, curvesOf } from "../effects/model";
+import { curveUniforms } from "../effects/curves";
 import { blendShader } from "./blend-shader";
 import { resolvedEffects } from "../effects/evaluate";
 import { finishShader } from "./finish-shader";
@@ -561,13 +563,20 @@ export class GpuRenderer {
                 sharpen: 3,
                 temperature: 4,
                 tonalContrast: 5,
+                curves: 6,
               }[effect.type],
             );
+            const curves = curvesOf(effect);
+            if (curves) {
+              const { data, counts } = curveUniforms(curves);
+              gl.uniform3fv(this.uniform("u_curve"), data);
+              gl.uniform3i(this.uniform("u_curveCount"), counts[0], counts[1], counts[2]);
+            }
             gl.uniform4f(
               this.uniform("u_finish"),
               effect.value,
-              (effect.parameters?.size ?? 1.2) * scale,
-              effect.parameters?.softness ?? 0.6,
+              (grainOf(effect).size ?? 1.2) * scale,
+              grainOf(effect).softness ?? 0.6,
               Math.floor(frame - c.start),
             );
           }
