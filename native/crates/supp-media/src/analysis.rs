@@ -135,7 +135,7 @@ pub fn run(
             "{VERSION}:{CACHE_REVISION}:{}:{}:{stamp}:{}:{}",
             match settings.task {
                 Task::Speech => format!("{}:speech-parser-2", crate::models::VERSION),
-                Task::Vision => format!("{}:scene-vocabulary-2", crate::vision_models::VERSION),
+                Task::Vision => format!("{}:scene-vocabulary-2:dense-long-scenes-1", crate::vision_models::VERSION),
                 Task::Audio => "ffmpeg-audio-presentation-duration-2".into(),
                 _ => "ffmpeg-classical-1".into(),
             },

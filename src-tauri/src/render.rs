@@ -35,10 +35,10 @@ pub async fn begin_export(app: AppHandle, project: Project) -> Result<Option<Str
                 state.require(std::path::Path::new(&a.path))?;
             }
         }
-        let Some(output) = rfd::FileDialog::new()
+        let Some(output) = crate::dialogs::run(|| rfd::FileDialog::new()
             .add_filter("MP4 video", &["mp4"])
             .set_file_name("render.mp4")
-            .save_file()
+            .save_file())
         else {
             return Ok(None);
         };
@@ -114,10 +114,10 @@ pub async fn save_png(app: AppHandle, request: Request<'_>) -> Result<Option<Str
     }
     let bytes = bytes.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = crate::dialogs::run(|| rfd::FileDialog::new()
             .add_filter("PNG image", &["png"])
             .set_file_name("frame.png")
-            .save_file()
+            .save_file())
         else {
             return Ok(None);
         };

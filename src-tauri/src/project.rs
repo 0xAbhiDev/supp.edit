@@ -28,9 +28,9 @@ pub fn authorize(app: &AppHandle, p: &Project) -> Result<Vec<String>, String> {
 #[tauri::command]
 pub async fn open_project(app: AppHandle) -> Result<Option<Opened>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = crate::dialogs::run(|| rfd::FileDialog::new()
             .add_filter("supp.edit project", &["supp", "suppedit", "bak"])
-            .pick_file()
+            .pick_file())
         else {
             return Ok(None);
         };
@@ -64,10 +64,10 @@ pub async fn save_project(
             .map_err(|e| e.to_string())?
             .clone();
         let path = if save_as || old.is_none() {
-            rfd::FileDialog::new()
+            crate::dialogs::run(|| rfd::FileDialog::new()
                 .add_filter("supp.edit project", &["supp"])
                 .set_file_name("project.supp")
-                .save_file()
+                .save_file())
         } else {
             old
         };

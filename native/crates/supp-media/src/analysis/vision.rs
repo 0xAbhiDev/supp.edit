@@ -472,17 +472,30 @@ pub fn analyze(
     drop(text);
     let (mut vision, image_device) = runtime::session(&base.join("vision_model.onnx"))?;
     let (mut objects, object_device) = runtime::session(&base.join("yolox_nano.onnx"))?;
-    let count = video.scenes.len().min(32);
+    // Long footage needs looks measured throughout, not three samples per detected scene: cuts
+    // between similar material are often missed, leaving one scene of a minute or more. Long
+    // scenes get a sample every 2.5 s; the whole clip stays within a frame budget.
+    const FRAME_BUDGET: usize = 400;
+    let count = video.scenes.len().min(160);
     let indices: Vec<usize> = (0..count).map(|i| i * video.scenes.len() / count).collect();
     let mut frames = Vec::new();
-    for index in indices {
+    let mut budget = FRAME_BUDGET;
+    for (done, index) in indices.into_iter().enumerate() {
         let scene = &video.scenes[index];
-        let mut times = vec![
-            scene.start_ms + (scene.end_ms - scene.start_ms) / 4,
-            scene.representative_ms,
-            scene.start_ms + (scene.end_ms - scene.start_ms) * 3 / 4,
-        ];
+        let length = scene.end_ms - scene.start_ms;
+        let mut times = if length > 7500 {
+            let mut t: Vec<u32> = (0..).map(|k| scene.start_ms + 1250 + k * 2500).take_while(|t| *t + 500 < scene.end_ms).collect();
+            t.push(scene.representative_ms);
+            t.sort_unstable();
+            t
+        } else {
+            vec![scene.start_ms + length / 4, scene.representative_ms, scene.start_ms + length * 3 / 4]
+        };
         times.dedup();
+        // Every later scene keeps at least one frame of the budget.
+        let later = count - done - 1;
+        times.truncate(budget.saturating_sub(later).max(1));
+        budget = budget.saturating_sub(times.len());
         for time in times {
             check(cancel)?;
             // Bounded JPEG decode respects FFmpeg autorotation and preserves the actual aspect ratio.

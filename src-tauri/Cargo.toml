@@ -17,3 +17,6 @@ uuid = { version = "1", features = ["v4"] }
 supp-project = { path = "../native/crates/supp-project" }
 supp-media = { path = "../native/crates/supp-media" }
 supp-export = { path = "../native/crates/supp-export" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Com"] }

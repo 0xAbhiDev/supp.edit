@@ -110,6 +110,28 @@ describe("long raw footage", () => {
     expect(new Set(choices.map((c) => c.sourceId)).size).toBe(3);
   });
 
+  it("splits at cuts scene detection missed and never takes a cut spike for action", () => {
+    // One detected scene of 60 s: held frames with action moments, a spike at every cut.
+    const plants: Plant[] = [
+      { clip: 0, startMs: 12000, endMs: 15000, peakMs: 13500, look: vector() },
+      { clip: 0, startMs: 40000, endMs: 43000, peakMs: 41500, look: vector() },
+    ];
+    const source = clip("held", 60000, plants);
+    const analysis = source.analysis as unknown as { video: { scenes: { startMs: number; endMs: number }[]; quality: { timeMs: number; frameDifference: number }[] } };
+    analysis.video.scenes = [{ ...analysis.video.scenes[0], startMs: 0, endMs: 60000 }];
+    for (const q of analysis.video.quality) {
+      const inside = plants.some((p) => q.timeMs >= p.startMs && q.timeMs < p.endMs);
+      q.frameDifference = inside ? 0.03 : 0.001;
+      if (plants.some((p) => q.timeMs === p.startMs || q.timeMs === p.endMs)) q.frameDifference = 0.12;
+    }
+    const reqs = plants.map((p) => requirement(p.look, 1500, 0.5));
+    reqs.forEach((r) => ((r.shot as { motion: number }).motion = 0.03));
+    const choices = selectShots(buildFootageIndex([source]), [source], reqs, "Close Match");
+    choices.forEach((c, i) => {
+      expect(c.inMs).toBeGreaterThanOrEqual(plants[i].startMs);
+      expect(c.outMs).toBeLessThanOrEqual(plants[i].endMs);
+    });
+  });
   it("rejects blurred or shaky footage when usable footage exists", () => {
     const look = vector();
     const good: Plant = { clip: 0, startMs: 50000, endMs: 53000, peakMs: 51500, look };

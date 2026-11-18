@@ -1,3 +1,22 @@
+## Resume after long-footage selection — 19 November 2026
+
+**State:**
+- Last commit: `4c2c7e5`.
+- Not committed: the file-dialog thread (`src-tauri/src/dialogs.rs`, `windows-sys 0.59` from the local cache), dense vision sampling, the footage-index fixes (cut splitting, motion gate, dense look), the multi-clip generator, the measurement scripts and these notes.
+- `bin/supp-edit.exe` is built from the working tree.
+
+**Reproduce:**
+1. Generate the cases: `node scripts/make-long-footage-case.mjs test-results/footage/long90`, then `node scripts/make-multi-clip-case.mjs test-results/footage/multi`.
+2. Build each inventory: `node scripts/capture-reference-analysis.mjs DIR/inventory REF RAW… work/gym/music.wav`.
+3. Check selection offline (coarse reference shots): `node scripts/check-footage-selection.mjs DIR/inventory DIR/truth.json`.
+4. Windows: `node scripts/verify-native-focused.mjs COPY.supp OUT 0 8000` (multi-clip: `0 15000`), then `node scripts/measure-footage-selection.mjs COPY.supp DIR/truth.json`.
+
+**Next:**
+- **Exercise identity:** make look discriminate similar exercises, e.g. person-model pose for raw clips by default, or embeddings on the subject crop.
+- **Missed cuts:** a cut detector on the dense per-frame visual analysis instead of 500 ms samples.
+- **Analysis time:** for long pools.
+- **Smart Adaptation:** let it extend a shot to the available action when a reference shot is longer than any action.
+
 ## Resume after audio fidelity 3.1 — 18 November 2026
 
 Last commit: `9da430a` (Audio 3.0 checkpoint). The structural-recreation work (3.1, top of `CURRENT_STATE.md`) is not committed. `bin/supp-edit.exe` is built from it; `bin/supp-edit-audio30.exe` is the 3.0 build.

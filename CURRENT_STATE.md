@@ -1,3 +1,27 @@
+## Long-footage selection and recreate-panel redesign — 19 November 2026
+
+Raw clips are now searched end to end.
+- **Index:** every clip is indexed from its cached analysis into action and hold candidates with quality flags, split where scene detection missed cuts.
+- **Selection:** each reference shot is chosen globally by beam search, with reuse control and a motion gate.
+- **Trimming:** the source's action peak is placed on the reference shot's strongest audio event.
+- **Preview:** per-criterion match, up to three alternatives with *Choose another take* (re-preview, no re-analysis), and a coverage line.
+- **Vision sampling:** dense for long scenes.
+- **Recreate panel:** sources and style cards, progress steps, one action bar, readable evidence.
+- **Stability:** file dialogs run on one persistent COM thread, after a Deliver crash in the unloaded shell dialog was traced.
+
+| Case (Windows app, Close Match, full flow) | Source moments in planted action | Right exercise | From a clip's first 10 s | Reuse |
+| --- | --- | --- | --- | --- |
+| 90 s single clip, 8 s 6-shot reference (`test-results/footage/long90/`) | 4/5 | 4/5 | 0 | 0 |
+| Three clips, 7 m 10 s, 15 s 9-shot reference (`test-results/footage/multi/`) | 6/8 | 3/8 | 0 | 0 |
+
+The missed shot in the 90 s case is a 3.3 s reference shot (two shots merged by reference detection) that no planted action is long enough to fill in Close Match.
+
+Open:
+- **Exercise identity:** look discrimination between similar exercises is still weak (multi-clip: right action, often the wrong exercise). The pose term needs the person model's masks.
+- **Missed cuts:** two windows crossed cuts the spike rule missed.
+- **Analysis time:** first analysis of 7 minutes of footage takes about 18 minutes in the app.
+- **Tests:** synthetic acceptance tests pass: 90 s planted moments, a three-clip pool, missed cuts, blur rejection.
+
 ## Audio fidelity 3.1: structural recreation — 18 November 2026
 
 *Recreate audio structure* now aligns the two soundtracks' structures instead of snapping each event to the nearest replacement event:

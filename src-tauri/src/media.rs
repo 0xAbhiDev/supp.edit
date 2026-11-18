@@ -28,7 +28,7 @@ fn import_one(app: &AppHandle, path: &std::path::Path, id: String) -> Result<Imp
 #[tauri::command]
 pub async fn import_media(app: AppHandle) -> Result<ImportResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let paths = rfd::FileDialog::new()
+        let paths = crate::dialogs::run(|| rfd::FileDialog::new()
             .add_filter(
                 "Media",
                 &[
@@ -36,7 +36,7 @@ pub async fn import_media(app: AppHandle) -> Result<ImportResult, String> {
                     "ogg", "aif", "aiff", "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff",
                 ],
             )
-            .pick_files()
+            .pick_files())
             .unwrap_or_default();
         let mut result = ImportResult {
             imported: vec![],
@@ -60,9 +60,9 @@ pub async fn relink_media(app: AppHandle, asset_id: String) -> Result<Option<Imp
         return Err("Invalid asset ID".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let Some(path) = rfd::FileDialog::new()
+        let Some(path) = crate::dialogs::run(|| rfd::FileDialog::new()
             .set_title("Relink source media")
-            .pick_file()
+            .pick_file())
         else {
             return Ok(None);
         };

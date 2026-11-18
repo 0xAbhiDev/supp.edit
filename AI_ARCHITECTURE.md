@@ -18,6 +18,12 @@ Raw footage may be far longer than the reference. `packages/ai/reference/footage
   - **Alternatives:** the best three are kept per shot.
 - **Planner:** the global choice is each shot's first option, and the existing local matcher remains the fallback. Caption-led edits keep each source's chronology with the local matcher. Matches record `selection`, `match`, `alternatives`, `reuse` and `peak`, and the plan reports coverage.
 - **Preview:** "Why each source moment was chosen" lists per shot the source moment, the action-peak placement, per-criterion bars and overall match. Up to three alternatives each offer *Choose another take*, which swaps that shot's source in the plan and re-previews without re-analysis.
+- **Long-footage fixes found on real media** (a 90 s clip of held frames and planted action):
+  - **Missed cuts:** scene detection misses cuts between similar material. The index splits scenes at isolated one-sample frame-difference spikes (≥ 0.05 and ≥ 2.5× their neighbours), so no candidate straddles a cut and no cut spike counts as action. Segment edges are conservative: the last sample before the spike, and the spike sample.
+  - **Motion gate:** when the reference shot moves, a candidate's score is scaled by its motion fit, so static footage cannot play an action shot.
+  - **Look:** look uses vision embeddings only within ±1.5 s of the window. Otherwise it falls back to the dense per-frame colour signature (luma, contrast, saturation, temperature).
+  - **Dense vision sampling:** native vision analysis samples long scenes (over 7.5 s) every 2.5 s and analyses up to 160 scenes, within 400 frames per clip, instead of three frames in at most 32 scenes. The cache key revision `dense-long-scenes-1` forces recomputation. The 90 s case went from 6 to 38 embeddings.
+- **File dialogs:** every native file dialog runs on one long-lived `file-dialogs` thread that keeps STA COM initialised for the process lifetime (`src-tauri/src/dialogs.rs`). Before this, dialogs ran on short-lived blocking-pool threads. Their final COM teardown unloaded the shell dialog component (`explorerframe.dll`) while its callbacks were pending, and the app crashed with an access violation about 90 s after the Deliver save dialog (Windows Error Reporting, BEX64 in `explorerframe.dll_unloaded`).
 
 ## Recreate-workflow UI
 

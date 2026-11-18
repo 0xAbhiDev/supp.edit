@@ -1,5 +1,16 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**19 November long-footage selection.** Two cases were generated from local clips. Each raw file holds long held frames of the exercises (look-alike but motionless), with live action only at planted places. Both ran through the full Windows flow on the current build.
+
+| Case | Raw pool | Reference | Picks in planted action | Right exercise | From a clip's first 10 s | Reuse |
+| --- | --- | --- | --- | --- | --- | --- |
+| `footage/long90` | one 90 s clip; action at 12–14, 31–34, 46–48, 67–70, 82–85 s | 8 s, 6 shots (5 measured) | 4/5 | 4/5 | 0 | 0 |
+| `footage/multi` | 2 m 10 s + 1 m 40 s + 3 m 20 s; 10 action moments | 15 s, 9 shots (8 measured) | 6/8 | 3/8 | 0 | 0 |
+
+- **Before the fixes:** the first real 90 s run picked 2/5; dense vision and missed-cut splitting brought it to 4/5.
+- **Coverage:** the whole supplied duration is analysed; the coverage line reports supplied and analysed duration and the candidate count.
+- **Gaps:** exercise identity between similar gym exercises, two cut-crossing windows in the multi-clip run, and about 18 minutes of first analysis for 7 minutes of footage.
+
 **18 November structural recreation (3.1).** Evidence lives in `test-results/audio31/`: the generated corpus with ground truth under `corpus/`, and the Windows cases under `native/case1…5/`. Each case folder holds `native-verification.json`, screenshots, `render.mp4` and `av-metrics.json`. Every case passed the full Windows flow on the 3.1 build: preview, Apply/Undo/Redo, save, exit, reopen, playback, Inspector edit and Deliver.
 
 | Detector on ground truth | S1 letterbox lyrics | S2 vertical montage | S3 dialogue + music | S4 beat montage |
