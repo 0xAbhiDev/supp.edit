@@ -1,3 +1,41 @@
+## Long footage 2.0: semantic action matching and cut-safe selection — 19 November 2026
+
+Checkpoint before this phase: `6632f5e`. This phase is **not committed** (awaiting approval).
+
+Selection now asks "which stretch moves the same way, inside one shot, long enough to play this reference shot?":
+- **Frame-accurate cuts:** a second-stage detector on the dense 33 ms frames finds cuts between similar material; segments keep a two-frame margin. In strict mode it also splits merged reference shots without splitting title swaps or silhouette flashes.
+- **Movement and pose:** a temporal action signature (movement curve, where it moves, camera, rhythm, subject outline trajectory) plus a pose trajectory compared by time warping.
+- **Retrieval:** two-stage retrieval with a rerank, and duration feasibility with a mild-retime fallback and an explicit "no source interval can faithfully fill" report.
+- **Timing and roles:** shots have roles; the action phase follows the audio event, else the reference's own movement peak.
+- **Global choice:** a wider global search, explained choices, distinct alternatives with what they lost on, and "Choose another take" after Apply as an undoable edit.
+- **Speed and caching:** analysis is 6–7× faster (optimised media crate, concurrent stages, queued native slots), with a persistent per-file index and caches keyed by file identity.
+
+Windows app, Close Match, full flow (open, recreate, preview, apply, undo, redo, alternative take with undo and redo, save, exit, reopen, playback, Inspector edit, Deliver). Each passed, with picks graded from the preview's own explanation (before the deliberate take edit):
+
+| Case | Reference shots measured | In planted action | Correct action | Cut crossings | Duration-infeasible | Reused | First 10 s | Preview (first run) | Preview (cached) | Deliver |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A: 90 s gym clip | 6 (was 5) | 6/6 (was 4/5) | 4/6 (was 4/5) | 0 | 0 | 0 | 0 | 49 s (was 84 s) | – | 66 s |
+| B: three gym clips, 7 m 10 s | 9 (was 8) | 9/9 (was 6/8) | 8/9 (was 3/8) | 0 (was 2) | 0 | 0 | 0 | 155 s (was 1070 s) | 19 s | 103 s (was 325 s) |
+| C: travel, two generated clips, 3 m | 6 | 5/6 | 4/6 | 0 | 0 | 0 | 1 (planted at 8 s) | 104 s, fully cold | 18 s | 54 s |
+
+- **Audio alignment:** the preview reports, per shot, that the audio event lands on the source's movement peak.
+- **Offline (same code, captured inventories):** A 5/6 correct (the sixth flagged low-confidence), B 9/9, C 4/6, cooking 1/4.
+- **Failures, honestly:**
+  - **A:** the reference uses the deadlift twice and the footage holds one 3 s deadlift. Shot 1 takes most of it, the 1.9 s shot cannot fit in the rest, and the global search swapped shots 5 and 6 (two wrong but moving picks beat one right pick and an empty hold).
+  - **B:** shot 3 (bench) took a row; four candidates scored within 0.008.
+  - **C:** the vehicle shot took a slow push-in, and the sunset hold took a static street hold. Holds are decided by look, which is weak across palettes.
+  - **Cooking:** strict reference mode finds 3 of 5 punch-in cuts, so two measured shots mix two actions.
+- **Analysis profile** (`scripts/profile-footage-analysis.mjs`, 100 s clip, cold):
+  - Before, per stage: person masks 117 s, vision 49 s, per-frame visual 37 s, aperture 9 s, scenes 7.5 s, colour 3 s; 230 s total (2.3 s per footage second).
+  - After compiling `supp-media` optimised in dev builds: 74 s.
+  - After running the stages concurrently: 35 s wall (0.35 s per footage second).
+  - In the app, B's first run took 2 m 11 s for 7 m 10 s. Stage totals (summed across concurrent work): person masks 3 m 16 s, per-frame visual 1 m 42 s, webview tone sampling 1 m 23 s, aperture 36 s.
+- **Cut detection:**
+  - Raw: 30/30 planted cuts found (one extra two frames before a real cut).
+  - References: gym 8/8 and 5/5, travel 5/5.
+  - Real reels, strict mode: reel 55 adds nothing (its silhouette flashes and title swaps are rejected); reel 54 gains its missed cut at 6.17 s (verified visually); coastal gains 7.57 s.
+- **Tests:** 220 TS tests (8 new in `tests/long-footage-2.test.ts`), 42 native tests, `tsc` clean.
+
 ## Long-footage selection and recreate-panel redesign — 19 November 2026
 
 Raw clips are now searched end to end.

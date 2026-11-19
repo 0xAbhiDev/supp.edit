@@ -9,3 +9,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tempfile = "3"
+
+# Media analysis runs per pixel and per frame over long footage; unoptimized it costs ~2 s of
+# analysis per second of footage in the desktop's dev build. Optimize it (and the image math it
+# leans on) even there; the rest of the dev build stays fast to compile.
+[profile.dev.package.supp-media]
+opt-level = 3

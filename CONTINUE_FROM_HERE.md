@@ -1,3 +1,32 @@
+## Resume after Long Footage 2.0 — 19 November 2026
+
+**State:**
+- Last commit: `6632f5e` (checkpoint before this phase).
+- Not committed: everything in "Long footage 2.0" (CURRENT_STATE.md), awaiting approval.
+- `bin/supp-edit.exe` is built from the working tree.
+
+**Reproduce:**
+1. Generate the cases:
+   - Gym: `node scripts/make-long-footage-case.mjs test-results/footage/long90`, `node scripts/make-multi-clip-case.mjs test-results/footage/multi`.
+   - Non-gym: `node scripts/make-motion-case.mjs cooking|travel test-results/footage/<kind>`.
+2. Inventories: `node scripts/capture-reference-analysis.mjs DIR/inventory REF RAW… work/gym/music.wav`; person masks with `target/debug/examples/person_mask.exe work/ai-models CLIP > DIR/inventory/i-person.json`.
+3. Offline:
+   - Selection: `node scripts/check-footage-selection.mjs DIR/inventory DIR/truth.json [MODE] [--inspect=3]`.
+   - Cuts: `node scripts/check-frame-cuts.mjs VISUAL.json "t1,t2"`, and for references `node scripts/compare-frame-cuts.mjs DIR --strict`.
+   - Feature discrimination: `node scripts/action-feature-confusion.mjs DIR/inventory DIR/truth.json`.
+4. Profile: `node scripts/profile-footage-analysis.mjs CLIP [OUT] [--parallel]`.
+5. Windows:
+   - Run `node scripts/verify-native-focused.mjs COPY.supp OUT 0 END_MS` (A: 8000, B: 15000, C: 9300).
+   - Then `node scripts/measure-footage-selection.mjs COPY.supp DIR/truth.json OUT.json --log=RUN.log`, which grades the preview's own picks.
+   - If a run fails, the app stays open and leaves `%APPDATA%\studio.supp.edit\recovery-0.json`. Close that instance and move the snapshot aside before rerunning.
+
+**Next:**
+- **Capacity packing:** let two shots share one cut-safe stretch (with the mild retime) when the reference repeats an action the footage holds once.
+- **Strict reference cuts for punch-ins** without flow reset; native tone sampling (the webview stage is now a notable cost).
+- **Dense stages beyond 300 s per clip** (visual, tone and colour stop at 5 minutes; quality and vision cover the whole clip).
+- **Vision per refined segment:** sample embeddings per refined segment rather than per first-stage scene.
+- **Hold shots:** match holds on something better than look across palettes.
+
 ## Resume after long-footage selection — 19 November 2026
 
 **State:**

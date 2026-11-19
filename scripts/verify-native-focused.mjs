@@ -124,7 +124,7 @@ for (;;) {
   if (status && Math.round((Date.now() - began) / 1000) % 30 < 2) log("  ", status.replace("Cancel", "").trim());
   await page.waitForTimeout(2000);
 }
-const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music/.test(t));
+const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music|Analysis time|Raw footage|No source interval|Low confidence|Analysis:/.test(t));
 // The audio evidence the preview shows, opened as a user would.
 const audioEvidence = panel.getByText(/^Audio events/);
 if (await audioEvidence.count()) {
@@ -134,6 +134,16 @@ if (await audioEvidence.count()) {
   await shot(page, "2b-audio-evidence.png");
 }
 step("Preview ready", { seconds: Math.round((Date.now() - began) / 1000), summary });
+// The per-shot explanation table: role, confidence, meters, reasons, why alternatives lost.
+{
+  const why = panel.getByText("Why each source moment was chosen", { exact: true });
+  if (await why.count()) {
+    await why.scrollIntoViewIfNeeded();
+    await shot(page, "2c-why-each-moment.png");
+    const rows = await panel.locator("details", { has: page.getByText("Why each source moment was chosen", { exact: true }) }).locator("table tbody tr").allInnerTexts();
+    step("Explained each choice", { rows: rows.map((t) => t.replace(/\s+/g, " ").slice(0, 600)) });
+  }
+}
 await apply.scrollIntoViewIfNeeded();
 await shot(page, "2-preview.png");
 // Scrub the preview to a title frame before applying.
@@ -157,6 +167,44 @@ await page.waitForTimeout(500);
 const redone = await sequences(page);
 assert.deepEqual(redone, applied, "Redo did not restore the recreated sequence");
 step("Apply, Undo and Redo", { applied, undone, redone });
+// Edit an alternative take in the applied sequence, then undo and redo that edit, checking the
+// saved project each time.
+{
+  const takes = panel.getByRole("button", { name: /^Choose another take: / });
+  const count = await takes.count();
+  let chosen;
+  for (let i = 0; i < count && !chosen; i++) if (await takes.nth(i).isEnabled()) chosen = takes.nth(i);
+  assert(chosen, "No alternative take can be chosen after Apply");
+  const label = (await chosen.textContent()).trim();
+  const [, takeName, takeSeconds] = label.match(/^Choose another take: (.+) @ ([\d.]+) s$/);
+  const savedHas = async () => {
+    await page.getByRole("button", { name: "Save project", exact: true }).click();
+    let file;
+    for (let i = 0; i < 60; i++) {
+      await page.waitForTimeout(500);
+      try {
+        file = read(project);
+        if (file.compositions.length === applied.length - 1) break;
+      } catch {}
+    }
+    const asset = file.assets.find((a) => a.name === takeName);
+    const comp = file.compositions.at(-1);
+    const rate = (comp.settings?.fps ?? file.settings.fps).num / (comp.settings?.fps ?? file.settings.fps).den;
+    return comp.layers.some((l) => l.assetId === asset?.id && Math.abs(l.sourceIn / rate - Number(takeSeconds)) < 0.05);
+  };
+  await chosen.scrollIntoViewIfNeeded();
+  await chosen.click();
+  await page.waitForTimeout(800);
+  await shot(page, "3b-alternative-take.png");
+  assert(await savedHas(), "The chosen alternative take is not in the saved sequence");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await page.waitForTimeout(500);
+  assert(!(await savedHas()), "Undo did not restore the original take");
+  await page.getByRole("button", { name: "Redo", exact: true }).click();
+  await page.waitForTimeout(500);
+  assert(await savedHas(), "Redo did not restore the alternative take");
+  step("Edited an alternative take, Undo and Redo", { take: label });
+}
 await page.getByRole("button", { name: "Save project", exact: true }).click();
 // Saving is in place for an opened project; wait for the file to change on disk.
 for (let i = 0; i < 120; i++) {

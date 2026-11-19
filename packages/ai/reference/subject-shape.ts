@@ -28,8 +28,18 @@ function inside(x: number, y: number, points: PersonSample["points"]) {
   return c;
 }
 
-/** Shape of one contour, or undefined for an empty or degenerate one. */
+const drawn = new WeakMap<PersonSample["points"], Map<number, SubjectShape | undefined>>();
+/** Shape of one contour, or undefined for an empty or degenerate one (memoised per contour:
+ * the same measured sample is compared against many reference shots). */
 export function silhouette(points: PersonSample["points"], frameAspect: number): SubjectShape | undefined {
+  let byAspect = drawn.get(points);
+  if (!byAspect) drawn.set(points, (byAspect = new Map()));
+  if (byAspect.has(frameAspect)) return byAspect.get(frameAspect);
+  const shape = draw(points, frameAspect);
+  byAspect.set(frameAspect, shape);
+  return shape;
+}
+function draw(points: PersonSample["points"], frameAspect: number): SubjectShape | undefined {
   if (points.length < 3) return;
   const xs = points.map((p) => p[0]),
     ys = points.map((p) => p[1]);
@@ -90,12 +100,52 @@ export function shapeFit(a: SubjectShape, b: SubjectShape) {
 
 /** Record the reference subject's typical shape on each shot that shows a person. */
 export function annotateSubjects(
-  dna: { shots: { startMs: number; endMs: number; subjectShape?: SubjectShape }[] },
+  dna: { shots: { startMs: number; endMs: number; subjectShape?: SubjectShape; subjectPath?: (SubjectShape | null)[] }[] },
   people: PersonSample[],
   frameAspect: number,
 ) {
   for (const shot of dna.shots) {
     const shape = shapeOver(people, shot.startMs, shot.endMs, frameAspect);
     if (shape) shot.subjectShape = shape;
+    const path = shapePath(people, shot.startMs, shot.endMs, frameAspect);
+    if (path.filter(Boolean).length * 2 >= path.length) shot.subjectPath = path.map((p) => p ?? null);
   }
+}
+
+/** The subject's outline at `steps` moments across [start, end): a pose trajectory. Each step is
+ * the sample nearest its moment (undefined where no person is measured within 150 ms). */
+export function shapePath(samples: PersonSample[] | undefined, startMs: number, endMs: number, frameAspect: number, steps = 8): (SubjectShape | undefined)[] {
+  const inside = (samples ?? []).filter((s) => s.timeMs >= startMs - 150 && s.timeMs < endMs + 150 && s.points.length >= 3);
+  return Array.from({ length: steps }, (_, k) => {
+    const t = startMs + ((k + 0.5) / steps) * (endMs - startMs);
+    let best: PersonSample | undefined;
+    for (const s of inside) if (!best || Math.abs(s.timeMs - t) < Math.abs(best.timeMs - t)) best = s;
+    return best && Math.abs(best.timeMs - t) <= 150 ? silhouette(best.points, frameAspect) : undefined;
+  });
+}
+
+/** 0–1: how alike two pose trajectories are, aligned in time by dynamic time warping within a
+ * band of two steps (the same movement performed a little faster or later still matches).
+ * Undefined when either side measured a person at fewer than half the steps. */
+export function pathFit(a: (SubjectShape | undefined)[], b: (SubjectShape | undefined)[]) {
+  if (a.filter(Boolean).length * 2 < a.length || b.filter(Boolean).length * 2 < b.length) return undefined;
+  const n = a.length,
+    m = b.length,
+    band = 2;
+  const cost = (i: number, j: number) => (a[i] && b[j] ? 1 - shapeFit(a[i]!, b[j]!) : 0.6);
+  const d = Array.from({ length: n + 1 }, () => Array.from({ length: m + 1 }, () => Infinity));
+  const len = Array.from({ length: n + 1 }, () => Array.from({ length: m + 1 }, () => 0));
+  d[0][0] = 0;
+  for (let i = 1; i <= n; i++)
+    for (let j = Math.max(1, i - band); j <= Math.min(m, i + band); j++) {
+      const options: [number, number][] = [
+        [d[i - 1][j - 1], len[i - 1][j - 1]],
+        [d[i - 1][j], len[i - 1][j]],
+        [d[i][j - 1], len[i][j - 1]],
+      ];
+      const [best, steps] = options.reduce((x, y) => (y[0] < x[0] ? y : x));
+      d[i][j] = best + cost(i - 1, j - 1);
+      len[i][j] = steps + 1;
+    }
+  return Number.isFinite(d[n][m]) ? Math.max(0, 1 - d[n][m] / Math.max(1, len[n][m])) : undefined;
 }

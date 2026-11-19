@@ -1,5 +1,16 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**19 November Long Footage 2.0.** The same two gym cases, plus a generated travel case; all three passed the full Windows flow on the current build, including "Choose another take" after Apply with Undo and Redo. Picks are graded from the preview's own explanation.
+
+| Case | Raw pool | Reference shots measured | In planted action | Right action | Cut crossings | Reuse | First preview / cached |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `footage/long90` | one 90 s clip | 6 of 6 | 6/6 | 4/6 | 0 | 0 | 49 s / – |
+| `footage/multi` | 2 m 10 s + 1 m 40 s + 3 m 20 s | 9 of 9 | 9/9 | 8/9 | 0 | 0 | 155 s / 19 s |
+| `footage/travel` | two generated city clips, 3 m | 6 of 6 | 5/6 | 4/6 | 0 | 0 | 104 s / 18 s |
+
+- **Held-out cases:** travel and cooking (`scripts/make-motion-case.mjs`) were not used to tune selection weights. Three cut-detector rules (camera movement, flow reset before a cut, punch-ins) came from their references. Cooking is measured offline only: 1/4, limited by two punch-in cuts strict reference mode still misses.
+- **Remaining gaps:** a capacity conflict when the reference repeats an action the footage holds once (90 s case); thin margins between similar lifts; static holds decided by look.
+
 **19 November long-footage selection.** Two cases were generated from local clips. Each raw file holds long held frames of the exercises (look-alike but motionless), with live action only at planted places. Both ran through the full Windows flow on the current build.
 
 | Case | Raw pool | Reference | Picks in planted action | Right exercise | From a clip's first 10 s | Reuse |

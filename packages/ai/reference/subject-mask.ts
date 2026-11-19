@@ -20,8 +20,8 @@ export async function personMasks(asset: Asset, job: JobContext) {
   const { desktop } = await import("../../platform");
   const { readDerived, writeDerived } = await import("../../platform/derived");
   const { nativeJob } = await import("../media-analysis/service");
-  const key =
-    "person-mask-pphumanseg-552d8a98-v1:" + asset.id + ":" + asset.fingerprint;
+  // Keyed by file identity and model (path, size, modified time), not by project asset.
+  const key = "person-mask-pphumanseg-552d8a98-v2:" + asset.fingerprint;
   const cached = personSamplesSchema.safeParse(await readDerived(key));
   if (cached.success) return cached.data;
   if (!desktop) return [];

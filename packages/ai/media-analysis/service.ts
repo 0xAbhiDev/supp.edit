@@ -84,6 +84,22 @@ export const personModel: AIModel = {
   download: { state: "not-requested" },
   runtime: "native-inference",
 };
+/** Native analysis runs at most this many jobs at once (the desktop enforces the same cap, see
+ * src-tauri/src/analysis.rs); further jobs wait here for a free slot instead of failing. */
+export const NATIVE_SLOTS = 4;
+let nativeActive = 0;
+const nativeWaiting: (() => void)[] = [];
+async function nativeSlot(signal: AbortSignal) {
+  while (nativeActive >= NATIVE_SLOTS) {
+    await new Promise<void>((resolve) => nativeWaiting.push(resolve));
+    if (signal.aborted) throw new Error("Cancelled");
+  }
+  nativeActive++;
+}
+function nativeRelease() {
+  nativeActive--;
+  nativeWaiting.shift()?.();
+}
 export async function nativeJob<T>(
   command: string,
   args: Record<string, unknown>,
@@ -94,6 +110,14 @@ export async function nativeJob<T>(
       "Local media analysis runs in the Windows desktop application.",
     );
   await job.checkpoint();
+  await nativeSlot(job.signal);
+  try {
+    return await runNativeJob<T>(command, args, job);
+  } finally {
+    nativeRelease();
+  }
+}
+async function runNativeJob<T>(command: string, args: Record<string, unknown>, job: JobContext): Promise<T> {
   const id = await invoke<string>("prepare_analysis_job");
   const cancel = () => {
     void invoke("cancel_analysis_job", { id }).catch(() => undefined);

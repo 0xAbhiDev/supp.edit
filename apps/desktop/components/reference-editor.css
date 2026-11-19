@@ -436,3 +436,27 @@
 .reference-editor .re-summary {
   line-height: 1.45;
 }
+
+/* Long-footage explanations: progress, reasons and why alternatives lost. */
+.re-progress {
+  width: min(240px, 40%);
+  height: 6px;
+  margin-right: 8px;
+  vertical-align: middle;
+  accent-color: var(--accent, currentColor);
+}
+.re-reasons {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+.re-alt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.re-alt .re-muted {
+  font-size: 0.8em;
+}

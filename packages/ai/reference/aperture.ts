@@ -10,7 +10,7 @@ export async function sourceAperture(a: Asset, job: JobContext) {
   const { desktop } = await import("../../platform");
   const { readDerived, writeDerived } = await import("../../platform/derived");
   const { nativeJob } = await import("../media-analysis/service");
-  const key = "source-aperture-v2:" + a.id + ":" + a.fingerprint;
+  const key = "source-aperture-v3:" + a.fingerprint;
   const cached = apertureSchema.safeParse(await readDerived(key));
   if (cached.success) return cached.data;
   if (!desktop) return undefined;

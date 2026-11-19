@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { frameCuts } from "./cuts";
+import { actionSignature, actionSignatureSchema } from "./action-signature";
 import { toneSchema } from "./tone";
 import { subjectShapeSchema } from "./subject-shape";
 import { audioTimelineSchema } from "../audio/timeline";
@@ -49,6 +51,10 @@ export const dnaSchema = z
             plateTint: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
             tone: toneSchema.optional(),
             subjectShape: subjectShapeSchema.optional(),
+            /** The subject's outline at eight moments across the shot (pose trajectory). */
+            subjectPath: z.array(subjectShapeSchema.nullable()).length(8).optional(),
+            /** How the shot moves over time (movement geometry, not a label). */
+            action: actionSignatureSchema.optional(),
             layout: z.array(unit).length(16).nullable().optional(),
             embedding: z
               .array(z.number().finite().min(-1).max(1))
@@ -207,6 +213,15 @@ export function extractDNA(
       { ...old, startMs: s.timeMs, fadeIn: false, boundaryConfidence: null },
     );
   }
+  // Cuts between similar material (two dark takes from one corner) leave no residual the sparse
+  // samples can see; at frame level they break flow and palette at once. Strict mode: titles,
+  // flashes and pulses that return within half a second are effects, not shots.
+  for (const cut of frameCuts(visual, [], text ?? [], true)) {
+    const j = shots.findIndex((x) => cut.timeMs > x.startMs + 300 && cut.timeMs < x.endMs - 300);
+    if (j < 0 || shots.some((x) => Math.abs(x.startMs - cut.timeMs) < 250)) continue;
+    const old = shots[j];
+    shots.splice(j, 1, { ...old, endMs: cut.timeMs, fadeOut: false }, { ...old, startMs: cut.timeMs, fadeIn: false, boundaryConfidence: null });
+  }
   const colorPulses = separateColorPulses(shots, visual);
   refineFlashBoundaries(shots, visual);
   const cuts = shots.slice(1);
@@ -234,6 +249,8 @@ export function extractDNA(
         shot.startMs + 100,
         shot.endMs - 100,
       );
+      const action = actionSignature(visual, undefined, shot.startMs, shot.endMs, asset.width / Math.max(1, asset.height));
+      if (action) shot.action = action;
     }
     const samples = motion.filter(
       (m) => m.timeMs > shot.startMs + 125 && m.timeMs < shot.endMs,

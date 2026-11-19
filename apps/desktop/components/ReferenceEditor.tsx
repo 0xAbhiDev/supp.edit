@@ -32,6 +32,7 @@ import {
   type StyleDNA,
 } from "../../../packages/ai/reference/dna";
 import { recreate } from "../../../packages/ai/reference/service";
+import { termLabels } from "../../../packages/ai/reference/footage-index";
 import { measureTitleInk } from "../../../packages/ai/reference/font-match";
 import { SequencePreview } from "./SequencePreview";
 import "./reference-editor.css";
@@ -90,7 +91,9 @@ export function ReferenceEditor() {
     job = jobs.find((j) => j.id === jobId),
     busy = job?.state === "Running" || job?.state === "Queued",
     canApply =
-      result && isEditPreviewCurrent(result.preview, project, revision);
+      result && isEditPreviewCurrent(result.preview, project, revision),
+    // After Apply, a take is swapped in the recreated sequence itself, as an undoable edit.
+    appliedTakes = !canApply && !!result?.preview.plan.resultCompositionId && project.compositions.some((c) => c.id === result.preview.plan.resultCompositionId);
   const filePicker = useRef<HTMLInputElement>(null),
     target = useRef<"reference" | "raw">("raw"),
     mounted = useRef(true);
@@ -166,24 +169,58 @@ export function ReferenceEditor() {
       setError(String(e));
     }
   }
-  /** Swap one shot's source moment for an alternative and re-preview; nothing is re-analysed. */
+  /** Swap one shot's source moment for an alternative; nothing is re-analysed. Before Apply the
+   * preview is rebuilt; after Apply the recreated sequence's clip is edited (undoable). */
   function chooseTake(index: number, alt: NonNullable<Result["matches"][number]["alternatives"]>[number]) {
-    if (!result || !canApply) return;
+    if (!result || (!canApply && !appliedTakes)) return;
     try {
       const m = result.matches[index],
         asset = project.assets.find((a) => a.id === alt.sourceId);
       if (!asset) throw Error("That footage is no longer in the project.");
       const rate = fps(project),
         sourceIn = Math.round((alt.inMs * rate) / 1000);
-      const commands = result.preview.plan.commands.map((call) =>
+      // A take from a slightly short cut-safe stretch plays mildly slowed: rescale this clip's
+      // speed curve (or add a constant one) so the edit timing never changes.
+      const was = m.speed ?? 1,
+        speed = alt.speed ?? 1;
+      let commands = result.preview.plan.commands.map((call) =>
         call.tool === "sequence.insert" && call.clipId === m.clipId ? { ...call, assetId: asset.id, fingerprint: asset.fingerprint, sourceIn } : call,
       );
-      const preview = previewEditPlan({ ...result.preview.plan, commands }, project, revision);
-      const previous = { sourceId: m.source, inMs: Math.round((m.sourceIn * 1000) / rate), outMs: Math.round(((m.sourceIn + m.duration) * 1000) / rate), score: 0, match: m.match ?? {} };
+      if (speed !== was) {
+        const curve = commands.find((call) => call.tool === "sequence.speed" && call.clipId === m.clipId);
+        if (curve && curve.tool === "sequence.speed") {
+          const keys = curve.curve.keys.map((k) => ({ ...k, speed: (k.speed * speed) / was }));
+          const constant = keys.every((k) => Math.abs(k.speed - 1) < 1e-6);
+          commands = constant ? commands.filter((call) => call !== curve) : commands.map((call) => (call === curve ? { ...curve, curve: { ...curve.curve, keys } } : call));
+        } else if (speed < 1) {
+          const at = commands.findIndex((call) => call.tool === "sequence.insert" && call.clipId === m.clipId);
+          const sequenceId = (commands[at] as { sequenceId: string }).sequenceId;
+          commands.splice(at + 1, 0, { tool: "sequence.speed", sequenceId, clipId: m.clipId, curve: { sourceOffset: 0, keys: [{ frame: 0, speed, easing: "smooth" }, { frame: m.duration, speed, easing: "smooth" }] } });
+        }
+      }
+      const previous = { sourceId: m.source, inMs: Math.round((m.sourceIn * 1000) / rate), outMs: Math.round(((m.sourceIn + m.duration * was) * 1000) / rate), speed: was, score: 0, match: m.match ?? {}, lostOn: "the take chosen before" };
       const matches = result.matches.map((x, k) =>
-        k === index ? { ...x, source: asset.id, sourceIn, match: alt.match, alternatives: [previous, ...(x.alternatives ?? []).filter((a) => a !== alt)] } : x,
+        k === index ? { ...x, source: asset.id, sourceIn, speed, match: alt.match, alternatives: [previous, ...(x.alternatives ?? []).filter((a) => a !== alt)] } : x,
       );
-      setResult({ ...result, preview, matches });
+      if (canApply) setResult({ ...result, preview: previewEditPlan({ ...result.preview.plan, commands }, project, revision), matches });
+      else {
+        const s = state();
+        s.setComposition(result.preview.plan.resultCompositionId!);
+        s.executeScoped("Choose another take", (p) => {
+          const clip = p.clips.find((c) => c.id === m.clipId);
+          if (!clip) throw Error("That shot is no longer in the recreated sequence.");
+          clip.assetId = asset.id;
+          clip.sourceIn = sourceIn;
+          if (speed !== was) {
+            if (clip.timeRemap) {
+              for (const k of clip.timeRemap.keys) k.speed = (k.speed * speed) / was;
+              if (clip.timeRemap.keys.every((k) => Math.abs(k.speed - 1) < 1e-6)) clip.timeRemap = undefined;
+            } else if (speed < 1)
+              clip.timeRemap = { sourceOffset: 0, keys: [{ frame: 0, speed, easing: "smooth" }, { frame: clip.duration, speed, easing: "smooth" }] };
+          }
+        });
+        setResult({ ...result, matches });
+      }
       setError("");
     } catch (e) {
       setError(String(e));
@@ -601,6 +638,9 @@ export function ReferenceEditor() {
       </fieldset>
       {busy && (
         <p role="status" className="re-status">
+          {!!job?.progress?.total && (
+            <progress className="re-progress" value={job.progress.completed} max={job.progress.total} aria-label="Recreation progress" />
+          )}
           {job?.progress?.detail ?? job?.state}{" "}
           <button onClick={() => backgroundJobs.cancel(jobId)}>Cancel</button>
         </p>
@@ -630,8 +670,17 @@ export function ReferenceEditor() {
           {result.coverage && (
             <p className="re-muted">
               Raw footage searched end to end: {(result.coverage.suppliedMs / 1000).toFixed(1)} s supplied across {result.coverage.clips} clip
-              {result.coverage.clips === 1 ? "" : "s"}, {(result.coverage.analyzedMs / 1000).toFixed(1)} s analysed, {result.coverage.candidates} candidate moments,{" "}
-              {result.coverage.used} used, final edit {(result.coverage.finalMs / 1000).toFixed(1)} s.
+              {result.coverage.clips === 1 ? "" : "s"}, {(result.coverage.analyzedMs / 1000).toFixed(1)} s analysed, {result.coverage.segments} cut-safe stretches (
+              {result.coverage.cuts} frame-accurate cuts), {result.coverage.candidates} candidate moments, {result.coverage.used} used, final edit{" "}
+              {(result.coverage.finalMs / 1000).toFixed(1)} s.
+              {result.analysisProfile && (
+                <>
+                  {" "}
+                  Analysis: {(result.analysisProfile.footageWallMs / 1000).toFixed(0)} s for {(result.analysisProfile.footageMs / 1000).toFixed(0)} s of footage,{" "}
+                  {result.analysisProfile.clips.flatMap((c) => c.stages).filter((s) => s.reused).length} of {result.analysisProfile.clips.flatMap((c) => c.stages).length} stages
+                  reused from cache.
+                </>
+              )}
             </p>
           )}
           <p className="re-muted">
@@ -674,8 +723,9 @@ export function ReferenceEditor() {
           <details open>
             <summary>Why each source moment was chosen</summary>
             <p className="re-muted">
-              Every raw clip is searched over its whole length. Each reference shot gets the moment that best plays the same role; its action peak is placed on the shot's
-              strongest audio event. Choose another take to swap one shot without rebuilding.
+              Every raw clip is searched over its whole length, never across a cut. Each reference shot gets the moment that moves the same way (body trajectory, where
+              the movement is, its curve over time) and plays the same role; its action peak is placed on the shot's strongest audio event, else on its own movement
+              peak. Choose another take to swap one shot without rebuilding.
             </p>
             <table>
               <thead>
@@ -700,6 +750,18 @@ export function ReferenceEditor() {
                         <span className="re-muted">
                           {(m.referenceMs / 1000).toFixed(2)}–{(m.referenceEndMs / 1000).toFixed(2)} s
                         </span>
+                        {m.role && (
+                          <>
+                            <br />
+                            <span className="re-tag">{m.role}</span>
+                          </>
+                        )}
+                        {m.confidence && (
+                          <>
+                            <br />
+                            <span className={m.confidence === "low" ? "re-tag warn" : "re-tag"}>{m.confidence} confidence</span>
+                          </>
+                        )}
                       </td>
                       <td>
                         {name(m.source)} @ {(m.sourceIn / rate).toFixed(2)}–{((m.sourceIn + m.duration) / rate).toFixed(2)} s
@@ -709,11 +771,36 @@ export function ReferenceEditor() {
                             <span className="re-tag">action peak on audio event at {Math.round(m.peak.fraction * 100)}%</span>
                           </>
                         )}
+                        {m.peak?.source === "reference motion" && (
+                          <>
+                            <br />
+                            <span className="re-tag">action peak on the reference's movement peak at {Math.round(m.peak.fraction * 100)}%</span>
+                          </>
+                        )}
+                        {m.speed !== undefined && m.speed < 1 && (
+                          <>
+                            <br />
+                            <span className="re-tag warn">slowed to {Math.round(m.speed * 100)}%: the cut-safe stretch is shorter than the shot</span>
+                          </>
+                        )}
                         {m.reuse?.intentional && (
                           <>
                             <br />
                             <span className="re-tag">reused: {m.reuse.reason}</span>
                           </>
+                        )}
+                        {m.shortfall && (
+                          <>
+                            <br />
+                            <span className="re-tag warn">{m.shortfall}</span>
+                          </>
+                        )}
+                        {!!m.reasons?.length && (
+                          <ul className="re-reasons">
+                            {m.reasons.map((reason) => (
+                              <li key={reason}>{reason}</li>
+                            ))}
+                          </ul>
                         )}
                       </td>
                       <td>
@@ -721,7 +808,7 @@ export function ReferenceEditor() {
                           .sort((a, b) => b[1] - a[1])
                           .map(([k, v]) => (
                             <span key={k} className="re-meter" style={{ marginRight: 8 }}>
-                              {k}
+                              {termLabels[k] ?? k}
                               <i>
                                 <b style={{ width: `${v * 100}%` }} />
                               </i>
@@ -733,9 +820,12 @@ export function ReferenceEditor() {
                       </td>
                       <td>
                         {(m.alternatives ?? []).map((alt, k) => (
-                          <button key={k} disabled={!canApply || busy} title={Object.entries(alt.match).map(([x, v]) => `${x} ${Math.round(v * 100)}%`).join(" · ")} onClick={() => chooseTake(i, alt)}>
-                            Choose another take: {name(alt.sourceId)} @ {(alt.inMs / 1000).toFixed(2)} s
-                          </button>
+                          <div key={k} className="re-alt">
+                            <button disabled={(!canApply && !appliedTakes) || busy} title={Object.entries(alt.match).map(([x, v]) => `${termLabels[x] ?? x} ${Math.round(v * 100)}%`).join(" · ")} onClick={() => chooseTake(i, alt)}>
+                              Choose another take: {name(alt.sourceId)} @ {(alt.inMs / 1000).toFixed(2)} s
+                            </button>
+                            <span className="re-muted">{alt.lostOn}</span>
+                          </div>
                         ))}
                       </td>
                     </tr>

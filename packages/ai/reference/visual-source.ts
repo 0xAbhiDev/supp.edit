@@ -7,7 +7,8 @@ import type { JobContext } from "../../jobs";
 import { visualFrameSchema } from "./visual";
 
 export async function referenceVisual(asset: Asset, job: JobContext) {
-  const key = "reference-visual-v3:" + asset.id + ":" + asset.fingerprint;
+  // Keyed by file identity (path, size, modified time), not by project asset.
+  const key = "reference-visual-v4:" + asset.fingerprint;
   const schema = z.array(visualFrameSchema).max(9001);
   const cached = schema.safeParse(await readDerived(key));
   if (cached.success) return cached.data;

@@ -12,7 +12,7 @@ export async function sourceTone(
   job: Pick<JobContext, "checkpoint">,
   url?: string,
 ): Promise<ToneSample[]> {
-  const key = "source-tone-v2:" + asset.id + ":" + asset.fingerprint,
+  const key = "source-tone-v3:" + asset.fingerprint,
     validate = z.array(toneSampleSchema).max(600);
   const cached = validate.safeParse(await readDerived(key).catch(() => undefined));
   if (cached.success && cached.data.length) return cached.data;

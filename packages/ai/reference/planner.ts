@@ -6,7 +6,7 @@ import type { AudioTimeline } from "../audio/timeline";
 import type { SoundKind } from "../audio/synth";
 import { beatMapOf, plannedSounds, retimeDna, retimer } from "./audio-structure";
 import { alignStructure, type StructuralAlignment } from "./structural-alignment";
-import { buildFootageIndex, selectShots, type ShotChoice, type ShotRequirement } from "./footage-index";
+import { buildFootageIndex, infeasibleShots, motionPeak, selectShots, shotRole, type SelectionProfile, type ShotChoice, type ShotRequirement } from "./footage-index";
 import { editablePersonMask, type PersonSample } from "./subject-mask";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
@@ -30,6 +30,8 @@ export interface SourceEvidence {
   people?: PersonSample[];
   aperture?: Aperture;
   tone?: ToneSample[];
+  /** This clip's cached long-footage index (keyed by file identity and analysis versions). */
+  index?: import("./footage-index").SourceIndex;
 }
 export interface Controls {
   mode: RecreationMode;
@@ -108,6 +110,11 @@ export function buildRecreation(
       match?: Record<string, number>;
       alternatives?: ShotChoice["alternatives"];
       reuse?: ShotChoice["reuse"];
+      role?: ShotChoice["role"];
+      reasons?: string[];
+      confidence?: ShotChoice["confidence"];
+      shortfall?: string | null;
+      speed?: number;
       peak?: { fraction: number; source: ShotRequirement["peakSource"] };
     }[] = [];
   if (
@@ -255,18 +262,42 @@ export function buildRecreation(
   // ---- Long-footage selection: every raw clip indexed once over its whole length, then one
   // global choice per reference shot, trimmed so the source's action peak lands on the shot's
   // important moment (its strongest linked audio event).
+  let clock = performance.now();
   const footage = buildFootageIndex(sources);
+  const matchingProfile: SelectionProfile & { index: number } = { index: Math.round(performance.now() - clock), stageA: 0, stageB: 0, beam: 0, rerankedPerShot: 0 };
+  // Frame-accurate cuts the scene pass missed bound the local matcher's ranges too (2 frames clear).
+  for (const cut of footage.cuts) {
+    const at = Math.round((cut.timeMs * rate) / 1000);
+    const k = pool.findIndex((r) => r.source.asset.id === cut.sourceId && r.first + 2 < at && at < r.end - 2);
+    if (k < 0) continue;
+    const r = pool[k];
+    const parts = [
+      { ...r, end: at - 2, shot: { ...r.shot, endMs: Math.round(((at - 2) * 1000) / rate) } },
+      { ...r, first: at + 2, shot: { ...r.shot, startMs: Math.round(((at + 2) * 1000) / rate) } },
+    ].filter((x) => x.end - x.first >= 2);
+    pool.splice(k, 1, ...parts);
+  }
   const peakOf = (index: number): Pick<ShotRequirement, "peakFraction" | "peakSource"> => {
     const shot = measuredDna.shots.length === referenceShots.length ? measuredDna.shots[index] : referenceShots[index];
     const weight: Record<string, number> = { impact: 3, drop: 3, bass_hit: 2.5, downbeat: 1.6, kick: 1.5, snare: 1.2, beat: 1, onset: 0.8 };
     const anchor = (measuredDna.eventGraph?.anchors ?? [])
       .filter((a) => a.timeMs > shot.startMs + 40 && a.timeMs < shot.endMs - 40 && weight[a.kind])
       .sort((a, b) => weight[b.kind] * (0.5 + b.strength) - weight[a.kind] * (0.5 + a.strength))[0];
-    return anchor ? { peakFraction: (anchor.timeMs - shot.startMs) / Math.max(1, shot.endMs - shot.startMs), peakSource: "audio event" } : { peakFraction: 0.4, peakSource: "none" };
+    // No audio event inside the shot: its own movement peak is the moment that matters.
+    return anchor ? { peakFraction: (anchor.timeMs - shot.startMs) / Math.max(1, shot.endMs - shot.startMs), peakSource: "audio event" } : (motionPeak(shot) ?? { peakFraction: 0.4, peakSource: "none" });
   };
-  const requirements: ShotRequirement[] = referenceShots.map((shot, index) => ({ shot, durationMs: (requestedFor(index) * 1000) / rate, ...peakOf(index) }));
+  const requirements: ShotRequirement[] = referenceShots.map((shot, index) => {
+    const peak = peakOf(index);
+    return { shot, durationMs: (requestedFor(index) * 1000) / rate, ...peak, role: shotRole(shot, index, referenceShots.length, peak.peakSource, referenceShots[index + 1]) };
+  });
   // Caption-led edits keep each source's chronology; the local matcher handles that order.
-  const choices = captions ? [] : selectShots(footage, sources, requirements, controls.mode);
+  clock = performance.now();
+  const choices = captions ? [] : selectShots(footage, sources, requirements, controls.mode, 40, 12, matchingProfile);
+  for (const x of captions ? [] : infeasibleShots(footage, requirements))
+    warnings.push(`No source interval can faithfully fill reference shot ${x.shot + 1}: it needs ${(x.needMs / 1000).toFixed(1)} s and the longest usable cut-safe stretch is ${(x.longestMs / 1000).toFixed(1)} s; it uses the closest shorter moment and is flagged low-confidence.`);
+  choices.forEach((c, i) => {
+    if (c.shortfall) warnings.push(`Shot ${i + 1} (${c.role}): ${c.shortfall}`);
+  });
   const longestLater: number[] = [];
   let longest = 0;
   for (let i = referenceShots.length - 1; i >= 0; i--) {
@@ -293,8 +324,10 @@ export function buildRecreation(
     const fromChoice = (() => {
       if (!pick) return undefined;
       const first = Math.round((pick.inMs * rate) / 1000),
-        length = Math.min(requested, Math.round(((pick.outMs - pick.inMs) * rate) / 1000));
-      const range = pool.find((r) => r.source.asset.id === pick.sourceId && r.first <= first && first + length <= r.end);
+        used = Math.round(((pick.outMs - pick.inMs) * rate) / 1000),
+        // A mildly retimed pick fills the whole requested length from a shorter stretch.
+        length = pick.speed < 1 ? requested : Math.min(requested, used);
+      const range = pool.find((r) => r.source.asset.id === pick.sourceId && r.first <= first && first + Math.min(used, length) <= r.end);
       return range && length >= 2 ? { range, first, length, score: pick.score, timingCoverage: 0, motion: range.shot.motion, terms: pick.match } : undefined;
     })();
     const candidate = fromChoice ?? matchRange(
@@ -455,6 +488,9 @@ export function buildRecreation(
       key(duration - 1, 0);
     }
     const camera = ref.camera;
+    // A pick from a stretch up to 15% short of the shot plays mildly slowed (never across a cut).
+    const retimeSpeed = fromChoice && pick && pick.speed < 1 ? pick.speed : 1;
+    let speedCurve = false;
     const observations =
       s.source.analysis.vision?.frames.filter(
         (f) =>
@@ -750,10 +786,18 @@ export function buildRecreation(
           })),
         };
         const area = sourceFrameAt({ sourceIn: 0, timeRemap: curve }, duration);
-        for (const k of curve.keys) k.speed *= duration / area;
+        for (const k of curve.keys) k.speed *= (duration / area) * retimeSpeed;
         command.push({ tool: "sequence.speed", sequenceId: id, clipId, curve });
+        speedCurve = true;
       }
     }
+    if (retimeSpeed < 1 && !speedCurve)
+      command.push({
+        tool: "sequence.speed",
+        sequenceId: id,
+        clipId,
+        curve: { sourceOffset: 0, keys: [{ frame: 0, speed: retimeSpeed, easing: "smooth" as const }, { frame: duration, speed: retimeSpeed, easing: "smooth" as const }] },
+      });
     const transcript =
       s.source.speech?.transcript ??
       p.transcripts.find(
@@ -781,7 +825,7 @@ export function buildRecreation(
       referenceEndMs: ref.endMs,
       why: candidate.terms,
       selection: fromChoice ? "global" : "local",
-      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives, reuse: pick.reuse } : {}),
+      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives, reuse: pick.reuse, role: pick.role, reasons: pick.why, confidence: pick.confidence, shortfall: pick.shortfall, speed: pick.speed } : {}),
       peak: { fraction: Number(requirements[index].peakFraction.toFixed(3)), source: requirements[index].peakSource },
     });
     cursor += duration;
@@ -1518,9 +1562,9 @@ export function buildRecreation(
   if (command.length !== preview.plan.commands.length || warnings.length)
     preview = previewEditPlan(plan, p, revision);
   const min = (ms: number) => `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
-  const coverage = { ...footage.coverage, used: matches.length, global: matches.filter((m) => m.selection === "global").length, finalMs: Math.round((cursor * 1000) / rate) };
+  const coverage = { ...footage.coverage, used: matches.length, global: matches.filter((m) => m.selection === "global").length, finalMs: Math.round((cursor * 1000) / rate), matching: matchingProfile };
   warnings.push(
-    `Raw footage: ${min(coverage.suppliedMs)} supplied, ${min(coverage.analyzedMs)} analysed, ${coverage.candidates} candidate moments, ${coverage.used} used (${coverage.global} chosen globally), final edit ${(coverage.finalMs / 1000).toFixed(1)} s.`,
+    `Raw footage: ${min(coverage.suppliedMs)} supplied, ${min(coverage.analyzedMs)} analysed, ${coverage.segments} cut-safe stretches (${coverage.cuts} frame-accurate cuts), ${coverage.candidates} candidate moments, ${coverage.used} used (${coverage.global} chosen globally), final edit ${(coverage.finalMs / 1000).toFixed(1)} s. Matching: index ${matchingProfile.index} ms, stage A ${matchingProfile.stageA} ms, stage B ${matchingProfile.stageB} ms (${matchingProfile.rerankedPerShot} reranked per shot), sequence ${matchingProfile.beam} ms.`,
   );
   return { matches, warnings, preview, coverage };
 }

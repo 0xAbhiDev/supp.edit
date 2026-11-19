@@ -50,8 +50,9 @@ pub fn cancel_analysis_job(app: AppHandle, id: String) -> Result<(), String> {
 fn start(app: &AppHandle, id: &str) -> Result<Arc<AtomicBool>, String> {
     let state = app.state::<AnalysisJobs>();
     let mut jobs = state.0.lock().map_err(|e| e.to_string())?;
-    if jobs.values().filter(|(_, s)| *s).count() >= 2 {
-        return Err("Two native analysis tasks are already running".into());
+    // Matches NATIVE_SLOTS in packages/ai/media-analysis/service.ts, which queues further jobs.
+    if jobs.values().filter(|(_, s)| *s).count() >= 4 {
+        return Err("Four native analysis tasks are already running".into());
     }
     let (cancel, started) = jobs
         .get_mut(id)

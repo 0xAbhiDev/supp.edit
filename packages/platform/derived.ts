@@ -56,7 +56,7 @@ async function touch(key: string, bytes?: number) {
   if (bytes !== undefined || old)
     index.push({ key, bytes: bytes ?? old!.bytes });
   let total = index.reduce((n, e) => n + e.bytes, 0);
-  while (total > 64 * 1024 * 1024 || index.length > 512) {
+  while (total > 512 * 1024 * 1024 || index.length > 4096) {
     const entry = index.shift()!;
     total -= entry.bytes;
     if (entry.key.startsWith("derived:") && entry.key !== "derived:index")
@@ -64,16 +64,20 @@ async function touch(key: string, bytes?: number) {
   }
   await writeLocal("state", "derived:index", index);
 }
+/** Every derived read and whether it was reused, newest last (for analysis profiles). */
+export const derivedReads: { key: string; hit: boolean }[] = [];
 export function readDerived<T>(key: string) {
   return serialized(async () => {
     const value = await readLocal<T>("state", `derived:${key}`);
+    derivedReads.push({ key, hit: value !== undefined });
+    if (derivedReads.length > 2048) derivedReads.splice(0, derivedReads.length - 2048);
     if (value !== undefined) await touch(`derived:${key}`);
     return value;
   });
 }
 export function writeDerived(key: string, value: unknown, bytes: number) {
   return serialized(async () => {
-    if (bytes > 64 * 1024 * 1024) return;
+    if (bytes > 256 * 1024 * 1024) return;
     await writeLocal("state", `derived:${key}`, value);
     await touch(`derived:${key}`, bytes);
   });

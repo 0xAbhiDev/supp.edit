@@ -22,6 +22,24 @@ import type { SoundKind } from "../audio/synth";
 import { buildEventGraph } from "./event-graph";
 import { plannedSounds } from "./audio-structure";
 import { alignStructure } from "./structural-alignment";
+import { actionSignature } from "./action-signature";
+import type { VisualFrame } from "./visual";
+import { derivedReads, readDerived, writeDerived } from "../../platform/derived";
+import { INDEX_VERSION, indexSource, sourceIndexKey, type SourceIndex } from "./footage-index";
+
+/** Time and cache use of one analysis stage of one clip. */
+export interface StageTiming {
+  stage: string;
+  ms: number;
+  reused: boolean;
+}
+export interface ClipProfile {
+  clip: string;
+  footageMs: number;
+  wallMs: number;
+  stages: StageTiming[];
+}
+const clock = (ms: number) => (ms >= 60000 ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`);
 export interface RecreationInputs {
   reference: string;
   raw: string[];
@@ -84,16 +102,12 @@ export function recreate(
                 x.fingerprint === a.fingerprint &&
                 x.vision,
             );
-        const analysis = await run(a, vision ? "vision" : "video");
-        const color = await nativeColorBackend(
-          a,
-          {
-            startMs: 0,
-            endMs: Math.max(1, Math.floor(Math.min(a.duration, 300) * 1000)),
-          },
-          { ...job, report: () => {} },
-        );
-        const visual = await referenceVisual(a, { ...job, report: () => {} });
+        // Independent stages run at once (each native job has its own worker).
+        const [analysis, color, visual] = await Promise.all([
+          run(a, vision ? "vision" : "video"),
+          nativeColorBackend(a, { startMs: 0, endMs: Math.max(1, Math.floor(Math.min(a.duration, 300) * 1000)) }, { ...job, report: () => {} }),
+          referenceVisual(a, { ...job, report: () => {} }),
+        ]);
         return { asset: a, analysis, color, visual };
       };
       const total = raw.length + 3;
@@ -102,8 +116,11 @@ export function recreate(
       stage(0, "Analyzing reference");
       const quiet = { ...job, report: () => {} };
       let referenceTranscript: Project["transcripts"][number] | undefined;
+      let referenceFrames: VisualFrame[] | undefined;
+      const referenceStarted = performance.now();
       async function measureReference() {
         const measured = await visuals(reference);
+        referenceFrames = measured.visual;
         let text = null;
         try {
           text = await referenceText(reference, quiet);
@@ -185,7 +202,14 @@ export function recreate(
         try {
           if (!referencePeople.length) referencePeople = await personMasks(reference, quiet);
           const annotated = { ...dna, shots: dna.shots.map((shot) => ({ ...shot })) };
-          annotateSubjects(annotated, referencePeople, reference.width / Math.max(1, reference.height));
+          const aspect = reference.width / Math.max(1, reference.height);
+          annotateSubjects(annotated, referencePeople, aspect);
+          // Movement geometry with the subject's outline trajectory, on the reference's dense frames.
+          referenceFrames ??= await referenceVisual(reference, quiet);
+          for (const shot of annotated.shots) {
+            const action = actionSignature(referenceFrames, referencePeople, shot.startMs, shot.endMs, aspect);
+            if (action) shot.action = action;
+          }
           dna = annotated;
         } catch (e) {
           await job.checkpoint();
@@ -227,50 +251,128 @@ export function recreate(
         }
       }
       stage(1, "Extracted Style DNA");
-      const sources: SourceEvidence[] = [];
-      for (const a of raw) {
-        stage(1 + sources.length, "Understanding " + a.name);
-        const evidence: SourceEvidence = await visuals(a);
-        // Portrait delivery crops to the content; Close Match fill framing crops baked bars.
-        if (controls.format === "vertical" || closeMatch)
-          evidence.aperture = await sourceAperture(a, quiet);
-        if (keepsLook) {
+      const referenceMs = Math.round(performance.now() - referenceStarted);
+      // ---- Understanding the raw footage. Every clip's independent stages run at once and two
+      // clips are analysed together; each stage is timed and reports whether its cache was reused.
+      const needPeople =
+        (caps.personModel?.installed && dna.shots.some((shot) => shot.subjectShape)) ||
+        controls.subjectLayering === "behind-people" ||
+        (controls.subjectLayering === "reference" &&
+          (!!dna.personFlashes?.length ||
+            !!dna.text?.some((l) => l.depth?.relation === "behind" && l.evidence?.status !== "uncertain")));
+      const needSpeech = (a: Asset) =>
+        a.hasAudio &&
+        (/caption|speech|talking.head/i.test(controls.instructions) ||
+          (controls.wording === "adapt" && !!dna.text?.length && !/["“]/.test(controls.instructions))) &&
+        !!caps.model?.installed;
+      const footageMs = raw.reduce((n, a) => n + a.duration * 1000, 0);
+      const analysisProfile: ClipProfile[] = [];
+      const running = new Map<string, string[]>();
+      let doneMs = 0,
+        doneClips = 0;
+      const progress = () => {
+        const stages = analysisProfile.flatMap((c) => c.stages);
+        const reused = stages.filter((x) => x.reused).length;
+        // One unit for the whole job (the job system requires it): stages, a clip each.
+        job.report({
+          completed: 1 + doneClips,
+          total,
+          unit: "stages",
+          detail:
+            `Understanding footage · ${doneClips} of ${raw.length} clips done · ${clock(doneMs)} of ${clock(footageMs)} analysed` +
+            [...running].map(([name, active]) => ` · ${name}: ${active.length ? active.join(", ") : "finishing"}`).join("") +
+            (stages.length ? ` · ${reused} of ${stages.length} stages reused from cache` : ""),
+        });
+      };
+      const understand = async (a: Asset): Promise<SourceEvidence> => {
+        const started = performance.now(),
+          stages: StageTiming[] = [],
+          active: string[] = [];
+        running.set(a.name, active);
+        progress();
+        const hit = (prefix: string) => () => derivedReads.some((x) => x.hit && x.key.startsWith(prefix) && x.key.endsWith(a.fingerprint));
+        const timed = async <T,>(name: string, reused: () => boolean, work: () => Promise<T>): Promise<T> => {
+          active.push(name);
+          progress();
+          const t = performance.now();
           try {
-            evidence.tone = await sourceTone(a, quiet);
-          } catch (e) {
-            await job.checkpoint();
-            warnings.push("Footage tone could not be measured: " + String(e).slice(0, 160));
+            return await work();
+          } finally {
+            active.splice(active.indexOf(name), 1);
+            stages.push({ stage: name, ms: Math.round(performance.now() - t), reused: reused() });
+            progress();
           }
-        }
-        if (
-          (caps.personModel?.installed && dna.shots.some((shot) => shot.subjectShape)) ||
-          controls.subjectLayering === "behind-people" ||
-          (controls.subjectLayering === "reference" &&
-            (!!dna.personFlashes?.length || dna.text?.some(
-              (l) =>
-                l.depth?.relation === "behind" &&
-                l.evidence?.status !== "uncertain",
-            )))
-        ) {
-          try {
-            evidence.people = await personMasks(a, quiet);
-          } catch (e) {
+        };
+        await job.checkpoint();
+        await mediaAnalysis.restore(a);
+        const snapshot = mediaAnalysis.getSnapshot().find((x) => x.assetId === a.id && x.fingerprint === a.fingerprint);
+        const vision = caps.visionModel?.installed || !!snapshot?.vision;
+        const measured = !!snapshot && (vision ? !!snapshot.vision : !!snapshot.video);
+        const soft = <T,>(what: string, work: () => Promise<T>) =>
+          work().catch(async (e) => {
             await job.checkpoint();
-            warnings.push(
-              "Person segmentation unavailable: " + String(e).slice(0, 180),
-            );
+            warnings.push(what + String(e).slice(0, 180));
+            return undefined;
+          });
+        const [analysis, color, visual, aperture, tone, people, speech] = await Promise.all([
+          timed(vision ? "scenes + vision" : "scenes", () => measured, () => run(a, vision ? "vision" : "video")),
+          timed("colour", () => false, () => nativeColorBackend(a, { startMs: 0, endMs: Math.max(1, Math.floor(Math.min(a.duration, 300) * 1000)) }, quiet)),
+          timed("per-frame visual", hit("reference-visual-v4:"), () => referenceVisual(a, quiet)),
+          // Portrait delivery crops to the content; Close Match fill framing crops baked bars.
+          controls.format === "vertical" || closeMatch ? timed("aperture", hit("source-aperture-v3:"), () => sourceAperture(a, quiet)) : undefined,
+          keepsLook ? timed("tone", hit("source-tone-v3:"), () => soft("Footage tone could not be measured: ", () => sourceTone(a, quiet))) : undefined,
+          needPeople ? timed("person masks", hit("person-mask-pphumanseg-552d8a98-v2:"), () => soft("Person segmentation unavailable: ", () => personMasks(a, quiet))) : undefined,
+          needSpeech(a) ? timed("speech", () => false, () => run(a, "speech")) : undefined,
+        ]);
+        const evidence: SourceEvidence = { asset: a, analysis, color, visual };
+        if (aperture) evidence.aperture = aperture;
+        if (tone) evidence.tone = tone;
+        if (people) evidence.people = people;
+        if (speech) evidence.speech = speech;
+        // The clip's long-footage index (cut-safe segments, frame cuts, candidates), persisted by
+        // file identity: a second recreation or a new clip beside it never rebuilds it.
+        await timed("footage index", hit("footage-index-"), async () => {
+          const key = sourceIndexKey(evidence);
+          const cached = await readDerived<SourceIndex>(key).catch(() => undefined);
+          if (cached?.version === INDEX_VERSION && Array.isArray(cached.candidates) && Array.isArray(cached.segments)) evidence.index = cached;
+          else {
+            evidence.index = indexSource(evidence);
+            await writeDerived(key, evidence.index, JSON.stringify(evidence.index).length * 2).catch(() => {});
           }
-        }
-        if (
-          a.hasAudio &&
-          (/caption|speech|talking.head/i.test(controls.instructions) ||
-            (controls.wording === "adapt" &&
-              !!dna.text?.length &&
-              !/["“]/.test(controls.instructions))) &&
-          caps.model?.installed
-        )
-          evidence.speech = await run(a, "speech");
-        sources.push(evidence);
+        });
+        // Colour is cached natively; a stage that returns at once was reused.
+        for (const st of stages) if (st.stage === "colour") st.reused = st.ms < 400;
+        analysisProfile.push({ clip: a.name, footageMs: Math.round(a.duration * 1000), wallMs: Math.round(performance.now() - started), stages });
+        running.delete(a.name);
+        doneMs += a.duration * 1000;
+        doneClips++;
+        progress();
+        return evidence;
+      };
+      const footageStarted = performance.now();
+      const sources: SourceEvidence[] = new Array(raw.length);
+      let nextClip = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(2, raw.length) }, async () => {
+          while (nextClip < raw.length) {
+            const k = nextClip++;
+            sources[k] = await understand(raw[k]);
+          }
+        }),
+      );
+      const footageWallMs = Math.round(performance.now() - footageStarted);
+      {
+        const stages = analysisProfile.flatMap((c) => c.stages);
+        const byStage = new Map<string, number>();
+        for (const st of stages) byStage.set(st.stage, (byStage.get(st.stage) ?? 0) + st.ms);
+        warnings.push(
+          `Analysis time: reference ${clock(referenceMs)}; ${clock(footageMs)} of footage in ${clock(footageWallMs)} (${(footageWallMs / Math.max(1, footageMs)).toFixed(2)} s per footage second, ${stages.filter((x) => x.reused).length} of ${stages.length} stages reused). Stage totals: ` +
+            [...byStage]
+              .sort((x, y) => y[1] - x[1])
+              .map(([k, v]) => `${k} ${clock(v)}`)
+              .join(", ") +
+            ".",
+        );
       }
       await job.checkpoint();
       stage(raw.length + 1, "Processing audio");
@@ -343,7 +445,7 @@ export function recreate(
         { reference: dna.audio, music: musicAudio, soundtrack, sounds, referenceAperture },
       );
       stage(total, "Ready to preview");
-      return { ...edit, dna, warnings: [...edit.warnings, ...warnings] };
+      return { ...edit, dna, warnings: [...edit.warnings, ...warnings], analysisProfile: { referenceMs, footageMs, footageWallMs, clips: analysisProfile } };
     },
   });
 }

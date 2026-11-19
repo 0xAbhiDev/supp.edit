@@ -1,37 +1,115 @@
 // Run long-footage selection offline on a captured inventory (SOURCE.supp + i-vision.json /
-// i-visual.json from capture-reference-analysis.mjs), using the reference's measured shots.
-// Usage: node scripts/check-footage-selection.mjs INVENTORY_DIR [TRUTH.json] [MODE]
+// i-visual.json / i-person.json from capture-reference-analysis.mjs and person_mask), with the
+// reference's shots extracted as the app does (scene pass, frame-accurate cuts, action
+// signatures; subject shapes and trajectories when 0-person.json exists).
+// Usage: node scripts/check-footage-selection.mjs INVENTORY_DIR [TRUTH.json] [MODE] [--json=OUT] [--inspect=2,6]
+// --inspect lists the best reranked candidates of those reference shots.
 import fs from "node:fs";
 import path from "node:path";
 import { createServer } from "vite";
-const [dir, truthFile, mode = "Close Match"] = process.argv.slice(2);
-const read = (f) => JSON.parse(fs.readFileSync(f, "utf8").replace(/^\uFEFF/, ""));
+const args = process.argv.slice(2);
+const [dir, truthFile, mode = "Close Match"] = args.filter((a) => !a.startsWith("--"));
+const out = args.find((a) => a.startsWith("--json="))?.slice(7);
+const inspectShots = (args.find((a) => a.startsWith("--inspect="))?.slice(10) ?? "").split(",").filter(Boolean).map(Number);
+const read = (f) => JSON.parse(fs.readFileSync(f, "utf8").replace(/^﻿/, ""));
 const optional = (f) => (fs.existsSync(path.join(dir, f)) ? read(path.join(dir, f)) : undefined);
 const project = read(path.join(dir, "SOURCE.supp"));
-const host = await createServer({ server: { middlewareMode: true, hmr: false, watch: null }, appType: "custom" });
+const host = await createServer({ server: { middlewareMode: true, hmr: false, watch: null }, appType: "custom", logLevel: "error" });
 try {
-  const { describeShots } = await host.ssrLoadModule("/packages/ai/reference/dna.ts");
-  const { buildFootageIndex, selectShots } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
-  const { averageEmbedding, measuredColor, measuredLayout } = await host.ssrLoadModule("/packages/ai/reference/visual.ts");
-  const refVisual = optional("0-visual.json");
+  const { extractDNA } = await host.ssrLoadModule("/packages/ai/reference/dna.ts");
+  const { buildFootageIndex, selectShots, shotRole, motionPeak } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
+  const { actionSignature } = await host.ssrLoadModule("/packages/ai/reference/action-signature.ts");
+  const { annotateSubjects } = await host.ssrLoadModule("/packages/ai/reference/subject-shape.ts");
   const ref = project.assets[0];
-  const refAnalysis = optional("0-vision.json");
-  // As the DNA does: each shot carries the average look of the reference frames inside it.
-  const refShots = describeShots(ref, refAnalysis).map((s) => ({
-    ...s,
-    embedding: averageEmbedding((refAnalysis.vision?.frames ?? []).filter((f) => f.timeMs >= s.startMs && f.timeMs < s.endMs).map((f) => f.embedding)),
-    ...(refVisual ? { color: measuredColor(refVisual, s.startMs, s.endMs), layout: measuredLayout(refVisual, s.startMs + 100, s.endMs - 100) } : {}),
-  }));
-  const sources = project.assets.flatMap((asset, i) => (i && asset.kind === "video" ? [{ asset, analysis: optional(i + "-vision.json"), visual: optional(i + "-visual.json") }] : []));
+  const refVisual = optional("0-visual.json") ?? [];
+  const refPeople = optional("0-person.json");
+  const text = optional("text.json");
+  const dna = extractDNA(ref, optional("0-vision.json"), undefined, undefined, optional("motion.json") ?? [], Array.isArray(text) ? text : null, refVisual);
+  const aspect = ref.width / Math.max(1, ref.height);
+  if (refPeople) {
+    annotateSubjects(dna, refPeople, aspect);
+    for (const shot of dna.shots) shot.action = actionSignature(refVisual, refPeople, shot.startMs, shot.endMs, aspect) ?? shot.action;
+  }
+  const sources = project.assets.flatMap((asset, i) =>
+    i && asset.kind === "video" ? [{ asset, analysis: optional(i + "-vision.json"), visual: optional(i + "-visual.json"), people: optional(i + "-person.json") }] : [],
+  );
+  const t0 = performance.now();
   const index = buildFootageIndex(sources);
-  const reqs = refShots.map((shot) => ({ shot, durationMs: shot.endMs - shot.startMs, peakFraction: 0.4, peakSource: "none" }));
-  const choices = selectShots(index, sources, reqs, mode);
-  const truth = truthFile ? read(truthFile) : undefined;
-  console.log("coverage", JSON.stringify(index.coverage));
-  choices.forEach((c, i) => {
-    const planted = truth?.planted.find((w) => c.inMs >= w.startMs - 200 && c.outMs <= w.endMs + 200);
-    console.log(`shot ${i + 1} (${(refShots[i].startMs / 1000).toFixed(2)}–${(refShots[i].endMs / 1000).toFixed(2)}) → ${(c.inMs / 1000).toFixed(2)}–${(c.outMs / 1000).toFixed(2)} ${planted ? "in " + planted.source : "OUTSIDE"} score ${c.score} ${JSON.stringify(c.match)}`);
+  const indexMs = Math.round(performance.now() - t0);
+  const reqs = dna.shots.map((shot, i) => {
+    const peak = motionPeak(shot) ?? { peakFraction: 0.4, peakSource: "none" };
+    return { shot, durationMs: shot.endMs - shot.startMs, ...peak, role: shotRole(shot, i, dna.shots.length, peak.peakSource, dna.shots[i + 1]) };
   });
+  const profile = {};
+  const fileName = (id) => path.basename(sources.find((s) => s.asset.id === id).asset.path.replace(/^\\\\\?\\/, ""));
+  const choices = selectShots(index, sources, reqs, mode, 40, 12, profile, (i, list) => {
+    if (inspectShots.includes(i + 1))
+      console.log(`shot ${i + 1} candidates: ` + list.slice(0, 8).map((x) => `${fileName(x.c.sourceId)} ${(x.inMs / 1000).toFixed(1)} ${x.score.toFixed(3)} ${process.env.FULL ? JSON.stringify(x.match) : `a${x.match.action} l${x.match.look} p${x.match.pose} m${x.match.motion}`}`).join(" | "));
+  });
+  const truth = truthFile ? read(truthFile) : undefined;
+  const fileOf = (id) => path.basename(sources.find((s) => s.asset.id === id).asset.path.replace(/^\\\\\?\\/, ""));
+  // Which planted source should play at each reference shot (truth shots are consecutive).
+  const wantedAt = (ms) => {
+    let at = 0;
+    for (const sh of truth?.shots ?? []) {
+      if (ms >= at && ms < at + sh.lengthS * 1000) return sh.source;
+      at += sh.lengthS * 1000;
+    }
+    return undefined;
+  };
+  const cutsByClip = new Map();
+  for (const c of index.cuts) cutsByClip.set(c.sourceId, [...(cutsByClip.get(c.sourceId) ?? []), c.timeMs]);
+  const rows = choices.map((c, i) => {
+    const clip = fileOf(c.sourceId);
+    const planted = truth?.planted.map((w) => ({ ...w, clip: w.clip ?? path.basename(truth.raw ?? "") })).find((w) => w.clip === clip && c.inMs >= w.startMs - 150 && c.outMs <= w.endMs + 150);
+    const shot = dna.shots[i];
+    const wanted = wantedAt((shot.startMs + shot.endMs) / 2);
+    // Ground-truth cut crossing: a planted boundary strictly inside the chosen interval (planted
+    // boundaries are cuts unless the case films one continuous camera: truth.rawCuts === false).
+    const truthCuts = (truth?.rawCuts === false ? [] : (truth?.planted ?? [])).filter((w) => (w.clip ?? path.basename(truth.raw ?? "")) === clip).flatMap((w) => [w.startMs, w.endMs]);
+    const crosses = truthCuts.some((t) => t > c.inMs + 20 && t < c.outMs - 20);
+    return {
+      shot: i + 1,
+      ref: `${(shot.startMs / 1000).toFixed(2)}–${(shot.endMs / 1000).toFixed(2)}`,
+      role: c.role,
+      wanted,
+      clip,
+      inS: +(c.inMs / 1000).toFixed(2),
+      outS: +(c.outMs / 1000).toFixed(2),
+      speed: c.speed,
+      planted: planted ? planted.source : null,
+      correct: !!planted && planted.source === wanted,
+      crossesCut: crosses,
+      feasible: c.outMs - c.inMs >= (shot.endMs - shot.startMs) * 0.85 - 1,
+      score: c.score,
+      confidence: c.confidence,
+      action: c.match.action,
+      look: c.match.look,
+      pose: c.match.pose,
+      alternatives: c.alternatives.map((a) => `${fileOf(a.sourceId)} ${(a.inMs / 1000).toFixed(2)}: ${a.lostOn}`),
+    };
+  });
+  const overlaps = rows.filter((r, i) => rows.some((o, j) => j < i && o.clip === r.clip && o.inS < r.outS && r.inS < o.outS)).length;
+  const report = {
+    mode,
+    referenceShots: dna.shots.length,
+    coverage: index.coverage,
+    timingMs: { index: indexMs, ...profile },
+    inPlantedAction: `${rows.filter((r) => r.planted).length}/${rows.length}`,
+    correctSemanticAction: `${rows.filter((r) => r.correct).length}/${rows.length}`,
+    cutCrossings: rows.filter((r) => r.crossesCut).length,
+    durationInfeasible: rows.filter((r) => !r.feasible).length,
+    reused: overlaps,
+    fromFirstTenSeconds: rows.filter((r) => r.inS < 10).length,
+    shots: rows,
+  };
+  if (out) fs.writeFileSync(out, JSON.stringify(report, null, 2));
+  for (const r of rows)
+    console.log(
+      `shot ${r.shot} ${r.ref} [${r.role}] wants ${r.wanted ?? "?"} → ${r.clip} ${r.inS}–${r.outS}${r.speed < 1 ? ` ×${r.speed}` : ""} ${r.planted ? "in " + r.planted : "OUTSIDE"}${r.correct ? " ✓" : " ✗"}${r.crossesCut ? " CROSSES CUT" : ""} score ${r.score} action ${r.action} look ${r.look} pose ${r.pose} (${r.confidence})`,
+    );
+  const { shots, ...summary } = report;
+  console.log(JSON.stringify(summary));
 } finally {
   await host.close();
 }
