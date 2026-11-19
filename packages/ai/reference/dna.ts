@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { frameCuts } from "./cuts";
-import { actionSignature, actionSignatureSchema } from "./action-signature";
+import { actionSignature, actionSignatureSchema, shotSpan } from "./action-signature";
+import { medianSharpness, sceneSignature, sceneSignatureSchema } from "./scene-signature";
 import { toneSchema } from "./tone";
 import { subjectShapeSchema } from "./subject-shape";
 import { audioTimelineSchema } from "../audio/timeline";
@@ -55,6 +56,8 @@ export const dnaSchema = z
             subjectPath: z.array(subjectShapeSchema.nullable()).length(8).optional(),
             /** How the shot moves over time (movement geometry, not a label). */
             action: actionSignatureSchema.optional(),
+            /** What the shot shows when it barely moves: structure, horizon, role. */
+            scene: sceneSignatureSchema.optional(),
             layout: z.array(unit).length(16).nullable().optional(),
             embedding: z
               .array(z.number().finite().min(-1).max(1))
@@ -249,8 +252,11 @@ export function extractDNA(
         shot.startMs + 100,
         shot.endMs - 100,
       );
-      const action = actionSignature(visual, undefined, shot.startMs, shot.endMs, asset.width / Math.max(1, asset.height));
+      const [from, to] = shotSpan(shot);
+      const action = actionSignature(visual, undefined, from, to, asset.width / Math.max(1, asset.height));
       if (action) shot.action = action;
+      const scene = sceneSignature(visual, from, to, action, vision?.find((f) => f.subject)?.subject?.bounds.height ?? null, (vision ?? []).flatMap((f) => f.detections ?? []), medianSharpness(visual));
+      if (scene) shot.scene = scene;
     }
     const samples = motion.filter(
       (m) => m.timeMs > shot.startMs + 125 && m.timeMs < shot.endMs,

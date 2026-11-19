@@ -1,3 +1,26 @@
+## Resume after Long Footage 2.1 — 19 November 2026
+
+**State:**
+- Long Footage 2.1 is committed on top of `a3eb3f0` (Long Footage 2.0 is `3f9fcee`).
+- `bin/supp-edit.exe` is built from the working tree.
+
+**Reproduce:**
+1. Cases:
+   - `make-long-footage-case.mjs` (A), `make-multi-clip-case.mjs` (B), `make-motion-case.mjs travel|cooking` (C, D), `make-long-form-case.mjs` (E, one 11-minute clip).
+   - A cold copy of E: remux with `-c copy`, probe it, and give the asset a unique id.
+2. Offline, with the app's own audio-anchored peaks from a run log: `node scripts/check-footage-selection.mjs DIR/inventory DIR/truth.json "Close Match" --peaks=RUN.log [--inspect=N] [--json=OUT]`. Use `TOP=… FULL=1 FINE=1` for candidate detail.
+3. Signatures: `node scripts/compare-shot-signatures.mjs INVENTORY REF_START REF_END CLIP START END`.
+4. Windows: `node scripts/run-native-verification.mjs COPY.supp OUT 0 END_MS`. It is the harness around `verify-native-focused.mjs`; on failure it collects a screenshot and the console, closes the app, and keeps only this run's recovery snapshot. The matrix scripts are `test-results/footage/run-matrix-21*.sh`.
+5. Grade: `node scripts/measure-footage-selection.mjs COPY.supp DIR/truth.json OUT.json --log=RUN.log`.
+6. Inventories must use dense vision (recapture `i-vision.json` with `analyze … vision`). Sparse vision made offline look neutral and hid what the app does.
+
+**Next:**
+- **Local motion direction** (per-region flow) to separate a falling stream from a circling spoon, cooking's remaining confusion.
+- **Shared decode** of the per-frame visual pass and person masks (the measured critical path); tone stays in the webview until then.
+- **Cache reference title tracing** (16 s of every cached reconstruction).
+- **A clip over 20 minutes** to exercise the 15 fps dense rate.
+- **Native colour sampling** should report cache hits (reuse is inferred from time today).
+
 ## Resume after Long Footage 2.0 — 19 November 2026
 
 **State:**

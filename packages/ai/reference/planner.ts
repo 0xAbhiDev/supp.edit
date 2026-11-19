@@ -6,7 +6,7 @@ import type { AudioTimeline } from "../audio/timeline";
 import type { SoundKind } from "../audio/synth";
 import { beatMapOf, plannedSounds, retimeDna, retimer } from "./audio-structure";
 import { alignStructure, type StructuralAlignment } from "./structural-alignment";
-import { buildFootageIndex, infeasibleShots, motionPeak, selectShots, shotRole, type SelectionProfile, type ShotChoice, type ShotRequirement } from "./footage-index";
+import { buildFootageIndex, infeasibleShots, motionPeak, selectShots, shotRole, type PlanReport, type SelectionProfile, type ShotChoice, type ShotRequirement } from "./footage-index";
 import { editablePersonMask, type PersonSample } from "./subject-mask";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
@@ -113,6 +113,8 @@ export function buildRecreation(
       role?: ShotChoice["role"];
       reasons?: string[];
       confidence?: ShotChoice["confidence"];
+      certainty?: number;
+      coverage?: ShotChoice["coverage"];
       shortfall?: string | null;
       speed?: number;
       peak?: { fraction: number; source: ShotRequirement["peakSource"] };
@@ -292,7 +294,17 @@ export function buildRecreation(
   });
   // Caption-led edits keep each source's chronology; the local matcher handles that order.
   clock = performance.now();
-  const choices = captions ? [] : selectShots(footage, sources, requirements, controls.mode, 40, 12, matchingProfile);
+  // The cut-safe ranges before any shot consumes them (intentional reuse looks here).
+  const cutSafePool = pool.map((r) => ({ ...r }));
+  let planReport: PlanReport | undefined;
+  const choices = captions ? [] : selectShots(footage, sources, requirements, controls.mode, 40, 16, matchingProfile, undefined, (r) => (planReport = r));
+  if (planReport) {
+    const c = planReport.coverage;
+    warnings.push(`Reference coverage: excellent ${c.excellent}, good ${c.good}, weak ${c.weak}, missing ${c.missing}.`);
+    for (const g of planReport.groups)
+      warnings.push(`Shots ${g.shots.map((x) => x + 1).join(", ")} repeat one action (similarity ${g.similarity.toFixed(2)}); the footage holds ${g.stretches} strong stretch${g.stretches === 1 ? "" : "es"} of it; the plan ${g.outcome ?? g.decision}.`);
+    for (const t of planReport.nearTies) warnings.push(`Shot ${t.shot + 1}: near tie (${t.margin.toFixed(3)}) reviewed by deeper temporal matching${t.changed ? "; the pick changed" : ""}.`);
+  }
   for (const x of captions ? [] : infeasibleShots(footage, requirements))
     warnings.push(`No source interval can faithfully fill reference shot ${x.shot + 1}: it needs ${(x.needMs / 1000).toFixed(1)} s and the longest usable cut-safe stretch is ${(x.longestMs / 1000).toFixed(1)} s; it uses the closest shorter moment and is flagged low-confidence.`);
   choices.forEach((c, i) => {
@@ -327,7 +339,9 @@ export function buildRecreation(
         used = Math.round(((pick.outMs - pick.inMs) * rate) / 1000),
         // A mildly retimed pick fills the whole requested length from a shorter stretch.
         length = pick.speed < 1 ? requested : Math.min(requested, used);
-      const range = pool.find((r) => r.source.asset.id === pick.sourceId && r.first <= first && first + Math.min(used, length) <= r.end);
+      const fits = (r: (typeof pool)[number]) => r.source.asset.id === pick.sourceId && r.first <= first && first + Math.min(used, length) <= r.end;
+      // Intentional reuse plays frames another shot already used: look them up before consumption.
+      const range = pool.find(fits) ?? (pick.reuse ? cutSafePool.find(fits) : undefined);
       return range && length >= 2 ? { range, first, length, score: pick.score, timingCoverage: 0, motion: range.shot.motion, terms: pick.match } : undefined;
     })();
     const candidate = fromChoice ?? matchRange(
@@ -825,11 +839,11 @@ export function buildRecreation(
       referenceEndMs: ref.endMs,
       why: candidate.terms,
       selection: fromChoice ? "global" : "local",
-      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives, reuse: pick.reuse, role: pick.role, reasons: pick.why, confidence: pick.confidence, shortfall: pick.shortfall, speed: pick.speed } : {}),
+      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives, reuse: pick.reuse, role: pick.role, reasons: pick.why, confidence: pick.confidence, certainty: pick.certainty, coverage: pick.coverage, shortfall: pick.shortfall, speed: pick.speed } : {}),
       peak: { fraction: Number(requirements[index].peakFraction.toFixed(3)), source: requirements[index].peakSource },
     });
     cursor += duration;
-    consumeRange(pool, s, sourceIn, duration);
+    if (pool.includes(s)) consumeRange(pool, s, sourceIn, duration);
   }
   if (!cursor) throw Error("The selected footage has no usable video ranges");
   const transitionTrack = uid();
@@ -1562,7 +1576,7 @@ export function buildRecreation(
   if (command.length !== preview.plan.commands.length || warnings.length)
     preview = previewEditPlan(plan, p, revision);
   const min = (ms: number) => `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
-  const coverage = { ...footage.coverage, used: matches.length, global: matches.filter((m) => m.selection === "global").length, finalMs: Math.round((cursor * 1000) / rate), matching: matchingProfile };
+  const coverage = { ...footage.coverage, sources: planReport?.coverage, used: matches.length, global: matches.filter((m) => m.selection === "global").length, finalMs: Math.round((cursor * 1000) / rate), matching: matchingProfile };
   warnings.push(
     `Raw footage: ${min(coverage.suppliedMs)} supplied, ${min(coverage.analyzedMs)} analysed, ${coverage.segments} cut-safe stretches (${coverage.cuts} frame-accurate cuts), ${coverage.candidates} candidate moments, ${coverage.used} used (${coverage.global} chosen globally), final edit ${(coverage.finalMs / 1000).toFixed(1)} s. Matching: index ${matchingProfile.index} ms, stage A ${matchingProfile.stageA} ms, stage B ${matchingProfile.stageB} ms (${matchingProfile.rerankedPerShot} reranked per shot), sequence ${matchingProfile.beam} ms.`,
   );

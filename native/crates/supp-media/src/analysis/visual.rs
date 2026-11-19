@@ -136,6 +136,15 @@ fn measure(rgb: &[u8], previous: Option<&[u8]>, time_ms: u32) -> VisualFrame {
     }
 }
 
+/// Dense frames per second for a clip of this length.
+pub fn dense_rate(seconds: f64) -> usize {
+    if seconds > 1200. {
+        15
+    } else {
+        30
+    }
+}
+
 pub fn run(
     source: &Path,
     cancel: &AtomicBool,
@@ -147,8 +156,12 @@ pub fn run(
         return Err("Visual measurements require a video".into());
     }
     let before = std::fs::metadata(&source).map_err(|e| e.to_string())?;
-    let seconds = asset.duration.min(300.);
-    let total = (seconds * 30.).ceil() as usize;
+    // The whole clip, decoded in 4 s chunks whose pixels are released as soon as they are
+    // measured; only the compact per-frame features are kept. Past 20 minutes the dense rate
+    // halves to bound memory (a cut is still a one-sample discontinuity at 15 fps).
+    let seconds = asset.duration;
+    let rate: usize = dense_rate(seconds);
+    let total = (seconds * rate as f64).ceil() as usize;
     let mut result = Vec::with_capacity(total);
     // Decode in bounded chunks so cancellation and memory remain predictable.
     let mut previous = None;
@@ -176,7 +189,7 @@ pub fn run(
                     "0:v:0",
                     "-an",
                     "-vf",
-                    "fps=30,scale=96:54:out_range=full,format=rgb24",
+                    &format!("fps={rate},scale=96:54:out_range=full,format=rgb24"),
                     "-pix_fmt",
                     "rgb24",
                     "-f",
@@ -184,11 +197,11 @@ pub fn run(
                     "pipe:1",
                 ]),
             cancel,
-            PIXELS * 3 * 122,
+            PIXELS * 3 * (4 * rate + 2),
         )?;
         for (index, rgb) in bytes.chunks_exact(PIXELS * 3).enumerate() {
             check(cancel)?;
-            let time_ms = (start * 1000 + (index * 1000 + 15) / 30) as u32;
+            let time_ms = (start * 1000 + (index * 1000 + rate / 2) / rate) as u32;
             if f64::from(time_ms) >= seconds * 1000. {
                 break;
             }

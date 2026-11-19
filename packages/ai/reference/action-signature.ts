@@ -14,8 +14,18 @@
 import { z } from "zod";
 import type { VisualFrame } from "./visual";
 import { stabilize, type PersonSample } from "./subject-mask";
+import { shapeFit, silhouette } from "./subject-shape";
 
 export const STEPS = 12;
+/** Below this mean per-frame change a picture is still: where it "moves" is codec noise. */
+export const STILL_LEVEL = 0.0003;
+/** Frames kept clear of a reference shot's cuts when measuring it: the frame at a cut (or one
+ * frame of boundary slack) would dominate where and how much the shot moves. Raw segments keep the
+ * same two-frame margin (cuts.ts). */
+export const shotSpan = (shot: { startMs: number; endMs: number }) => {
+  const guard = Math.min(67, (shot.endMs - shot.startMs) / 6);
+  return [shot.startMs + guard, shot.endMs - guard] as const;
+};
 const curve = z.array(z.number().finite()).length(STEPS);
 export const actionSignatureSchema = z
   .object({
@@ -47,6 +57,12 @@ export const actionSignatureSchema = z
         stretch: z.number().nonnegative(),
         /** Outline movement by body third (top, middle, bottom) × axis (vertical, horizontal). */
         limbs: z.array(z.number().min(0).max(1)).length(6),
+        /** Principal-axis angle of the outline over time (radians), for near-tie review. */
+        orientation: curve.optional(),
+        /** How much the outline changes shape between samples (0 rigid – 1 entirely new). */
+        deformation: z.number().min(0).max(1).optional(),
+        /** Share of picture movement inside the subject's box (foreground vs background). */
+        foreground: z.number().min(0).max(1).optional(),
       })
       .strict()
       .nullable(),
@@ -112,7 +128,7 @@ function periodOf(values: readonly number[], stepMs: number): { periodMs: number
   return best >= 0.2 && lag ? { periodMs: Math.round(lag * stepMs), periodicity: Math.min(1, best) } : { periodMs: null, periodicity: Math.max(0, Math.min(1, best)) };
 }
 
-function subjectTrajectory(people: readonly PersonSample[], start: number, end: number, frameAspect: number): ActionSignature["subject"] {
+function subjectTrajectory(people: readonly PersonSample[], start: number, end: number, frameAspect: number, frames: readonly VisualFrame[] = []): ActionSignature["subject"] {
   const inside = stabilize(people.filter((p) => p.timeMs >= start && p.timeMs < end && p.points.length >= 3));
   if (inside.length < 3) return null;
   const boxes = inside.map((p) => {
@@ -140,6 +156,38 @@ function subjectTrajectory(people: readonly PersonSample[], start: number, end: 
   }
   const total = limbs.reduce((a, b) => a + b, 0);
   const pts = (get: (b: (typeof boxes)[number]) => number) => boxes.map((b) => ({ t: b.t, v: get(b) }));
+  // Principal axis of each outline from its second moments.
+  const angles = inside.map((p) => {
+    const cx = mean(p.points.map((q) => q[0])),
+      cy = mean(p.points.map((q) => q[1]));
+    let xx = 0,
+      yy = 0,
+      xy = 0;
+    for (const [x, y] of p.points) {
+      xx += ((x - cx) * frameAspect) ** 2;
+      yy += (y - cy) ** 2;
+      xy += (x - cx) * frameAspect * (y - cy);
+    }
+    return { t: p.timeMs, v: 0.5 * Math.atan2(2 * xy, xx - yy) };
+  });
+  const fits: number[] = [];
+  for (let i = 1; i < inside.length; i++) {
+    const a = silhouette(inside[i - 1].points, frameAspect),
+      b = silhouette(inside[i].points, frameAspect);
+    if (a && b && inside[i].timeMs - inside[i - 1].timeMs <= 250) fits.push(shapeFit(a, b));
+  }
+  // Foreground: movement in the layout cells the subject's box covers, against the whole frame.
+  const box = { left: Math.min(...boxes.map((b) => b.cx)) - 0.1, right: Math.max(...boxes.map((b) => b.cx)) + 0.1, top: Math.min(...boxes.map((b) => b.top)), bottom: Math.max(...boxes.map((b) => b.top + b.h)) };
+  let fg = 0,
+    all = 0;
+  for (let i = 1; i < frames.length; i++)
+    for (let j = 0; j < 16; j++) {
+      const d = Math.abs(frames[i].layout[j] - frames[i - 1].layout[j]);
+      all += d;
+      const x0 = (j % 4) / 4,
+        y0 = Math.floor(j / 4) / 4;
+      if (x0 < box.right && x0 + 0.25 > box.left && y0 < box.bottom && y0 + 0.25 > box.top) fg += d;
+    }
   return {
     cx: resample(pts((b) => b.cx), start, end),
     cy: resample(pts((b) => b.cy), start, end),
@@ -149,6 +197,9 @@ function subjectTrajectory(people: readonly PersonSample[], start: number, end: 
     travelY: span(boxes.map((b) => b.cy)) / body,
     stretch: span(boxes.map((b) => b.h)) / body,
     limbs: total > 0 ? limbs.map((v) => v / total) : limbs.map(() => 1 / 6),
+    orientation: resample(angles, start, end).map((v) => Number(v.toFixed(3))),
+    ...(fits.length ? { deformation: Number(Math.max(0, Math.min(1, 1 - mean(fits))).toFixed(3)) } : {}),
+    ...(all > 0 ? { foreground: Number(Math.min(1, fg / all).toFixed(3)) } : {}),
   };
 }
 
@@ -200,7 +251,7 @@ export function actionSignature(
     ...periodOf(smooth, stepMs),
     peak: moving.length ? Math.max(0, Math.min(1, (moving[peakAt].timeMs - startMs) / Math.max(1, endMs - startMs))) : 0.5,
     peakedness: smoothMean > 1e-6 ? Number((smooth[peakAt] / smoothMean).toFixed(3)) : 0,
-    subject: people?.length ? subjectTrajectory(people, startMs, endMs, frameAspect) : null,
+    subject: people?.length ? subjectTrajectory(people, startMs, endMs, frameAspect, inside) : null,
   };
 }
 
@@ -241,6 +292,15 @@ export interface ActionMatch {
 
 /** How alike two stretches move, 0–1 per aspect. */
 export function actionSimilarity(a: ActionSignature, b: ActionSignature): ActionMatch {
+  // Two still pictures move alike; a still against a moving one does not. Neither has a
+  // meaningful movement curve or map, so those are not compared.
+  const stillA = a.level < STILL_LEVEL,
+    stillB = b.level < STILL_LEVEL;
+  if (stillA || stillB) {
+    const same = stillA && stillB ? 1 : 0.25;
+    const r = (v: number) => Number(v.toFixed(3));
+    return { trajectory: same, regions: same, camera: same, rhythm: same, subject: null, overall: r(same) };
+  }
   const trajectory = 0.5 * shape(a.energy, b.energy) + 0.5 * Math.max(0, 1 - mean(a.energy.map((v, i) => Math.abs(v - b.energy[i]))) / 1.5);
   const regions = intersection(a.regions, b.regions);
   const moves = (s: ActionSignature) => Math.abs(s.camera.panX) + Math.abs(s.camera.panY) + Math.abs(s.camera.zoom) > 0.02;

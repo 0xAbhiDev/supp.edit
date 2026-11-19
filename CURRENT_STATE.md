@@ -1,3 +1,46 @@
+## Long footage 2.1: global semantic planning, scarcity and generalization — 19 November 2026
+
+Checkpoint before this phase: `a3eb3f0` (Long Footage 2.0 is `3f9fcee`). This phase was committed after review.
+
+The planner now builds one plan for the whole reference against the whole inventory:
+- **Scarcity:** source resources with scarcity, and repeat groups with a permission and an outcome.
+- **Sharing:** action-phase windows that let shots share one repetition.
+- **Search:** a future-aware beam that keeps diverse ways of spending contested footage.
+- **Reuse and mismatch:** controlled reuse only within repeat groups (reported), and a semantic-mismatch penalty graded by how much worse a substitute agrees.
+- **Decisions:** near-tie review, transition context, calibrated confidence and coverage classes, and "No close source match found" handled per mode.
+- **Still shots:** a scene signature for static shots.
+- **Long footage:** cut-versus-zoom boundaries, whole-clip dense analysis (no 5-minute limit), tone profiling and cache diagnostics.
+- **Test harness:** it recovers from failed runs.
+
+Windows app, Close Match, full flow (open, recreate, preview, apply, undo, redo, alternative take with undo and redo, save, exit, reopen, playback, Inspector edit, Deliver). Picks are graded from the preview's own explanation, before the deliberate take edit:
+
+| Case | Shots measured | In planted action | Correct action | Cut crossings | Duration-infeasible | Intentional reuse | Accidental reuse | Coverage (exc/good/weak/missing) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A: 90 s gym (before → after) | 6 | 6/6 → 6/6 | 4/6 → **6/6** | 0 | 0 | 0 | 0 | 3/2/1/0 |
+| B: 7 m 10 s gym | 9 | 9/9 → 9/9 | 8/9 → **9/9** | 0 | 0 | 0 | 0 | 2/5/2/0 |
+| C: travel (generated) | 6 | 5/6 → 6/6 | 4/6 → **6/6** | 0 | 0 | 0 | 0 | 1/5/0/0 |
+| D: cooking (generated) | 4 → 6 | offline 2/4 → 5/6 | offline 1/4 → **4/6** | 0 | 0 | 0 | 0 | 2/1/2/1 |
+| E: one 11-minute clip (new) | 9 | 9/9 | **9/9** | 0 | 0 | 0 | 0 | 3/4/2/0 |
+
+- **A:** the planner finds that shots 1 and 6 repeat the deadlift the footage holds once ("shared one stretch"). It splits the repetition on movement-phase boundaries: shot 1 32.87–33.94 s, shot 6 31.07–32.69 s at ×0.85, with no frame played twice. Before, shots 5 and 6 swapped onto wrong lifts.
+- **E:** seven of nine picks lie after minute 5 (330–642 s), which dense analysis never reached before.
+- **Times:**
+  - B first run 145 s (2.0: 155 s); B cached 22 s on a quiet machine (2.0: 19 s). The cached floor is reference title tracing (16 s, uncached by design) plus matching (3.5 s, +1.5 s for phase windows, the near-tie review and scene signatures).
+  - E cold first run 343 s for 11 minutes (0.48 s per footage second). Person masks are the critical path (5 m 17 s), level with vision (5 m 11 s).
+- **Tone profile (phase 15):** 90 s: 180 frames, seeking 11 s, drawing 4.2 s, pixel readback ≈ 0, measuring 0.1 s. 11 min: 1320 frames, seeking 1 m 41 s, drawing 33 s.
+  - **Decision:** decode-by-seek dominates tone, but tone runs beside person masks, which take longer on every clip, so moving it native would not shorten any run yet. It was not moved. The one change: a single pixel readback per frame instead of two.
+- **Shared frame analysis (phase 16):** not built. The same measurements show person masks (192², 10 Hz) and vision as the critical path; sharing tone's decode would not change wall time. Merging the visual and person-mask decodes is the measured next step.
+- **Cut detection:**
+  - Cooking reference: 5/5 punch-in cuts (was 1/5; now one-frame scale jumps).
+  - Reel 55: no false splits.
+  - Reel 54: gains 3.93 s, 6.17 s (both verified) and the end-card cut.
+  - S1 corpus: gains its ground-truth cut at 2.5 s; coastal gains 7.57 s.
+  - Raw clips: 30/30 planted cuts.
+- **Bugs found on the way:**
+  - **Vision frame cap:** the vision schema capped frames at 96, which broke any clip over about 4 minutes once 2.0 sampled every 2.5 s; now 2200.
+  - **Retimed source range:** the panel showed a retimed shot's source range as in-point + timeline length (overlap and cut-crossing false alarms); now in-point + length × speed.
+- **Tests:** 228 TS tests (8 new in `tests/long-footage-21.test.ts`), 42 native, `tsc` clean.
+
 ## Long footage 2.0: semantic action matching and cut-safe selection — 19 November 2026
 
 Checkpoint before this phase: `6632f5e`. This phase was committed as `3f9fcee` after review.

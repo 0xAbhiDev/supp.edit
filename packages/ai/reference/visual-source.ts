@@ -8,8 +8,9 @@ import { visualFrameSchema } from "./visual";
 
 export async function referenceVisual(asset: Asset, job: JobContext) {
   // Keyed by file identity (path, size, modified time), not by project asset.
-  const key = "reference-visual-v4:" + asset.fingerprint;
-  const schema = z.array(visualFrameSchema).max(9001);
+  const key = "reference-visual-v5:" + asset.fingerprint;
+  // Whole clips: 30 frames a second up to 20 minutes, 15 beyond (native dense_rate).
+  const schema = z.array(visualFrameSchema).max(120001);
   const cached = schema.safeParse(await readDerived(key));
   if (cached.success) return cached.data;
   if (!desktop) return [];

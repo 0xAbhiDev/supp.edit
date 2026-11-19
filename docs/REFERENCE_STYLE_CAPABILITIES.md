@@ -1,5 +1,19 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**19 November Long Footage 2.1.** Five cases ran the full Windows flow on the current build (final matrix: `test-results/footage/*/native21-final`). Picks are graded from the preview's own explanation. Cached times vary with machine load (the 7 m 10 s case: 22 s quiet, 38 s under load):
+
+| Case | Raw pool | Shots measured | In planted action | Right action | Cut crossings | Reuse | Preview first / cached |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `footage/long90` | one 90 s gym clip | 6 | 6/6 | 6/6 | 0 | 0 | 48 s / 17 s |
+| `footage/multi` | three gym clips, 7 m 10 s | 9 | 9/9 | 9/9 | 0 | 0 | 145 s / 22 s |
+| `footage/travel` | two generated city clips, 3 m | 6 | 6/6 | 6/6 | 0 | 0 | 62 s / 13 s |
+| `footage/cooking` | two generated counter clips, 2 m 50 s | 6 | 5/6 | 4/6 | 0 | 0 | 166 s / 5 s |
+| `footage/long11` | one 11-minute gym clip | 9 | 9/9 | 9/9 | 0 | 0 | 343 s / 60 s (machine under load) |
+
+- **Repeated action:** the 90 s reference repeats the deadlift the footage holds once; the plan shares one repetition by movement phase, without reuse.
+- **Long clips:** the 11-minute clip is analysed end to end (seven picks after minute 5).
+- **Cooking:** pour versus stir is the remaining confusion; the signature has where small things move, not which way.
+
 **19 November Long Footage 2.0.** The same two gym cases, plus a generated travel case; all three passed the full Windows flow on the current build, including "Choose another take" after Apply with Undo and Redo. Picks are graded from the preview's own explanation.
 
 | Case | Raw pool | Reference shots measured | In planted action | Right action | Cut crossings | Reuse | First preview / cached |

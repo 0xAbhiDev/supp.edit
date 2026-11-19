@@ -441,6 +441,17 @@ fn detect(session: &mut Session, rgb: &RgbImage) -> Result<Vec<Detection>, Strin
     }
     Ok(kept)
 }
+/// Frame budget and scene cap for one clip: 400 frames / 160 scenes up to ~16 minutes, then a
+/// sample every 2.5 s of footage so long clips keep looks measured throughout.
+pub fn vision_budget(seconds: f64) -> (usize, usize) {
+    let every = (seconds / 2.5).ceil() as usize;
+    if every <= 400 {
+        (400, 160)
+    } else {
+        (every.min(2000), 600)
+    }
+}
+
 pub fn analyze(
     source: &Path,
     asset: &Asset,
@@ -475,11 +486,11 @@ pub fn analyze(
     // Long footage needs looks measured throughout, not three samples per detected scene: cuts
     // between similar material are often missed, leaving one scene of a minute or more. Long
     // scenes get a sample every 2.5 s; the whole clip stays within a frame budget.
-    const FRAME_BUDGET: usize = 400;
-    let count = video.scenes.len().min(160);
+    let (frame_budget, scene_cap) = vision_budget(asset.duration);
+    let count = video.scenes.len().min(scene_cap);
     let indices: Vec<usize> = (0..count).map(|i| i * video.scenes.len() / count).collect();
     let mut frames = Vec::new();
-    let mut budget = FRAME_BUDGET;
+    let mut budget = frame_budget;
     for (done, index) in indices.into_iter().enumerate() {
         let scene = &video.scenes[index];
         let length = scene.end_ms - scene.start_ms;

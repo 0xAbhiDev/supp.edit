@@ -25,7 +25,10 @@ const shots = c.layers.filter((l) => l.trackId === track && l.kind === "media").
 const explained = logFile
   ? JSON.parse(fs.readFileSync(logFile, "utf8").split("\n").find((line) => line.includes("Explained each choice")).replace(/^.*?Explained each choice /, "")).rows.map((t) => {
       const [, a, b, file, inS, outS] = t.match(/^\d+ ([\d.]+)–([\d.]+) s .*? (\S+\.mp4) @ ([\d.]+)–([\d.]+) s/);
-      return { refStartS: +a, refEndS: +b, file, inS: +inS, outS: +outS };
+      // Builds before the panel showed retimed source ranges reported in + timeline length.
+      const slowed = t.match(/slowed to (\d+)%/);
+      const span = +outS - +inS;
+      return { refStartS: +a, refEndS: +b, file, inS: +inS, outS: slowed && !process.argv.includes("--source-ranges") ? +(+inS + span * (+slowed[1] / 100)).toFixed(2) : +outS };
     })
   : undefined;
 const rows = (explained ?? shots).map((l, i) => {

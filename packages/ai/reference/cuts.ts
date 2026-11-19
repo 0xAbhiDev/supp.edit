@@ -58,7 +58,9 @@ export interface Overlay {
 /** strict (for finished, stylised references, whose effects imitate cuts): titles are masked
  * whatever other evidence says; a picture that returns within half a second (a silhouette flash,
  * a colour pulse, a short insert) is an effect, not a shot; and the cut must break the picture
- * globally: global flow loses its match AND the palette, the level or the motion regime changes. */
+ * globally: global flow loses its match or the scale/position jumps for one frame (a continuous
+ * zoom or pan is coherent over many frames) AND the palette, the level or the motion regime
+ * changes. */
 export function frameCuts(frames: readonly VisualFrame[], people: readonly PersonSample[] = [], overlays: readonly Overlay[] = [], strict = false): FrameCut[] {
   const cuts: FrameCut[] = [];
   const n = frames.length;
@@ -111,6 +113,15 @@ export function frameCuts(frames: readonly VisualFrame[], people: readonly Perso
     const conf = f.flow?.confidence;
     const confBefore = median(frames.slice(Math.max(1, i - 6), i).map((x) => x.flow?.confidence ?? 1));
     if (conf !== undefined && conf < 0.75 && conf <= confBefore - 0.15 && confBefore >= 0.6) evidence.push("flow reset");
+    // Cut or zoom: a continuous zoom (or pan) is coherent over many frames; a punch-in cut or a
+    // cut between two set-ups shows a scale or translation jump at one frame only.
+    const nbFlow = frames.slice(Math.max(1, i - 6), i).concat(frames.slice(i + 1, Math.min(n, i + 7)));
+    const exp = Math.abs(f.flow?.expansion ?? 0),
+      pan = Math.hypot(f.flow?.panX ?? 0, f.flow?.panY ?? 0);
+    const nbExp = median(nbFlow.map((x) => Math.abs(x.flow?.expansion ?? 0))),
+      nbPan = median(nbFlow.map((x) => Math.hypot(x.flow?.panX ?? 0, x.flow?.panY ?? 0)));
+    if (exp >= 0.05 && nbExp <= 0.2 * exp) evidence.push("scale jump");
+    else if (pan >= 1 && nbPan <= 0.2 * pan) evidence.push("camera transform jump");
     const before = frames.slice(Math.max(0, i - 5), i),
       after = frames.slice(i, Math.min(n, i + 5));
     const sharpShift = Math.abs(median(before.map((x) => x.sharpness)) - median(after.map((x) => x.sharpness)));
@@ -145,8 +156,10 @@ export function frameCuts(frames: readonly VisualFrame[], people: readonly Perso
       evidence.push("picture changes beyond the titles");
     }
     if (strict) {
-      // A punch-in keeps the palette but resets flow and shifts the level: also a cut.
-      if (!evidence.includes("flow reset") || !(evidence.includes("palette jump") || evidence.includes("motion regime switch") || evidence.includes("level shift"))) continue;
+      // The picture's geometry breaks (flow loses its match, or the scale or position jumps for
+      // one frame, as at a punch-in) AND its palette, level or motion regime changes.
+      const geometry = evidence.includes("flow reset") || evidence.includes("scale jump") || evidence.includes("camera transform jump");
+      if (!geometry || !(evidence.includes("palette jump") || evidence.includes("motion regime switch") || evidence.includes("level shift"))) continue;
       const returns = (from: number, to: number, target: VisualFrame) => {
         // Layout alone: a strobing effect returns the layout while its colour is still pulsing.
         for (let k = Math.max(0, from); k <= Math.min(n - 1, to); k++) if (layoutDelta(frames[k], target) < 0.3 * jump) return true;

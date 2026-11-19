@@ -28,6 +28,8 @@ import { pathFit, shapeFit, shapeOver, shapePath } from "./subject-shape";
 import type { SourceEvidence } from "./planner";
 import { cutSafeSegments, frameCuts } from "./cuts";
 import { actionSignature, actionSimilarity, smoothedChange, type ActionSignature } from "./action-signature";
+import { sceneSignature, sceneSimilarity } from "./scene-signature";
+import { breakNearTies, calibrate, phaseWindows, planSequence, repeatGroups, sourceResources, stretchOf, strongStretches, type Coverage, type Option, type RepeatGroup, type SourceResource } from "./sequence-planner";
 
 export interface FootageSegment {
   sourceId: string;
@@ -70,7 +72,7 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 
 /** Version of the per-clip index (segments, frame cuts, candidates). Part of its cache key with
  * the file identity, the vision model and whether person contours were measured. */
-export const INDEX_VERSION = "cut-safe-segments-1";
+export const INDEX_VERSION = "cut-safe-segments-2";
 export interface SourceIndex extends FootageIndex {
   version: string;
 }
@@ -142,6 +144,38 @@ function indexClips(sources: SourceEvidence[]): FootageIndex {
       const cuts = frameCuts(visual, source.people ?? []);
       for (const c of cuts) allCuts.push({ sourceId: id, timeMs: c.timeMs, evidence: c.evidence });
       segments = cutSafeSegments(scenes, cuts, 67, 400);
+      // A frozen run (no codec change for at least 0.5 s: a held still, a paused stream) beside live
+      // footage is its own stretch, so live windows are never judged by the hold next to them.
+      const frozenRuns: { startMs: number; endMs: number }[] = [];
+      // Hysteresis: up to three changing frames inside a run (quantisation of a near-still picture)
+      // do not end it.
+      let runStart = -1,
+        lastStill = -1;
+      for (let i = 1; i <= visual.length; i++) {
+        const still = i < visual.length && visual[i].change < 0.00015;
+        if (still) {
+          if (runStart < 0) runStart = i;
+          lastStill = i;
+        } else if (runStart >= 0 && (i === visual.length || i - lastStill > 3)) {
+          const startMs = visual[runStart].timeMs,
+            endMs = visual[lastStill].timeMs + 33;
+          if (endMs - startMs >= 500) frozenRuns.push({ startMs, endMs });
+          runStart = -1;
+        }
+      }
+      segments = segments.flatMap((seg) => {
+        const parts: typeof segments = [];
+        let at = seg.startMs;
+        for (const run of frozenRuns.filter((r) => r.endMs > seg.startMs && r.startMs < seg.endMs)) {
+          const a = Math.max(seg.startMs, run.startMs),
+            b = Math.min(seg.endMs, run.endMs);
+          if (a - 33 - at >= 400) parts.push({ startMs: at, endMs: a - 33, cutBefore: at === seg.startMs ? seg.cutBefore : false, cutAfter: false });
+          if (b - a >= 400) parts.push({ startMs: a, endMs: b, cutBefore: a === seg.startMs ? seg.cutBefore : false, cutAfter: b === seg.endMs ? seg.cutAfter : false });
+          at = b + 33;
+        }
+        if (seg.endMs - at >= 400) parts.push({ startMs: at, endMs: seg.endMs, cutBefore: at === seg.startMs ? seg.cutBefore : false, cutAfter: seg.cutAfter });
+        return parts.length ? parts : [seg];
+      });
     } else {
       // Without dense frames: an isolated one-sample spike of 500 ms frame difference is a cut.
       segments = [];
@@ -258,7 +292,10 @@ export function shotRole(shot: Shot, index: number, count: number, peakSource: S
   const camera = a ? Math.abs(a.camera.panX) + Math.abs(a.camera.panY) + Math.abs(a.camera.zoom) : (shot.camera?.drift ?? 0) / 2;
   const height = shot.subjectShape?.height ?? null;
   if (length < 450 && level > 0.01) return "transition";
-  if (level < 0.0015 || (shot.camera?.freeze ?? 0) > 0.5) return "rest/hold";
+  // A hold is a still picture, or weak movement spread over the frame; a small object moving in
+  // one place (a spoon, a stream, a vehicle far away) is an action even at a low level.
+  const localized = (shot.scene?.localized ?? 0) >= 0.45;
+  if (level < 0.0003 || (level < 0.0015 && !localized)) return "rest/hold";
   if (peakSource === "audio event" && (a?.peakedness ?? 0) >= 1.5) return "action peak";
   if (camera > 0.08 || (shot.framing === "wide" && level > 0.006)) return "wide movement";
   if (shot.framing === "close" || (height !== null && height > 0.9)) return level > 0.006 ? "close-up" : "detail";
@@ -279,6 +316,10 @@ export interface Scored {
   match: Record<string, number>;
   /** Movement-geometry detail when measured (stage B). */
   action?: ReturnType<typeof actionSimilarity>;
+  /** Pose agreement when a person was measured on both sides (stage B). */
+  pose?: number | null;
+  /** Subject scale (height share, or framing class) for transition context. */
+  scale?: number | null;
 }
 export interface ShotChoice {
   sourceId: string;
@@ -294,8 +335,17 @@ export interface ShotChoice {
   /** Plain reasons: what made it win, feasibility, peak alignment. */
   why: string[];
   confidence: "high" | "medium" | "low";
+  /** Calibrated 0–1 confidence: margin to the best distinct alternative, semantic agreement,
+   * quality and duration fit — not the absolute score. */
+  certainty: number;
+  /** Score lead over the best alternative from another stretch. */
+  margin: number;
+  /** How well the source footage covers this shot. */
+  coverage: Coverage;
+  /** Movement phases the window holds when it was cut on phase boundaries. */
+  phase?: string;
   alternatives: { sourceId: string; inMs: number; outMs: number; speed: number; score: number; match: Record<string, number>; lostOn: string }[];
-  reuse: { intentional: boolean; reason: string } | null;
+  reuse: { intentional: boolean; permitted?: boolean; reason: string; confidence?: number } | null;
   /** The shot could not be filled faithfully: what was tried and why it fell short. */
   shortfall: string | null;
 }
@@ -304,9 +354,9 @@ export interface ShotChoice {
  * movement level, peak alignment, composition, tone, quality; look (a frame embedding) counts
  * less, since similar rooms look alike whatever happens in them. Remix leans on movement. */
 const weights: Record<RecreationMode, Record<string, number>> = {
-  "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6 },
-  "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6 },
-  "Creative Remix": { action: 0.8, pose: 0.2, look: 0.3, framing: 0.2, motion: 1.0, peak: 0.5, composition: 0.15, tone: 0.15, quality: 0.6 },
+  "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 },
+  "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6, scene: 1 },
+  "Creative Remix": { action: 0.8, pose: 0.2, look: 0.3, framing: 0.2, motion: 1.0, peak: 0.5, composition: 0.15, tone: 0.15, quality: 0.6, scene: 0.5 },
 };
 /** What each role cares about more. */
 const roleEmphasis: Partial<Record<ShotRole, Record<string, number>>> = {
@@ -333,21 +383,39 @@ export const termLabels: Record<string, string> = {
   camera: "camera move",
   subject: "body trajectory",
   duration: "duration fit",
+  scene: "scene and role",
 };
 
 /** Score one candidate for one reference shot, trimmed so its peak lands on the shot's peak.
  * deep: measure movement geometry and pose (stage B); otherwise the cheap terms only. */
-export function scoreCandidate(req: ShotRequirement, c: FootageCandidate, source: SourceEvidence, mode: RecreationMode, deep = true): Scored | undefined {
+export function scoreCandidate(
+  req: ShotRequirement,
+  c: FootageCandidate,
+  source: SourceEvidence,
+  mode: RecreationMode,
+  deep = true,
+  /** An explicit window inside the stretch (a phase window); otherwise trimmed on the peak. */
+  window?: { inMs: number; outMs: number },
+): Scored | undefined {
   const len = req.durationMs;
   const lo = c.sceneStartMs,
     hi = c.sceneEndMs;
   const usable = hi - lo;
   // Duration feasibility before anything else: never borrow frames across a cut.
   if (usable < len * 0.85) return undefined;
-  const speed = usable >= len ? 1 : Number((usable / len).toFixed(3));
-  const sourceLen = Math.min(usable, len * speed);
-  let inMs = c.peakMs - req.peakFraction * sourceLen;
-  inMs = Math.max(lo, Math.min(hi - sourceLen, inMs));
+  let speed: number, sourceLen: number, inMs: number;
+  if (window) {
+    if (window.inMs < lo - 1 || window.outMs > hi + 1) return undefined;
+    sourceLen = Math.min(len, window.outMs - window.inMs);
+    speed = Number(Math.min(1, sourceLen / len).toFixed(3));
+    if (speed < 0.85) return undefined;
+    inMs = window.inMs;
+  } else {
+    speed = usable >= len ? 1 : Number((usable / len).toFixed(3));
+    sourceLen = Math.min(usable, len * speed);
+    inMs = c.peakMs - req.peakFraction * sourceLen;
+    inMs = Math.max(lo, Math.min(hi - sourceLen, inMs));
+  }
   const outMs = inMs + sourceLen;
   const achieved = (c.peakMs - inMs) / Math.max(1, sourceLen);
   // Look: embeddings measured inside this segment, near the window; otherwise the dense colour.
@@ -379,32 +447,63 @@ export function scoreCandidate(req: ShotRequirement, c: FootageCandidate, source
       : 0.5;
   let action: ReturnType<typeof actionSimilarity> | undefined;
   let pose: number | null = null;
+  let scene: number | null = null;
+  let measuredHeight: number | null = null;
+  let scale: number | null = shotScale === "close" ? 0.9 : shotScale === "medium" ? 0.6 : shotScale === "wide" ? 0.3 : null;
   if (deep) {
     const aspect = source.asset.width / Math.max(1, source.asset.height);
-    if (req.shot.action && source.visual?.length) {
-      const sig = actionSignature(source.visual, source.people, inMs, outMs, aspect);
-      if (sig) action = actionSimilarity(req.shot.action, sig);
+    const sig = source.visual?.length ? actionSignature(source.visual, source.people, inMs, outMs, aspect) : undefined;
+    if (req.shot.action && sig) action = actionSimilarity(req.shot.action, sig);
+    const shape = source.people?.length ? shapeOver(source.people, inMs, outMs, aspect) : undefined;
+    if (shape) {
+      scale = shape.height;
+      measuredHeight = shape.height;
     }
-    const shape = req.shot.subjectShape && source.people?.length ? shapeOver(source.people, inMs, outMs, aspect) : undefined;
+    // What the picture shows, which decides shots that barely move.
+    if (req.shot.scene && source.visual?.length) {
+      const detections = frames.flatMap((f) => f.detections ?? []);
+      const cs = sceneSignature(source.visual, inMs, outMs, sig, shape?.height ?? frames.find((f) => f.subject)?.subject?.bounds.height ?? null, detections);
+      if (cs) scene = sceneSimilarity(req.shot.scene, cs).overall;
+    }
     const still = req.shot.subjectShape && shape ? shapeFit(req.shot.subjectShape, shape) : null;
     // Pose trajectory: the outline's sequence across the shot, aligned by time warping.
     const path = req.shot.subjectPath && source.people?.length ? pathFit(req.shot.subjectPath.map((p) => p ?? undefined), shapePath(source.people, inMs, outMs, aspect)) : undefined;
     pose = still !== null && path !== undefined ? (still + path) / 2 : (still ?? path ?? null);
   }
+  // Low detail is a defect only where the reference has detail: a smooth sky, wall or plate is
+  // the content when the reference shot is itself far smoother than the rest of its video, or
+  // about as detailed as this window.
+  let quality = c.quality;
+  const refScene = req.shot.scene;
+  if (c.qualityIssues.includes("blur") && refScene) {
+    const own = (source.visual ?? []).filter((f) => f.timeMs >= inMs && f.timeMs < outMs);
+    const sharp = own.length ? own.reduce((s, f) => s + f.sharpness, 0) / own.length : 0;
+    if ((refScene.relativeDetail !== undefined && refScene.relativeDetail <= 0.6) || (refScene.sharpness !== undefined && own.length && sharp >= 0.7 * refScene.sharpness)) quality = Math.max(quality, 0.85);
+  }
+  // Framing: the subject's measured size on both sides when person outlines exist (continuous and
+  // dense); otherwise the share of the window's vision frames whose framing class matches (a single
+  // frame's class flips as a body bends).
+  const scaled = (frames.length ? frames : []).filter((f) => f.shotScale);
+  let framing = req.shot.framing && scaled.length ? 0.35 + 0.65 * (scaled.filter((f) => f.shotScale === req.shot.framing).length / scaled.length) : req.shot.framing && shotScale ? (req.shot.framing === shotScale ? 1 : 0.35) : 0.5;
+  if (deep && req.shot.subjectShape && measuredHeight !== null) framing = Math.exp(-Math.abs(Math.log(req.shot.subjectShape.height / Math.max(0.01, measuredHeight))) / 0.35);
   const match: Record<string, number> = {
     action: action?.overall ?? 0.5,
     look: look === null ? 0.5 : (look + 1) / 2,
     pose: pose ?? 0.5,
-    framing: req.shot.framing && shotScale ? (req.shot.framing === shotScale ? 1 : 0.35) : 0.5,
+    framing,
     motion: motionFit,
     // How close the source's movement peak lands to the shot's moment (a third of the shot off
     // still earns a third); semantic fit matters more than a few frames of phase.
     peak: req.peakSource === "none" ? 0.5 : Math.exp(-Math.abs(achieved - req.peakFraction) / 0.3) * (c.kind === "action" ? 1 : 0.6),
     composition: layout ?? 0.5,
     tone: req.shot.luma !== null && c.luma !== null && !dense ? Math.exp(-Math.abs(req.shot.luma - c.luma) / 0.15) : color && req.shot.color ? Math.exp(-Math.abs(req.shot.color.luma - color.luma) / 0.15) : 0.5,
-    quality: c.quality,
+    quality,
+    scene: scene ?? 0.5,
   };
-  const emphasis = (req.role && roleEmphasis[req.role]) ?? {};
+  const emphasis: Record<string, number> = { ...((req.role && roleEmphasis[req.role]) ?? {}) };
+  // The weaker the reference shot's movement, the more what the picture shows has to decide.
+  const stillness = 1 - Math.min(1, (refLevel ?? 0.004) / 0.004);
+  emphasis.scene = (emphasis.scene ?? 1) * (0.3 + 0.9 * stillness) * (scene === null ? 0 : 1);
   // A peak anchored by an audio event is part of the editing language; the reference's own
   // movement peak is weaker evidence of what must line up.
   const anchor: Record<string, number> = { peak: req.peakSource === "audio event" ? 1 : 0.6 };
@@ -423,7 +522,7 @@ export function scoreCandidate(req: ShotRequirement, c: FootageCandidate, source
       : 1;
   let score = moving ? total * (0.4 + 0.6 * Math.min(1, under / 0.5)) : total;
   if (c.frozen) score *= moving ? 0.3 : (req.shot.camera?.freeze ?? 0) >= 0.5 ? 1 : 0.6;
-  if (c.quality < 0.35) score *= 0.3;
+  if (quality < 0.35) score *= 0.3;
   score *= 1 - 0.6 * (1 - speed);
   for (const k of Object.keys(match)) match[k] = Number(match[k].toFixed(2));
   // Display-only detail (no weight): the parts of the movement match and the duration fit.
@@ -434,7 +533,8 @@ export function scoreCandidate(req: ShotRequirement, c: FootageCandidate, source
     if (action.subject !== null) match.subject = action.subject;
   }
   match.duration = speed;
-  return { inMs: Math.round(inMs), outMs: Math.round(outMs), peakMs: c.peakMs, speed, score: Number(score.toFixed(4)), match, action };
+  if (scene === null) delete match.scene;
+  return { inMs: Math.round(inMs), outMs: Math.round(outMs), peakMs: c.peakMs, speed, score: Number(score.toFixed(4)), match, action, pose, scale };
 }
 
 /** Timings of the matching stages (ms), for the analysis profile. */
@@ -445,23 +545,34 @@ export interface SelectionProfile {
   rerankedPerShot: number;
 }
 
-/** Choose a source moment for every reference shot, globally. */
+/** What the global plan found, for the preview and diagnostics. */
+export interface PlanReport {
+  resources: SourceResource[];
+  groups: RepeatGroup[];
+  nearTies: { shot: number; margin: number; changed: boolean }[];
+  coverage: Record<Coverage, number>;
+}
+
+/** Choose a source moment for every reference shot, globally: retrieval (stage A, stage B), phase
+ * windows on the best stretches, near-tie review, then one plan for the whole sequence that
+ * knows which footage is scarce and which reference shots repeat an action. */
 export function selectShots(
   index: FootageIndex,
   sources: SourceEvidence[],
   reqs: ShotRequirement[],
   mode: RecreationMode,
   beamWidth = 40,
-  perShot = 12,
+  perShot = 16,
   profile?: SelectionProfile,
   /** Review hook: every shot's reranked candidates, best first. */
   inspect?: (shot: number, ranked: (Scored & { c: FootageCandidate })[]) => void,
+  report?: (plan: PlanReport) => void,
 ): ShotChoice[] {
   const byId = new Map(sources.map((s) => [s.asset.id, s]));
   const roles = reqs.map((r, i) => r.role ?? shotRole(r.shot, i, reqs.length, r.peakSource, reqs[i + 1]?.shot));
   const withRoles = reqs.map((r, i) => ({ ...r, role: roles[i] }));
-  // Reference shots that repeat footage may repeat source footage too. A repeat looks the same
-  // AND moves the same: two moments of one take look alike but move differently.
+  // Reference shots that repeat the very same footage: same look AND same movement (two moments
+  // of one take look alike but move differently).
   const repeats = reqs.map((r, i) =>
     reqs.findIndex(
       (o, j) =>
@@ -472,8 +583,7 @@ export function selectShots(
         (!r.shot.action || !o.shot.action || actionSimilarity(r.shot.action, o.shot.action).overall >= 0.9),
     ),
   );
-  type Ranked = Scored & { c: FootageCandidate };
-  const dedupe = (list: Ranked[]) => list.filter((x, i, all) => all.findIndex((y) => y.c.sourceId === x.c.sourceId && Math.abs(y.inMs - x.inMs) < 250) === i);
+  const dedupe = (list: Option[]) => list.filter((x, i, all) => all.findIndex((y) => y.c.sourceId === x.c.sourceId && Math.abs(y.inMs - x.inMs) < 120 && Math.abs(y.outMs - x.outMs) < 120) === i);
   let t = performance.now();
   // Stage A: cheap terms over every candidate; keep the best 50 per shot.
   const shortlist = withRoles.map((req) =>
@@ -483,65 +593,94 @@ export function selectShots(
           const s = scoreCandidate(req, c, byId.get(c.sourceId)!, mode, false);
           return s && { c, ...s };
         })
-        .filter((x): x is Ranked => !!x)
+        .filter((x): x is Option => !!x)
         .sort((a, b) => b.score - a.score),
     ).slice(0, 50),
   );
   if (profile) profile.stageA = Math.round(performance.now() - t);
   t = performance.now();
-  // Stage B: movement geometry and pose on the shortlist.
-  const reranked = withRoles.map((req, i) =>
+  // Stage B: movement geometry, pose and scene on the shortlist.
+  const reranked: Option[][] = withRoles.map((req, i) =>
     shortlist[i]
       .map((x) => {
         const s = scoreCandidate(req, x.c, byId.get(x.c.sourceId)!, mode, true);
         return s && { c: x.c, ...s };
       })
-      .filter((x): x is Ranked => !!x)
+      .filter((x): x is Option => !!x)
       .sort((a, b) => b.score - a.score),
   );
+  // Action-phase windows on each shot's two best stretches: sub-intervals that start or end on a
+  // rest point and hold a movement peak, so one long repetition can serve several shots.
+  reranked.forEach((list, i) => {
+    const stretches = [...new Map(list.map((o) => [stretchOf(o), o] as const)).values()].slice(0, 2);
+    for (const o of stretches) {
+      const source = byId.get(o.c.sourceId)!;
+      for (const w of phaseWindows(source, o.c, withRoles[i].durationMs)) {
+        const c = { ...o.c, peakMs: w.peakMs, kind: "action" as const };
+        const s = scoreCandidate(withRoles[i], c, source, mode, true, w);
+        if (s) list.push({ c, ...s, phase: w.label });
+      }
+    }
+    const sorted = dedupe(list.sort((a, b) => b.score - a.score));
+    list.splice(0, list.length, ...sorted);
+  });
+  // Near ties between stretches are decided by a deeper temporal review, not rounding noise.
+  const nearTies = breakNearTies(withRoles, reranked, byId);
   if (profile) {
     profile.stageB = Math.round(performance.now() - t);
     profile.rerankedPerShot = Math.round(mean(shortlist.map((s) => s.length)));
   }
-  t = performance.now();
   reranked.forEach((list, i) => inspect?.(i, list));
-  const ranked = reranked.map((list) => list.slice(0, perShot));
-  type Beam = { total: number; picks: Ranked[] };
-  let beams: Beam[] = [{ total: 0, picks: [] }];
-  reqs.forEach((_, i) => {
-    const next: Beam[] = [];
-    for (const beam of beams)
-      for (const option of ranked[i]) {
-        let bonus = 0;
-        const overlaps = beam.picks.some((p, j) => p.c.sourceId === option.c.sourceId && p.inMs < option.outMs && option.inMs < p.outMs && repeats[i] !== j);
-        if (overlaps) continue;
-        const prev = beam.picks.at(-1);
-        if (prev && prev.c.sourceId === option.c.sourceId) {
-          // Near-identical neighbours look like a stutter; moving forward keeps progression, but
-          // only as a tie-breaker: it never outweighs a real difference in how well shots match.
-          if (Math.abs(prev.inMs - option.inMs) < 3000) bonus -= 0.25;
-          bonus += option.inMs > prev.inMs ? 0.01 : -0.015;
-        }
-        // Diversity: a little credit for footage the edit has not used yet.
-        if (!beam.picks.some((p) => p.c.sourceId === option.c.sourceId && p.c.sceneStartMs === option.c.sceneStartMs)) bonus += 0.01;
-        next.push({ total: beam.total + option.score + bonus, picks: [...beam.picks, option] });
-      }
-    beams = (next.length ? next : beams.map((b) => ({ ...b, picks: [...b.picks, ranked[i][0]].filter(Boolean) as Ranked[] }))).sort((a, b) => b.total - a.total).slice(0, beamWidth);
-  });
+  t = performance.now();
+  const resources = sourceResources(reranked, withRoles);
+  const groups = repeatGroups(withRoles, reranked);
+  const scarce = new Set(resources.filter((r) => r.scarcity >= 0.6).flatMap((r) => r.usableIntervals.map((u) => `${u.sourceId}:${u.startMs}`)));
+  const plan = planSequence(withRoles, reranked, groups, repeats, beamWidth, perShot, scarce);
   if (profile) profile.beam = Math.round(performance.now() - t);
-  const best = beams[0]?.picks ?? [];
-  return best.map((p, i) => {
+  const picks = plan.picks;
+  const strong = strongStretches(reranked);
+  for (const g of groups) {
+    const chosen = g.shots.map((i) => picks[i]).filter(Boolean);
+    const stretches = new Set(chosen.map(stretchOf));
+    g.outcome = g.shots.some((i) => plan.reuse[i])
+      ? "reused one interval"
+      : g.shots.some((i) => picks[i] && strong[i].size > 0 && !strong[i].has(stretchOf(picks[i])))
+        ? "substituted another action"
+        : stretches.size < chosen.length
+          ? "shared one stretch"
+          : "separate repetitions";
+  }
+  const used = (i: number) => picks.filter((_, j) => j !== i);
+  const choices = picks.map((first, i) => {
+    let p = first;
     const req = withRoles[i];
+    let cal = calibrate(p, reranked[i]);
+    let adapted: string | null = null;
+    // No equivalent moment in the footage: Close Match keeps it (timing kept, mismatch flagged);
+    // Smart Adaptation picks the footage that best plays the shot's visual role; Creative Remix
+    // reinterprets it with whatever moves like it.
+    if (cal.coverage === "missing" && mode !== "Close Match") {
+      const free = reranked[i].filter((o) => !used(i).some((q) => q.c.sourceId === o.c.sourceId && q.inMs < o.outMs && o.inMs < q.outMs));
+      const by = (o: Option) =>
+        mode === "Smart Adaptation" ? mean([o.match.scene ?? 0.5, o.match.framing, o.match.composition, o.match.look]) : mean([o.match.motion, o.match.quality, o.match.trajectory ?? 0.5]);
+      const best = [...free].sort((a, b) => by(b) - by(a))[0];
+      if (best && best !== p) {
+        p = best;
+        picks[i] = best;
+        cal = calibrate(p, reranked[i]);
+        adapted = mode === "Smart Adaptation" ? "adapted to the source moment that best plays the shot's visual role" : "reinterpreted with source footage that moves like it";
+      }
+    }
     // Distinct alternatives: another clip first, then another stretch, never a near-duplicate.
-    const alternatives: Ranked[] = [];
+    const alternatives: Option[] = [];
     for (const x of reranked[i]) {
       if (alternatives.length >= 3) break;
-      const near = (y: Ranked) => y.c.sourceId === x.c.sourceId && (y.c.sceneStartMs === x.c.sceneStartMs || Math.abs(y.inMs - x.inMs) < 2500);
+      const near = (y: Option) => y.c.sourceId === x.c.sourceId && (y.c.sceneStartMs === x.c.sceneStartMs || Math.abs(y.inMs - x.inMs) < 2500);
       if (near(p) || alternatives.some(near)) continue;
       alternatives.push(x);
     }
-    const lostOn = (x: Ranked) => {
-      const w = weights[mode];
+    const w = weights[mode];
+    const lostOn = (x: Option) => {
       const deficits = Object.keys(w)
         .map((k) => ({ k, d: (w[k] ?? 0) * ((p.match[k] ?? 0.5) - (x.match[k] ?? 0.5)) }))
         .filter((e) => e.d > 0.02)
@@ -549,25 +688,32 @@ export function selectShots(
         .slice(0, 2);
       const parts = deficits.map((e) => `${termLabels[e.k] ?? e.k} (${(x.match[e.k] ?? 0.5).toFixed(2)} vs ${(p.match[e.k] ?? 0.5).toFixed(2)})`);
       if (x.speed < 1) parts.push(`needs ${Math.round((1 - x.speed) * 100)}% slow-down`);
-      return parts.length ? "trails on " + parts.join(", ") : "close second overall";
+      const gap = p.score - x.score;
+      return (parts.length ? "trails on " + parts.join(", ") : "close second overall") + (gap < 0.02 ? ` · differs by only ${gap.toFixed(3)}` : "");
     };
     const why: string[] = [];
-    const strongest = Object.keys(weights[mode])
+    const strongest = Object.keys(w)
       .filter((k) => (p.match[k] ?? 0) >= 0.7)
-      .sort((a, b) => (weights[mode][b] ?? 0) * (p.match[b] ?? 0) - (weights[mode][a] ?? 0) * (p.match[a] ?? 0))
+      .sort((a, b) => (w[b] ?? 0) * (p.match[b] ?? 0) - (w[a] ?? 0) * (p.match[a] ?? 0))
       .slice(0, 3);
     if (strongest.length) why.push("strongest on " + strongest.map((k) => termLabels[k] ?? k).join(", "));
     if (p.action) why.push(`moves like the reference: trajectory ${p.action.trajectory.toFixed(2)}, regions ${p.action.regions.toFixed(2)}${p.action.subject !== null ? `, subject ${p.action.subject.toFixed(2)}` : ""}`);
+    if (p.phase) why.push(`cut on movement-phase boundaries (${p.phase}) so one repetition serves several shots`);
     why.push(p.speed < 1 ? `cut-safe stretch is ${Math.round((1 - p.speed) * 100)}% short: mildly slowed to fill the shot` : "fits inside one cut-safe stretch");
     if (req.peakSource !== "none") why.push(`${req.peakSource === "audio event" ? "audio event" : "the reference's movement peak"} lands on the source's movement peak`);
-    const actionFit = p.action?.overall ?? null;
-    const confidence: ShotChoice["confidence"] = p.score >= 0.55 && (actionFit === null || actionFit >= 0.6) ? "high" : p.score >= 0.4 && (actionFit === null || actionFit >= 0.45) ? "medium" : "low";
-    const reuse =
-      repeats[i] >= 0 && best[repeats[i]]?.c.sourceId === p.c.sourceId && best[repeats[i]].inMs < p.outMs && p.inMs < best[repeats[i]].outMs
-        ? { intentional: true, reason: `the reference repeats shot ${repeats[i] + 1}` }
-        : null;
+    const tie = nearTies.find((x) => x.shot === i);
+    if (tie) why.push(`near tie (${tie.margin.toFixed(3)}) decided by a deeper temporal review of pose, orientation and movement${tie.changed ? ", which changed the pick" : ""}`);
+    if (cal.nearest && cal.margin < 0) why.push(`a stretch scoring ${(-cal.margin).toFixed(3)} higher went to another shot that needed it more`);
+    else if (cal.nearest && cal.margin < 0.02) why.push(`the next stretch differs by only ${cal.margin.toFixed(3)}`);
+    if (adapted) why.push(adapted);
+    const reuse = plan.reuse[i];
+    const confidence: ShotChoice["confidence"] = cal.certainty >= 0.7 ? "high" : cal.certainty >= 0.45 ? "medium" : "low";
     let shortfall: string | null = null;
-    if (confidence === "low") shortfall = `Low confidence: no source moment moves like this shot${actionFit !== null ? ` (best action match ${actionFit.toFixed(2)})` : ""}; review the alternatives.`;
+    if (cal.coverage === "missing")
+      shortfall =
+        "No close source match found." +
+        (mode === "Close Match" ? " Reference timing is kept and the mismatch is flagged; review the alternatives." : ` ${adapted ? adapted[0].toUpperCase() + adapted.slice(1) : "Best available adaptation used"}.`);
+    else if (confidence === "low") shortfall = `Low confidence (${Math.round(cal.certainty * 100)}%): ${cal.margin < 0 ? "a better-scoring stretch went to another shot" : cal.margin < 0.02 ? `the next stretch differs by only ${cal.margin.toFixed(3)}` : "weak agreement on what the shot does"}; review the alternatives.`;
     return {
       sourceId: p.c.sourceId,
       inMs: p.inMs,
@@ -579,11 +725,19 @@ export function selectShots(
       role: roles[i],
       why,
       confidence,
+      certainty: cal.certainty,
+      margin: cal.margin,
+      coverage: cal.coverage,
+      ...(p.phase ? { phase: p.phase } : {}),
       alternatives: alternatives.map((x) => ({ sourceId: x.c.sourceId, inMs: x.inMs, outMs: x.outMs, speed: x.speed, score: x.score, match: x.match, lostOn: lostOn(x) })),
-      reuse,
+      reuse: reuse ? { intentional: true, permitted: true, reason: reuse.reason, confidence: reuse.confidence } : null,
       shortfall,
     };
   });
+  const coverage: Record<Coverage, number> = { excellent: 0, good: 0, weak: 0, missing: 0 };
+  for (const c of choices) coverage[c.coverage]++;
+  report?.({ resources, groups, nearTies, coverage });
+  return choices;
 }
 
 /** Shots no usable cut-safe stretch can fill (even with a mild retime), and the longest stretch. */

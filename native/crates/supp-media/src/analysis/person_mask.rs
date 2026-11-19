@@ -99,7 +99,8 @@ pub fn run(
         .with_name("supp.edit.local-vision")
         .commit();
     let mut session = runtime::session(&model)?.0;
-    let seconds = asset.duration.min(300.);
+    // The whole clip, 4 s at a time (pixels released per chunk).
+    let seconds = asset.duration;
     let mut out = vec![];
     for start in (0..seconds.ceil() as usize).step_by(4) {
         check(cancel)?;

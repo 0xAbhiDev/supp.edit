@@ -1,7 +1,7 @@
 import { referenceVisual } from "./visual-source";
 import { personMasks } from "./subject-mask";
 import { traceTitles } from "./focus";
-import { sourceTone } from "./source-tone";
+import { sourceTone, toneProfiles } from "./source-tone";
 import { medianTone } from "./tone";
 import { annotateSubjects } from "./subject-shape";
 import { measureTextDepth } from "./text-depth";
@@ -22,7 +22,8 @@ import type { SoundKind } from "../audio/synth";
 import { buildEventGraph } from "./event-graph";
 import { plannedSounds } from "./audio-structure";
 import { alignStructure } from "./structural-alignment";
-import { actionSignature } from "./action-signature";
+import { actionSignature, shotSpan } from "./action-signature";
+import { medianSharpness, sceneSignature } from "./scene-signature";
 import type { VisualFrame } from "./visual";
 import { derivedReads, readDerived, writeDerived } from "../../platform/derived";
 import { INDEX_VERSION, indexSource, sourceIndexKey, type SourceIndex } from "./footage-index";
@@ -32,6 +33,14 @@ export interface StageTiming {
   stage: string;
   ms: number;
   reused: boolean;
+  /** Where a stage spent its time, when it measures that (tone sampling). */
+  detail?: Record<string, number>;
+}
+/** Per-stage cache result across all clips, plus the reference and the matching. */
+export interface CacheDiagnostics {
+  stages: { stage: string; hits: number; total: number }[];
+  reference: { hits: number; total: number; ms: number };
+  matchingMs: number;
 }
 export interface ClipProfile {
   clip: string;
@@ -117,20 +126,30 @@ export function recreate(
       const quiet = { ...job, report: () => {} };
       let referenceTranscript: Project["transcripts"][number] | undefined;
       let referenceFrames: VisualFrame[] | undefined;
+      // Where reference analysis spends its time (each step, for the analysis profile).
+      const referenceSteps: Record<string, number> = {};
+      const step = async <T,>(name: string, work: Promise<T>): Promise<T> => {
+        const t = performance.now();
+        try {
+          return await work;
+        } finally {
+          referenceSteps[name] = (referenceSteps[name] ?? 0) + performance.now() - t;
+        }
+      };
       const referenceStarted = performance.now();
       async function measureReference() {
-        const measured = await visuals(reference);
+        const measured = await step("scenes, colour, per-frame visual", visuals(reference));
         referenceFrames = measured.visual;
         let text = null;
         try {
-          text = await referenceText(reference, quiet);
+          text = await step("text", referenceText(reference, quiet));
           if (
             text?.length &&
             controls.subjectLayering === "reference" &&
             caps.personModel?.installed
           ) {
             try {
-              const masks = await personMasks(reference, quiet);
+              const masks = await step("person masks", personMasks(reference, quiet));
               text = text.map((line) => measureTextDepth(line, masks));
             } catch (e) {
               await job.checkpoint();
@@ -147,7 +166,7 @@ export function recreate(
           );
         }
         const refMusic = reference.hasAudio
-          ? (await run(reference, "audio")).audio?.beatMap
+          ? (await step("beat map", run(reference, "audio"))).audio?.beatMap
           : undefined;
         let transcript = project.transcripts.find(
           (t) =>
@@ -162,7 +181,7 @@ export function recreate(
         ) {
           try {
             transcript =
-              (await run(reference, "speech")).transcript ?? undefined;
+              (await step("speech", run(reference, "speech"))).transcript ?? undefined;
           } catch (e) {
             await job.checkpoint();
             warnings.push(
@@ -176,7 +195,7 @@ export function recreate(
           measured.analysis,
           refMusic,
           measured.color,
-          await referenceMotion(reference, quiet),
+          await step("motion", referenceMotion(reference, quiet)),
           text,
           measured.visual,
           transcript,
@@ -188,9 +207,9 @@ export function recreate(
           : await measureReference();
       let referencePeople:Awaited<ReturnType<typeof personMasks>>=[];
       if(controls.interval){
-        const contours=caps.personModel?.installed ? await personMasks(reference,quiet) : [];
+        const contours=caps.personModel?.installed ? await step("person masks", personMasks(reference,quiet)) : [];
         referencePeople=contours;
-        const focused=await traceTitles(reference,dna,controls.interval,contours,referenceTranscript,quiet,undefined,controls.reviewedTitleCues);
+        const focused=await step("titles", traceTitles(reference,dna,controls.interval,contours,referenceTranscript,quiet,undefined,controls.reviewedTitleCues));
         dna=focused.dna;
         warnings.push(...focused.warnings);
       }
@@ -200,15 +219,18 @@ export function recreate(
       // Pose-aware shot choice: the reference subject's shape per shot.
       if (caps.personModel?.installed && controls.mode !== "Creative Remix") {
         try {
-          if (!referencePeople.length) referencePeople = await personMasks(reference, quiet);
+          if (!referencePeople.length) referencePeople = await step("person masks", personMasks(reference, quiet));
           const annotated = { ...dna, shots: dna.shots.map((shot) => ({ ...shot })) };
           const aspect = reference.width / Math.max(1, reference.height);
           annotateSubjects(annotated, referencePeople, aspect);
           // Movement geometry with the subject's outline trajectory, on the reference's dense frames.
           referenceFrames ??= await referenceVisual(reference, quiet);
           for (const shot of annotated.shots) {
-            const action = actionSignature(referenceFrames, referencePeople, shot.startMs, shot.endMs, aspect);
+            const [from, to] = shotSpan(shot);
+            const action = actionSignature(referenceFrames, referencePeople, from, to, aspect);
             if (action) shot.action = action;
+            const scene = sceneSignature(referenceFrames, from, to, shot.action, shot.subjectShape?.height ?? shot.scene?.subjectSize ?? null, [], medianSharpness(referenceFrames));
+            if (scene) shot.scene = shot.scene?.objects ? { ...scene, objects: shot.scene.objects } : scene;
           }
           dna = annotated;
         } catch (e) {
@@ -218,7 +240,7 @@ export function recreate(
       }
       if (keepsLook && dna.shots.some((shot) => !shot.tone)) {
         try {
-          const samples = await sourceTone(reference, quiet);
+          const samples = await step("tone", sourceTone(reference, quiet));
           dna = {
             ...dna,
             shots: dna.shots.map((shot) => {
@@ -243,7 +265,7 @@ export function recreate(
             referenceTranscript ??
             project.transcripts.find((t) => t.assetId === reference.id && t.sourceFingerprint === reference.fingerprint);
           const words = (transcript?.segments ?? []).flatMap((s) => s.words ?? []).map((w) => ({ text: w.text, startMs: w.startMs, endMs: w.endMs, confidence: w.confidence }));
-          const audio = await audioTimeline(reference, words);
+          const audio = await step("audio timeline", audioTimeline(reference, words));
           if (audio) dna = { ...dna, audio, eventGraph: buildEventGraph(dna, audio, 1000 / Math.max(1, reference.fps || 30)) };
         } catch (e) {
           await job.checkpoint();
@@ -252,6 +274,14 @@ export function recreate(
       }
       stage(1, "Extracted Style DNA");
       const referenceMs = Math.round(performance.now() - referenceStarted);
+      warnings.push(
+        `Reference analysis: ${clock(referenceMs)} — ` +
+          Object.entries(referenceSteps)
+            .sort((a, b) => b[1] - a[1])
+            .map(([k, v]) => `${k} ${clock(v)}`)
+            .join(", ") +
+          ".",
+      );
       // ---- Understanding the raw footage. Every clip's independent stages run at once and two
       // clips are analysed together; each stage is timed and reports whether its cache was reused.
       const needPeople =
@@ -316,12 +346,14 @@ export function recreate(
           });
         const [analysis, color, visual, aperture, tone, people, speech] = await Promise.all([
           timed(vision ? "scenes + vision" : "scenes", () => measured, () => run(a, vision ? "vision" : "video")),
-          timed("colour", () => false, () => nativeColorBackend(a, { startMs: 0, endMs: Math.max(1, Math.floor(Math.min(a.duration, 300) * 1000)) }, quiet)),
-          timed("per-frame visual", hit("reference-visual-v4:"), () => referenceVisual(a, quiet)),
+          // Colour samples are cached natively (invisible here): a cached answer returns in about a
+          // second whatever the footage length, a cold pass takes many; reuse is inferred from that.
+          timed("colour", () => true, () => nativeColorBackend(a, { startMs: 0, endMs: Math.max(1, Math.floor(Math.min(a.duration, 300) * 1000)) }, quiet)),
+          timed("per-frame visual", hit("reference-visual-v5:"), () => referenceVisual(a, quiet)),
           // Portrait delivery crops to the content; Close Match fill framing crops baked bars.
           controls.format === "vertical" || closeMatch ? timed("aperture", hit("source-aperture-v3:"), () => sourceAperture(a, quiet)) : undefined,
-          keepsLook ? timed("tone", hit("source-tone-v3:"), () => soft("Footage tone could not be measured: ", () => sourceTone(a, quiet))) : undefined,
-          needPeople ? timed("person masks", hit("person-mask-pphumanseg-552d8a98-v2:"), () => soft("Person segmentation unavailable: ", () => personMasks(a, quiet))) : undefined,
+          keepsLook ? timed("tone", hit("source-tone-v4:"), () => soft("Footage tone could not be measured: ", () => sourceTone(a, quiet))) : undefined,
+          needPeople ? timed("person masks", hit("person-mask-pphumanseg-552d8a98-v3:"), () => soft("Person segmentation unavailable: ", () => personMasks(a, quiet))) : undefined,
           needSpeech(a) ? timed("speech", () => false, () => run(a, "speech")) : undefined,
         ]);
         const evidence: SourceEvidence = { asset: a, analysis, color, visual };
@@ -340,8 +372,10 @@ export function recreate(
             await writeDerived(key, evidence.index, JSON.stringify(evidence.index).length * 2).catch(() => {});
           }
         });
-        // Colour is cached natively; a stage that returns at once was reused.
-        for (const st of stages) if (st.stage === "colour") st.reused = st.ms < 400;
+        for (const st of stages) if (st.stage === "colour") st.reused = st.ms < 1500;
+        const tp = toneProfiles.get(a.fingerprint);
+        const toneStage = stages.find((st) => st.stage === "tone");
+        if (tp && toneStage && !toneStage.reused) toneStage.detail = tp;
         analysisProfile.push({ clip: a.name, footageMs: Math.round(a.duration * 1000), wallMs: Math.round(performance.now() - started), stages });
         running.delete(a.name);
         doneMs += a.duration * 1000;
@@ -373,7 +407,25 @@ export function recreate(
               .join(", ") +
             ".",
         );
+        const tone = stages.filter((st) => st.stage === "tone" && st.detail);
+        if (tone.length) {
+          const sum = (k: string) => tone.reduce((n, st) => n + (st.detail![k] ?? 0), 0);
+          warnings.push(
+            `Tone sampling: ${sum("samples")} frames; seeking ${clock(sum("seek"))}, drawing ${clock(sum("draw"))}, pixel readback ${clock(sum("read"))}, measuring ${clock(sum("compute"))}, opening ${clock(sum("open"))}, saving ${clock(sum("save"))}.`,
+          );
+        }
       }
+      // Cache diagnostics: which stages came from cache for every clip, and for the reference.
+      const cacheStages = [...new Set(analysisProfile.flatMap((c) => c.stages.map((st) => st.stage)))].map((stage) => {
+        const all = analysisProfile.flatMap((c) => c.stages.filter((st) => st.stage === stage));
+        return { stage, hits: all.filter((st) => st.reused).length, total: all.length };
+      });
+      const referenceReads = derivedReads.filter((x) => x.key.endsWith(reference.fingerprint));
+      const cache: CacheDiagnostics = {
+        stages: cacheStages,
+        reference: { hits: referenceReads.filter((x) => x.hit).length, total: referenceReads.length, ms: referenceMs },
+        matchingMs: 0,
+      };
       await job.checkpoint();
       stage(raw.length + 1, "Processing audio");
       if (music) await mediaAnalysis.restore(music);
@@ -431,6 +483,7 @@ export function recreate(
       }
       stage(raw.length + 2, "Matching shots and building editable timeline");
       await job.checkpoint();
+      const matchingStarted = performance.now();
       const edit = buildRecreation(
         project,
         revision,
@@ -444,8 +497,14 @@ export function recreate(
         voiceTranscript,
         { reference: dna.audio, music: musicAudio, soundtrack, sounds, referenceAperture },
       );
+      cache.matchingMs = Math.round(performance.now() - matchingStarted);
+      warnings.push(
+        "Cache: " +
+          cache.stages.map((st) => `${st.stage} ${st.hits === st.total ? "HIT" : st.hits ? `HIT ${st.hits}/${st.total}` : "MISS"}`).join(", ") +
+          `; reference analysis ${cache.reference.total && cache.reference.hits === cache.reference.total ? "HIT" : cache.reference.hits ? `HIT ${cache.reference.hits}/${cache.reference.total}` : "MISS"} (${clock(referenceMs)}); matching recomputed (${clock(cache.matchingMs)}).`,
+      );
       stage(total, "Ready to preview");
-      return { ...edit, dna, warnings: [...edit.warnings, ...warnings], analysisProfile: { referenceMs, footageMs, footageWallMs, clips: analysisProfile } };
+      return { ...edit, dna, warnings: [...edit.warnings, ...warnings], analysisProfile: { referenceMs, footageMs, footageWallMs, clips: analysisProfile, cache } };
     },
   });
 }

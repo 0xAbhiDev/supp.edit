@@ -45,7 +45,10 @@ async function launch() {
   const env = mediaEnvironment();
   env.SUPP_AI_MODELS ||= path.resolve("work/ai-models");
   env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=" + port;
-  spawn(exe, [], { env, stdio: "ignore", detached: true, windowsHide: false }).unref();
+  const child = spawn(exe, [], { env, stdio: "ignore", detached: true, windowsHide: false });
+  // The harness (scripts/run-native-verification.mjs) cleans up only the instance this run launched.
+  fs.writeFileSync(path.join(out, "app.pid"), String(child.pid));
+  child.unref();
   let browser;
   for (let i = 0; i < 60 && !browser; i++) {
     await new Promise((r) => setTimeout(r, 1000));
@@ -53,6 +56,8 @@ async function launch() {
   }
   assert(browser, "The application window did not become available.");
   const page = browser.contexts()[0].pages()[0];
+  // The application's console, kept as run evidence.
+  page.on("console", (m) => fs.appendFileSync(path.join(out, "app-console.log"), `${new Date().toISOString()} ${m.type()} ${m.text()}\n`));
   await page.getByRole("button", { name: "Open project", exact: true }).waitFor({ timeout: 60000 });
   await page.waitForTimeout(1500);
   await page.screenshot({ path: path.join(out, "0-launched.png") });
@@ -124,7 +129,7 @@ for (;;) {
   if (status && Math.round((Date.now() - began) / 1000) % 30 < 2) log("  ", status.replace("Cancel", "").trim());
   await page.waitForTimeout(2000);
 }
-const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music|Analysis time|Raw footage|No source interval|Low confidence|Analysis:/.test(t));
+const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music|Analysis time|Raw footage|No source interval|Low confidence|Analysis:|Tone sampling|Cache:|Reference coverage|Reference analysis|repeat one action|near tie|No close source match/.test(t));
 // The audio evidence the preview shows, opened as a user would.
 const audioEvidence = panel.getByText(/^Audio events/);
 if (await audioEvidence.count()) {

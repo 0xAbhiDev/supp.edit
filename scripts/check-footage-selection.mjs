@@ -10,6 +10,8 @@ import { createServer } from "vite";
 const args = process.argv.slice(2);
 const [dir, truthFile, mode = "Close Match"] = args.filter((a) => !a.startsWith("--"));
 const out = args.find((a) => a.startsWith("--json="))?.slice(7);
+// --peaks=RUN.log uses the action-peak positions the app placed on audio events in that run.
+const peaksLog = args.find((a) => a.startsWith("--peaks="))?.slice(8);
 const inspectShots = (args.find((a) => a.startsWith("--inspect="))?.slice(10) ?? "").split(",").filter(Boolean).map(Number);
 const read = (f) => JSON.parse(fs.readFileSync(f, "utf8").replace(/^﻿/, ""));
 const optional = (f) => (fs.existsSync(path.join(dir, f)) ? read(path.join(dir, f)) : undefined);
@@ -18,7 +20,8 @@ const host = await createServer({ server: { middlewareMode: true, hmr: false, wa
 try {
   const { extractDNA } = await host.ssrLoadModule("/packages/ai/reference/dna.ts");
   const { buildFootageIndex, selectShots, shotRole, motionPeak } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
-  const { actionSignature } = await host.ssrLoadModule("/packages/ai/reference/action-signature.ts");
+  const { actionSignature, shotSpan } = await host.ssrLoadModule("/packages/ai/reference/action-signature.ts");
+  const { sceneSignature, medianSharpness } = await host.ssrLoadModule("/packages/ai/reference/scene-signature.ts");
   const { annotateSubjects } = await host.ssrLoadModule("/packages/ai/reference/subject-shape.ts");
   const ref = project.assets[0];
   const refVisual = optional("0-visual.json") ?? [];
@@ -28,7 +31,12 @@ try {
   const aspect = ref.width / Math.max(1, ref.height);
   if (refPeople) {
     annotateSubjects(dna, refPeople, aspect);
-    for (const shot of dna.shots) shot.action = actionSignature(refVisual, refPeople, shot.startMs, shot.endMs, aspect) ?? shot.action;
+    for (const shot of dna.shots) {
+      const [from, to] = shotSpan(shot);
+      shot.action = actionSignature(refVisual, refPeople, from, to, aspect) ?? shot.action;
+      const scene = sceneSignature(refVisual, from, to, shot.action, shot.subjectShape?.height ?? shot.scene?.subjectSize ?? null, [], medianSharpness(refVisual));
+      if (scene) shot.scene = shot.scene?.objects ? { ...scene, objects: shot.scene.objects } : scene;
+    }
   }
   const sources = project.assets.flatMap((asset, i) =>
     i && asset.kind === "video" ? [{ asset, analysis: optional(i + "-vision.json"), visual: optional(i + "-visual.json"), people: optional(i + "-person.json") }] : [],
@@ -36,16 +44,23 @@ try {
   const t0 = performance.now();
   const index = buildFootageIndex(sources);
   const indexMs = Math.round(performance.now() - t0);
+  const appPeaks = peaksLog
+    ? JSON.parse(fs.readFileSync(peaksLog, "utf8").split("\n").find((l) => l.includes("Explained each choice")).replace(/^.*?Explained each choice /, "")).rows.map((t) => {
+        const m = t.match(/action peak on audio event at (\d+)%/);
+        return m ? { peakFraction: Number(m[1]) / 100, peakSource: "audio event" } : undefined;
+      })
+    : [];
   const reqs = dna.shots.map((shot, i) => {
-    const peak = motionPeak(shot) ?? { peakFraction: 0.4, peakSource: "none" };
+    const peak = appPeaks[i] ?? motionPeak(shot) ?? { peakFraction: 0.4, peakSource: "none" };
     return { shot, durationMs: shot.endMs - shot.startMs, ...peak, role: shotRole(shot, i, dna.shots.length, peak.peakSource, dna.shots[i + 1]) };
   });
   const profile = {};
   const fileName = (id) => path.basename(sources.find((s) => s.asset.id === id).asset.path.replace(/^\\\\\?\\/, ""));
-  const choices = selectShots(index, sources, reqs, mode, 40, 12, profile, (i, list) => {
+  let plan;
+  const choices = selectShots(index, sources, reqs, mode, 40, 16, profile, (i, list) => {
     if (inspectShots.includes(i + 1))
-      console.log(`shot ${i + 1} candidates: ` + list.slice(0, 8).map((x) => `${fileName(x.c.sourceId)} ${(x.inMs / 1000).toFixed(1)} ${x.score.toFixed(3)} ${process.env.FULL ? JSON.stringify(x.match) : `a${x.match.action} l${x.match.look} p${x.match.pose} m${x.match.motion}`}`).join(" | "));
-  });
+      console.log(`shot ${i + 1} candidates: ` + list.slice(0, Number(process.env.TOP ?? 8)).map((x) => `${fileName(x.c.sourceId)} ${(x.inMs / 1000).toFixed(process.env.FINE ? 2 : 1)}${process.env.FINE ? "-" + (x.outMs / 1000).toFixed(2) : ""} ${x.score.toFixed(3)} ${process.env.FULL ? JSON.stringify(x.match) : `a${x.match.action} l${x.match.look} p${x.match.pose} m${x.match.motion}`}`).join(" | "));
+  }, (p) => (plan = p));
   const truth = truthFile ? read(truthFile) : undefined;
   const fileOf = (id) => path.basename(sources.find((s) => s.asset.id === id).asset.path.replace(/^\\\\\?\\/, ""));
   // Which planted source should play at each reference shot (truth shots are consecutive).
@@ -83,6 +98,10 @@ try {
       feasible: c.outMs - c.inMs >= (shot.endMs - shot.startMs) * 0.85 - 1,
       score: c.score,
       confidence: c.confidence,
+      certainty: c.certainty,
+      coverage: c.coverage,
+      phase: c.phase ?? null,
+      reuse: c.reuse?.reason ?? null,
       action: c.match.action,
       look: c.match.look,
       pose: c.match.pose,
@@ -100,13 +119,18 @@ try {
     cutCrossings: rows.filter((r) => r.crossesCut).length,
     durationInfeasible: rows.filter((r) => !r.feasible).length,
     reused: overlaps,
+    intentionalReuse: choices.filter((c) => c.reuse).map((c, i) => c.reuse.reason),
+    coverageClasses: plan?.coverage,
+    repeatGroups: plan?.groups.map((g) => `shots ${g.shots.map((x) => x + 1).join("+")}: ${g.outcome} (permission: ${g.decision}; ${g.stretches} strong stretches, similarity ${g.similarity})`),
+    scarce: plan?.resources.filter((r) => r.scarcity > 1).map((r) => `shots ${r.compatibleShots.map((x) => x + 1).join("+")}: ${(r.totalMs / 1000).toFixed(1)} s for ${(r.demandMs / 1000).toFixed(1)} s`),
+    nearTies: plan?.nearTies,
     fromFirstTenSeconds: rows.filter((r) => r.inS < 10).length,
     shots: rows,
   };
   if (out) fs.writeFileSync(out, JSON.stringify(report, null, 2));
   for (const r of rows)
     console.log(
-      `shot ${r.shot} ${r.ref} [${r.role}] wants ${r.wanted ?? "?"} → ${r.clip} ${r.inS}–${r.outS}${r.speed < 1 ? ` ×${r.speed}` : ""} ${r.planted ? "in " + r.planted : "OUTSIDE"}${r.correct ? " ✓" : " ✗"}${r.crossesCut ? " CROSSES CUT" : ""} score ${r.score} action ${r.action} look ${r.look} pose ${r.pose} (${r.confidence})`,
+      `shot ${r.shot} ${r.ref} [${r.role}] wants ${r.wanted ?? "?"} → ${r.clip} ${r.inS}–${r.outS}${r.speed < 1 ? ` ×${r.speed}` : ""} ${r.planted ? "in " + r.planted : "OUTSIDE"}${r.correct ? " ✓" : " ✗"}${r.crossesCut ? " CROSSES CUT" : ""} score ${r.score} action ${r.action} pose ${r.pose} (${r.coverage} ${Math.round(r.certainty * 100)}%)${r.phase ? " [phase: " + r.phase + "]" : ""}${r.reuse ? " REUSE: " + r.reuse : ""}`,
     );
   const { shots, ...summary } = report;
   console.log(JSON.stringify(summary));

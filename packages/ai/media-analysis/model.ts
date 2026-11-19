@@ -116,7 +116,8 @@ export const visionAnalysisSchema = z
     modelId: z.string().max(128),
     modelVersion: z.string().max(128),
     device: z.string().max(64),
-    frames: z.array(visionFrameSchema).min(1).max(96),
+    // Dense sampling: a frame every 2.5 s of long scenes, up to the native budget (vision_budget).
+    frames: z.array(visionFrameSchema).min(1).max(2200),
     totalScenes: z.number().int().min(1).max(2000),
     analyzedScenes: z.number().int().min(1).max(32),
     method: z.string().max(2000),

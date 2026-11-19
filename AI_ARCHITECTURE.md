@@ -1,5 +1,64 @@
 # Reference-to-Edit
 
+## Long footage 2.1: global semantic planning, scarcity and generalization
+
+Selection now plans the whole reference sequence against the whole source inventory (`packages/ai/reference/sequence-planner.ts`), instead of finding a good candidate shot by shot.
+
+- **Source resources (scarcity):** cut-safe stretches are grouped by the reference shots they can play well (options within 0.04 of a shot's best). Each `SourceResource` carries its usable intervals, total duration, compatible shots and scarcity, the demanded time over the available time.
+- **Strong stretches:** a stretch plays a shot well when it is within 0.1 of the shot's best AND agrees on what the shot does (movement geometry and pose ≥ 0.6). A second, slightly weaker repetition of the same action counts; a different action that merely scores close does not.
+- **Repeat groups:** reference shots whose clear best match is the same stretch, with moderate movement or pose agreement (≥ 0.6; pose ≥ 0.5), perform the same action. Each group gets:
+  - **Permission:** `distinct repetitions` (enough strong stretches), `share one stretch` (one stretch long enough for all of them), `reuse` (neither, and the action agrees well), or `substitute`.
+  - **Outcome:** what the plan actually did: separate repetitions, shared one stretch, reused one interval, or substituted another action. The preview reports it.
+- **Action-phase inventory:** `actionPhases` finds rest points and movement peaks in a stretch from its smoothed movement curve.
+  - **Phase windows:** these start or end on a rest point or a stretch edge, at full length or at the shortest length a mild retime can fill, and must hold a movement peak (`phaseWindows`).
+  - **Sharing:** one long repetition can serve several shots without overlapping frames, each window holding a real movement phase rather than a mathematical split.
+- **Future-aware global search:** a beam (width 40) whose priority adds, for every later shot, the best option still admissible given the footage already spent. The planner looks ahead before consuming scarce footage. The objective adds:
+  - **Penalties:** semantic mismatch (−0.08 for a stretch that does not play the shot well when one that does exists); controlled reuse (−0.06); stutter (−0.25); retime (in the score).
+  - **Small terms:** progression (±0.01–0.015), diversity (+0.01), and transition context (±0.03).
+  - **Overlap:** permitted only inside a repeat group with `reuse` permission, or where the reference repeats the very same shot (same look and movement ≥ 0.9). It is recorded as `{ permitted, reason: "reference-repeat …", confidence }` and shown in the preview. Accidental reuse is impossible.
+- **Near ties:** when a shot's two best stretches score within 0.02, `deepTemporal` reviews each tied stretch over its whole length (sliding windows, not only the peak-placed trim). It uses:
+  - best-aligned pose trajectory;
+  - body-orientation curve (principal axis of the outline);
+  - outline deformation;
+  - foreground/background movement split;
+  - movement regions.
+
+  The verdict moves each stretch's options by 0.15 × (review − mean).
+- **Context:** `transitionFit` compares how framing scale and movement level change between adjacent picks with how they change between the same reference shots.
+- **Calibration:** confidence comes from the lead over the best alternative from another stretch (full at 0.05), semantic agreement, quality and duration fit, never from the absolute score.
+  - **Coverage:** each shot is classed `excellent` / `good` / `weak` / `missing`, and the project reports the counts ("Reference coverage: …").
+  - **No good match:** a missing shot shows "No close source match found." Close Match keeps the reference timing and flags it; Smart Adaptation switches to the moment that best plays the shot's visual role (scene, framing, composition, look); Creative Remix reinterprets it with footage that moves like it.
+- **Static shots** (`scene-signature.ts`): the scene signature captures:
+  - the 4×4 brightness layout normalised to zero mean and unit spread (composition independent of palette and exposure, and of polarity at a 15% discount);
+  - its row profile and strongest horizontal edge (horizon);
+  - how concentrated movement is, camera movement and movement level;
+  - subject size and detected object classes;
+  - detail relative to the video's typical detail;
+  - a visual role inferred from those measurements (environment reveal, object movement, sky/horizon hold, object detail, portrait close-up, establishing wide, static reaction, subject action).
+
+  The scene term's weight grows as the reference shot's movement weakens (0.3 at full movement, 1.2 when still).
+  - **Stillness:** below a mean change of 0.0003 a picture is still: two stills move alike, a still against a moving shot does not, and the codec-noise "movement map" of a still is ignored.
+  - **Smooth content:** low detail is not penalised as blur when the reference shot is itself far smoother than its own video (relative detail ≤ 0.6), e.g. a sky or a plain wall.
+  - **Small movement:** a small object moving in one place (≥ 45% of movement in three cells) is an action even at a low movement level, not a hold.
+- **Reference shot measurements** keep a two-frame guard from their cuts (`shotSpan`): the frame at a cut used to dominate a short shot's movement map.
+- **Cut versus zoom** (`cuts.ts`): a one-frame scale jump (flow expansion with a near-zero neighbourhood) or a one-frame translation jump is evidence of a cut; a continuous zoom or pan is coherent over many frames and is not. In strict reference mode a split now needs:
+  - **Geometry break:** a flow reset, scale jump or transform jump;
+  - **and a picture change:** a palette, level or motion-regime change;
+  - **and no return:** the picture does not come back within half a second.
+
+  This recovers punch-in cuts that keep the palette.
+- **Long clips:** the dense per-frame pass and person masks run over the whole clip in 4 s chunks whose pixels are released at once; only compact features are kept (about 1.2 MB of JSON per minute).
+  - **Frame rate:** 30 fps up to 20 minutes, 15 fps beyond.
+  - **Vision:** the budget grows to a sample every 2.5 s past about 16 minutes; the cache key changes only for those clips.
+  - **Tone:** sampling covers the whole clip, reads each frame's pixels once instead of twice, and reports where its time goes.
+- **Caches:**
+  - **Diagnostics:** each run reports HIT/MISS per stage across clips, the reference analysis, and the recomputed matching time.
+  - **Invalidation:** per-file caches and the per-clip index are keyed by file identity and analysis versions only, so changing the reference or one raw file invalidates nothing else.
+- **Test harness:** `scripts/run-native-verification.mjs` wraps the Windows driver. On failure it:
+  - screenshots the window and keeps the app console the driver records;
+  - closes the window gracefully, and stops only the instance this run launched;
+  - moves a recovery snapshot into the evidence folder only if the run created it and it refers to the project under test.
+
 ## Long footage 2.0: semantic action matching and cut-safe selection
 
 Long footage 2.0 replaces "find something that moves and looks similar" with "find the stretch that moves the same way, inside one shot, long enough to play the reference shot".

@@ -681,6 +681,13 @@ export function ReferenceEditor() {
                   reused from cache.
                 </>
               )}
+              {result.coverage.sources && (
+                <>
+                  {" "}
+                  Reference coverage: excellent {result.coverage.sources.excellent}, good {result.coverage.sources.good}, weak {result.coverage.sources.weak}, missing{" "}
+                  {result.coverage.sources.missing}.
+                </>
+              )}
             </p>
           )}
           <p className="re-muted">
@@ -759,12 +766,20 @@ export function ReferenceEditor() {
                         {m.confidence && (
                           <>
                             <br />
-                            <span className={m.confidence === "low" ? "re-tag warn" : "re-tag"}>{m.confidence} confidence</span>
+                            <span className={m.confidence === "low" ? "re-tag warn" : "re-tag"}>
+                              confidence {m.certainty !== undefined ? `${Math.round(m.certainty * 100)}%` : m.confidence}
+                            </span>
+                          </>
+                        )}
+                        {m.coverage && (
+                          <>
+                            <br />
+                            <span className={m.coverage === "missing" || m.coverage === "weak" ? "re-tag warn" : "re-tag"}>source coverage: {m.coverage}</span>
                           </>
                         )}
                       </td>
                       <td>
-                        {name(m.source)} @ {(m.sourceIn / rate).toFixed(2)}–{((m.sourceIn + m.duration) / rate).toFixed(2)} s
+                        {name(m.source)} @ {(m.sourceIn / rate).toFixed(2)}–{((m.sourceIn + m.duration * (m.speed ?? 1)) / rate).toFixed(2)} s
                         {m.peak?.source === "audio event" && (
                           <>
                             <br />
@@ -786,7 +801,9 @@ export function ReferenceEditor() {
                         {m.reuse?.intentional && (
                           <>
                             <br />
-                            <span className="re-tag">reused: {m.reuse.reason}</span>
+                            <span className="re-tag warn">
+                              intentional reuse{m.reuse.confidence !== undefined ? ` (confidence ${Math.round(m.reuse.confidence * 100)}%)` : ""}: {m.reuse.reason}
+                            </span>
                           </>
                         )}
                         {m.shortfall && (
