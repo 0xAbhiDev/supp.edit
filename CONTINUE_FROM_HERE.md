@@ -1,8 +1,7 @@
 ## Resume after Long Footage 2.0 — 19 November 2026
 
 **State:**
-- Last commit: `6632f5e` (checkpoint before this phase).
-- Not committed: everything in "Long footage 2.0" (CURRENT_STATE.md), awaiting approval.
+- Long Footage 2.0 is committed as `3f9fcee` (on top of `6632f5e`).
 - `bin/supp-edit.exe` is built from the working tree.
 
 **Reproduce:**

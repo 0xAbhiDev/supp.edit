@@ -1,6 +1,6 @@
 ## Long footage 2.0: semantic action matching and cut-safe selection — 19 November 2026
 
-Checkpoint before this phase: `6632f5e`. This phase is **not committed** (awaiting approval).
+Checkpoint before this phase: `6632f5e`. This phase was committed as `3f9fcee` after review.
 
 Selection now asks "which stretch moves the same way, inside one shot, long enough to play this reference shot?":
 - **Frame-accurate cuts:** a second-stage detector on the dense 33 ms frames finds cuts between similar material; segments keep a two-frame margin. In strict mode it also splits merged reference shots without splitting title swaps or silhouette flashes.
