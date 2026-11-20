@@ -24,6 +24,93 @@ pub struct VisualFrame {
     pub shadow_rgb: [u8; 3],
     pub highlight_rgb: [u8; 3],
     pub flow: Option<VisualFlow>,
+    /// Local motion between this frame and the previous one, where the picture changes.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub local: Option<LocalMotion>,
+}
+
+/// Where and which way the picture moves locally: the centroid of changing pixels (frame
+/// fractions), the share of pixels that change, and one Lucas–Kanade flow vector per cell of a
+/// 4×4 grid (pixels per frame at 96×54, x then y), solved only over changing pixels so a small
+/// object moving on a still background is not averaged away.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalMotion {
+    cx: f64,
+    cy: f64,
+    area: f64,
+    flow: Vec<f64>,
+}
+
+fn blur(gray: &[f64]) -> Vec<f64> {
+    let mut out = vec![0.; PIXELS];
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            let (mut s, mut n) = (0., 0.);
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let (xx, yy) = (x as i32 + dx, y as i32 + dy);
+                    if xx >= 0 && yy >= 0 && (xx as usize) < WIDTH && (yy as usize) < HEIGHT {
+                        s += gray[yy as usize * WIDTH + xx as usize];
+                        n += 1.;
+                    }
+                }
+            }
+            out[y * WIDTH + x] = s / n;
+        }
+    }
+    out
+}
+
+fn local_motion(gray: &[f64], prior: &[f64]) -> Option<LocalMotion> {
+    let (a, b) = (blur(prior), blur(gray));
+    let (mut mass, mut sx, mut sy, mut moving) = (0., 0., 0., 0usize);
+    // Per cell: sums for the 2×2 Lucas–Kanade system over changing pixels.
+    let mut sums = [[0f64; 5]; 16];
+    for y in 1..HEIGHT - 1 {
+        for x in 1..WIDTH - 1 {
+            let i = y * WIDTH + x;
+            let it = b[i] - a[i];
+            let d = (gray[i] - prior[i]).abs();
+            if d < 0.02 {
+                continue;
+            }
+            moving += 1;
+            mass += d;
+            sx += d * x as f64;
+            sy += d * y as f64;
+            let ix = ((a[i + 1] - a[i - 1]) + (b[i + 1] - b[i - 1])) / 4.;
+            let iy = ((a[i + WIDTH] - a[i - WIDTH]) + (b[i + WIDTH] - b[i - WIDTH])) / 4.;
+            let cell = (y * 4 / HEIGHT) * 4 + x * 4 / WIDTH;
+            let s = &mut sums[cell];
+            s[0] += ix * ix;
+            s[1] += ix * iy;
+            s[2] += iy * iy;
+            s[3] += ix * it;
+            s[4] += iy * it;
+        }
+    }
+    if moving == 0 {
+        return None;
+    }
+    let mut flow = Vec::with_capacity(32);
+    for s in &sums {
+        let det = s[0] * s[2] - s[1] * s[1];
+        let (mut u, mut v) = (0., 0.);
+        if det > 1e-9 {
+            u = -(s[2] * s[3] - s[1] * s[4]) / det;
+            v = -(s[0] * s[4] - s[1] * s[3]) / det;
+        }
+        let round = |x: f64| (x.clamp(-4., 4.) * 100.).round() / 100.;
+        flow.push(round(u));
+        flow.push(round(v));
+    }
+    Some(LocalMotion {
+        cx: ((sx / mass) / WIDTH as f64 * 1000.).round() / 1000.,
+        cy: ((sy / mass) / HEIGHT as f64 * 1000.).round() / 1000.,
+        area: (moving as f64 / PIXELS as f64 * 10000.).round() / 10000.,
+        flow,
+    })
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -132,6 +219,13 @@ fn measure(rgb: &[u8], previous: Option<&[u8]>, time_ms: u32) -> VisualFrame {
             .unwrap_or(0.),
         white_fraction: gray.iter().filter(|&&v| v > 0.94).count() as f64 / PIXELS as f64,
         black_fraction: gray.iter().filter(|&&v| v < 0.035).count() as f64 / PIXELS as f64,
+        local: previous.and_then(|prior| {
+            let prior_gray: Vec<f64> = prior
+                .chunks_exact(3)
+                .map(|p| (0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2])) / 255.)
+                .collect();
+            local_motion(&gray, &prior_gray)
+        }),
         layout,
     }
 }
@@ -247,5 +341,29 @@ mod tests {
             })
             .collect();
         assert!(measure(&textured, None, 66).sharpness > base.sharpness + 0.5);
+    }
+    #[test]
+    fn local_motion_follows_a_small_moving_thing() {
+        // A soft blob in the upper-left quarter, one pixel lower in the next frame.
+        let blob = |cx: f64, cy: f64| -> Vec<f64> {
+            (0..PIXELS)
+                .map(|i| {
+                    let (x, y) = ((i % WIDTH) as f64, (i / WIDTH) as f64);
+                    0.2 + 0.6 * (-((x - cx).powi(2) + (y - cy).powi(2)) / 18.).exp()
+                })
+                .collect()
+        };
+        let (cx, cy) = (WIDTH as f64 * 0.375, HEIGHT as f64 * 0.375);
+        let before = blob(cx, cy);
+        assert!(local_motion(&before, &before).is_none());
+        let down = local_motion(&blob(cx, cy + 1.), &before).expect("movement");
+        let cell = (cy as usize * 4 / HEIGHT) * 4 + cx as usize * 4 / WIDTH;
+        let (u, v) = (down.flow[2 * cell], down.flow[2 * cell + 1]);
+        assert!(v > 0.3, "downward flow {v}");
+        assert!(u.abs() < 0.5 * v, "sideways {u} against {v}");
+        assert!((down.cx - 0.375).abs() < 0.06 && (down.cy - 0.39).abs() < 0.08);
+        assert!(down.area > 0. && down.area < 0.1);
+        let right = local_motion(&blob(cx + 1., cy), &before).expect("movement");
+        assert!(right.flow[2 * cell] > 0.3 && right.flow[2 * cell + 1].abs() < 0.5 * right.flow[2 * cell]);
     }
 }

@@ -7,6 +7,9 @@ use std::{fs, path::Path, sync::atomic::AtomicBool, time::UNIX_EPOCH};
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ColorStats {
+    /// The result came from this measurement's cache (not stored in the cache itself).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cached: bool,
     pub asset_id: String,
     pub fingerprint: String,
     pub cache_key: String,
@@ -87,7 +90,7 @@ pub fn run(
                     && data.asset_id == asset_id
                 {
                     check(cancel)?;
-                    return Ok(data);
+                    return Ok(ColorStats { cached: true, ..data });
                 }
             }
         }
@@ -150,6 +153,7 @@ pub fn run(
     let result = ColorStats {
         asset_id: asset.id,
         fingerprint: asset.fingerprint,
+        cached: false,
         cache_key: key,
         algorithm: "color-samples-1".into(),
         processing: "LOCAL".into(),

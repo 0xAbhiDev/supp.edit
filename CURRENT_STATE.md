@@ -1,3 +1,61 @@
+## Universal reference-to-edit engine — 19–20 November 2026 (not committed; awaiting approval)
+
+Start of phase: `690a96e` (Long Footage 2.1). Evidence: `test-results/footage/matrix-ue/` (per-run records `rec-*.json`, audits, grammar examples), each run folder (screenshots, `explanations.json`, `validation.json`), `test-results/audio-ue/`, `test-results/transitions-ue/`, `test-results/footage/person-masks-ue/`.
+
+**Product path — verified.** A reference and raw footage alone produce the edit: the defaults are Close Match, the reference's own words and its framing; titles are traced over the whole reference (≤ 90 s) and the reference soundtrack is used when no music is supplied; the preview says what it chose. Windows app, `--untouched` (only reference and raw chosen): travel 6/6, 7 m 10 s multi-clip 9/9, 26 minutes 9/9 (7 picks after minute 20), 0 cut crossings, valid exports.
+
+### Windows matrix (11 runs, matrix build) — verified
+All exit 0; all 11 MP4s validated (streams, duration, 0 ms drift, no black, no silence).
+
+| Run | Case | Cache | Preview | In action | Correct | Cut crossings | Reuse |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | multi 7 m 10 s | partly warm (titles, per-frame MISS) | 77 s | 9/9 | 9/9 | 0 | 0 |
+| 2 | multi, cached | warm (titles HIT) | 7 s | 9/9 | 9/9 | 0 | 0 |
+| 3 | multi, one clip changed | changed clip only MISS | 83 s | 9/9 | 9/9 | 0 | 0 |
+| 4 | same reference, new 11 min clip | reference HIT, footage MISS | 121 s | 9/9 | 9/9 | 0 | 0 |
+| 5 | new reference, same 11 min clip | reference MISS, footage HIT | 24 s | 9/9 | 9/9 | 0 | 0 |
+| 6 | 90 s gym | partly warm | 20 s | 6/6 | 6/6 | 0 | 0 (1 shared repetition) |
+| 7 | travel | partly warm | 26 s | 6/6 | 6/6 | 0 | 0 |
+| 8 | cooking | partly warm | 17 s | 5/6 | **4/6** | 0 | 0 |
+| 9 | 26 minutes, cached | warm | 23 s | 9/9 | **9/9** | **0** | 0 |
+| 10 | workshop holdout (untouched) | cold | 113 s | 3/4 | **1/4** (4 of 6 shots) | 0 | 0 |
+| 11 | street holdout (untouched) | cold | 109 s | 5/6 | 5/6 | 0 | 0 |
+
+### Fixed after the matrix — verified (offline audits and the app)
+- **Same-scene strict cuts** (flow reset + one-frame transform jump + layout jump): workshop 6/6 shots, 4/6 correct (was 1/4); coastal gains a verified cut at 3.8 s.
+- **Flow collapse in moving shots:** S1 4/4, S4 18/21 (was 3/4, 15/21); 0 new false positives on any reference.
+- **15 fps cut logic:** 26 min 17/18 planted boundaries (1330 s is a frozen picture starting to move — no picture change, missed at 30 fps too), 0 extra; 30 fps truth sets unchanged.
+- **Dissolves:** detected (2/2 true, 0 false on 14 references; fades to black left as fades), split as shots and rebuilt (incoming shot fades in above, silent, pre-roll inside the cut-safe stretch).
+- **Flash ramps:** a sliver between two flash boundaries joins the outgoing shot (new holdout 7 → 6 shots).
+- **Title cache v2:** cached and uncached reconstructions agree (tone and plate tint cached); word correction re-traces titles only (W1 MISS, W2 HIT, footage HIT).
+- **Honest cache report:** native analysis and colour report their own hits; text, motion, beat map, speech and audio timeline report their real state.
+- **Creative Remix:** reference movement measured in every mode — in app 7/9 (was 3/9) and 8/9 (was 1/9).
+- **Framing:** a frame the reference fills is filled in every mode; bars only over reference shots that show them; crops follow the footage's motion when no subject is detected.
+- **Titles:** a trace that disagrees with the text reading (size beyond 0.5–2×, inverted ink) is set aside and reported; reel 55 and S1 titles unchanged.
+- **Alternative takes:** each carries the tone curve fitted to its own footage.
+- **Person masks:** skip vs exhaustive 12.7/18.4 s (90 s), 52/115 s (11 min), 123/269 s (26 min); outlines differ 0.16–0.65 % mean, worst 1.64 % (multi-C), 4.1 % at one frozen moment on 11 min (the model jitters on an unchanged frame).
+
+### Holdouts
+- **Workshop / street** (after engine work, never tuned): untouched 1/4 and 5/6; the workshop failure revealed the same-scene cut defect (fixed above; frozen in `holdout-workshop/UNTOUCHED-RESULT.md`).
+- **Vertical beach holdout** (single run): 5/6 shots, right clip 4/5, right moment 1/5; visible defects (letterboxing, clipped brown title, missing word, grade overshoot) → framing, title agreement and per-take curves fixed and re-verified in the app; "HOUR" stays flagged uncertain.
+- **Landscape gym + coast holdout (final, single one-click run, no correction):** 7 shots detected (a flash ramp sliver, now fixed), dissolve found at 8.07 s (truth 8.078), right clip 4/6 (two are other moments of the same repetitive exercise), 2 wrong clips (one flagged at 32 %), title "TRAIN HARD" yellow at the top with a stray extra layer, valid export with the reference soundtrack, 87 s cold.
+
+### Partially working
+- **Recreated audio structure:** S4 unchanged from 3.1 (cut relations 0.955, titles 0.667, 0 inversions, phrase error 0.002); reel 55: sections and mapping improved (build appears; 1 event without replacement, was 7), but generated effect levels are off (median 6 dB; a bass hit is masked).
+- **Transitions:** cut, punch-in, dissolve, flash, blur found and classified; whip is classified as a cut; a dissolve is rebuilt ending at the cut, not centred on it.
+- **ReferenceGrammar v2:** canonical view with measurement / confidence / interpretation / generated value; the planner still reads the StyleDNA.
+
+### Known failures
+- Burned-in text in the raw footage (gym exercise labels) is recreated again as an overlay over footage that already shows it.
+- Stills across palettes (cooking "finished", workshop "product") and camera-only shots (street pan) pick the wrong hold.
+- Cooking pour vs stir in the app: 4/6 (offline 5/6, the app's person outlines differ).
+- Exact source moment on real footage: right clip but another moment in most holdout picks.
+- Strong tone curves can band a flat sky; effect levels mix a peak and a loudness measure.
+- Intermittent: once in two runs the reopened 26-minute project closed the app window (not reproduced).
+
+### Planned
+- Read text in the chosen raw ranges and skip overlays the footage already shows; still/composition identity across palettes; camera-move role; effect-level units; centred dissolve rebuild; whip classification. Shared decoding was measured (vision is ~83 % model inference) and not built.
+
 ## Long footage 2.1: global semantic planning, scarcity and generalization — 19 November 2026
 
 Checkpoint before this phase: `a3eb3f0` (Long Footage 2.0 is `3f9fcee`). This phase was committed after review.

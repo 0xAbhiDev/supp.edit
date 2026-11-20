@@ -49,16 +49,66 @@ export interface Controls {
   audio?: "music" | "reference" | "recreate";
   subjectLayering?: "flat" | "behind-people" | "reference";
 }
+// One click recreates the reference: its own words, its own framing, as closely as the footage allows.
 export const defaults: Controls = {
-  mode: "Smart Adaptation",
-  wording: "adapt",
+  mode: "Close Match",
+  wording: "original",
   pace: 1,
   color: 0.75,
   beat: 0.65,
   instructions: "",
-  format: "vertical",
+  format: "reference",
   subjectLayering: "reference",
 };
+
+/** The longest reference whose titles are traced end to end without being asked (tracing costs
+ * about 1.3 s per reference second). */
+export const AUTO_TITLE_MAX_MS = 90_000;
+
+/** What the user did not choose, chosen for a faithful recreation, so that a reference and raw
+ * footage alone produce the full reconstruction:
+ *  - titles are traced over the whole reference (up to 90 s) unless an interval was chosen;
+ *  - with no music supplied, the edit plays the reference's own soundtrack (else the raw clips'
+ *    sound would play). Each automatic choice is reported for review. */
+/** A reference shot shows bars when most of its samples do (a single sample at a flash or a
+ * transition does not make a letterboxed shot). */
+export const barred = (camera?: { letterbox?: number } | null) => (camera?.letterbox ?? 0) >= 0.5;
+/** Contiguous timeline spans of the recreated shots whose reference shots show bars. */
+export function barredRuns(matches: readonly { referenceMs: number; start: number; duration: number }[], shots: readonly { startMs: number; camera?: { letterbox?: number } | null }[]) {
+  const runs: { start: number; duration: number }[] = [];
+  for (const m of matches) {
+    if (!barred(shots.find((r) => r.startMs === m.referenceMs)?.camera)) continue;
+    const last = runs.at(-1);
+    if (last && last.start + last.duration === m.start) last.duration += m.duration;
+    else runs.push({ start: m.start, duration: m.duration });
+  }
+  return runs;
+}
+export function autonomousControls(controls: Controls, reference: { duration: number; hasAudio: boolean }, hasMusic: boolean) {
+  const chosen: string[] = [];
+  const next = { ...controls };
+  const ms = Math.floor(reference.duration * 1000);
+  if (!next.interval && next.mode !== "Creative Remix" && ms > 0 && ms <= AUTO_TITLE_MAX_MS) {
+    next.interval = { startMs: 0, endMs: ms };
+    chosen.push("titles reconstructed over the whole reference");
+  }
+  if (!next.audio) {
+    next.audio = !hasMusic && reference.hasAudio ? "reference" : "music";
+    if (next.audio === "reference") chosen.push("the reference soundtrack, since no music was supplied");
+  }
+  return { controls: next, chosen };
+}
+/** One take's tone curves: the reference shot's measured tone over the take's own measured tone. */
+export type TakeCurves = { red: [number, number][]; green: [number, number][]; blue: [number, number][] };
+export function takeCurves(tone: readonly ToneSample[] | undefined, inMs: number, outMs: number, target: NonNullable<StyleDNA["shots"][number]["tone"]>): TakeCurves | null {
+  const from = medianTone((tone ?? []).filter((t) => t.timeMs >= inMs - 250 && t.timeMs <= outMs + 250).map((t) => t.tone));
+  if (!from) return null;
+  return {
+    red: matchingCurve(from.map((q) => q[0]), target.map((q) => q[0])),
+    green: matchingCurve(from.map((q) => q[1]), target.map((q) => q[1])),
+    blue: matchingCurve(from.map((q) => q[2]), target.map((q) => q[2])),
+  };
+}
 const clamp = (n: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, n)) || 0;
 // Use a bounded gain. The floor limits amplification of compression noise
@@ -103,12 +153,15 @@ export function buildRecreation(
       duration: number;
       referenceMs: number;
       referenceEndMs: number;
+      preroll?: number;
       /** The matcher's scoring terms for the chosen range. */
       why?: Record<string, number>;
       /** Global long-footage selection: per-criterion match (0–1), alternatives and reuse. */
       selection?: "global" | "local";
       match?: Record<string, number>;
-      alternatives?: ShotChoice["alternatives"];
+      /** Alternative takes, each with the tone curve fitted to its own footage (a swap keeps the look
+       * consistent instead of carrying the replaced footage's curve). */
+      alternatives?: (ShotChoice["alternatives"][number] & { curves?: TakeCurves | null })[];
       reuse?: ShotChoice["reuse"];
       role?: ShotChoice["role"];
       reasons?: string[];
@@ -550,25 +603,31 @@ export function buildRecreation(
     if (
       !box &&
       controls.format !== "vertical" &&
-      ref.layout &&
-      !ref.subject &&
-      (camera?.letterbox ?? 0) < 0.03
+      !barred(camera)
     ) {
-      const fit = Math.min(width / asset.width, height / asset.height);
-      baseScale = clamp(
-        Math.max(width / (asset.width * fit), height / (asset.height * fit)),
-        1,
-        10,
-      );
-      command.push({
-        tool: "sequence.keyframe",
-        sequenceId: id,
-        clipId,
-        property: "scale",
-        frame: cursor,
-        value: baseScale,
-        easing: "linear",
-      });
+      // A reference that fills its frame is matched without bars, whatever the footage's shape.
+      // With no detected subject the crop follows where the footage moves (the local motion
+      // centre measured on its dense frames), not a blind centre crop; bars baked into the
+      // footage are not picture, so the measured content is what covers the frame.
+      const fit = Math.min(width / asset.width, height / asset.height),
+        sw = asset.width * fit,
+        sh = asset.height * fit;
+      const content = s.source.aperture;
+      const contentW = 1 - (content?.left ?? 0) - (content?.right ?? 0),
+        contentH = 1 - (content?.top ?? 0) - (content?.bottom ?? 0);
+      baseScale = clamp(Math.max(width / (sw * Math.max(0.2, contentW)), height / (sh * Math.max(0.2, contentH))), 1, 10);
+      command.push({ tool: "sequence.keyframe", sequenceId: id, clipId, property: "scale", frame: cursor, value: baseScale, easing: "linear" });
+      const fromMs = (sourceIn * 1000) / rate,
+        toMs = ((sourceIn + duration) * 1000) / rate;
+      const centres = (s.source.visual ?? []).filter((f) => f.timeMs >= fromMs && f.timeMs <= toMs && f.local && f.local.area >= 0.002).map((f) => [f.local!.cx, f.local!.cy] as const);
+      const mid = (xs: number[]) => [...xs].sort((a, b) => a - b)[xs.length >> 1];
+      const cx = centres.length >= 5 ? mid(centres.map((c) => c[0])) : 0.5,
+        cy = centres.length >= 5 ? mid(centres.map((c) => c[1])) : 0.5;
+      const edges = { left: content?.left ?? 0, right: content?.right ?? 0, top: content?.top ?? 0, bottom: content?.bottom ?? 0 };
+      const x = clamp((0.5 - cx) * baseScale * sw, Math.min(0, width / 2 - (0.5 - edges.right) * sw * baseScale), Math.max(0, -width / 2 - (edges.left - 0.5) * sw * baseScale));
+      const y = clamp((0.5 - cy) * baseScale * sh, Math.min(0, height / 2 - (0.5 - edges.bottom) * sh * baseScale), Math.max(0, -height / 2 - (edges.top - 0.5) * sh * baseScale));
+      if (Math.abs(x) >= 0.5) command.push({ tool: "sequence.keyframe", sequenceId: id, clipId, property: "x", frame: cursor, value: x, easing: "linear" });
+      if (Math.abs(y) >= 0.5) command.push({ tool: "sequence.keyframe", sequenceId: id, clipId, property: "y", frame: cursor, value: y, easing: "linear" });
     }
     if (box) {
       const fit = Math.min(width / asset.width, height / asset.height),
@@ -577,10 +636,10 @@ export function buildRecreation(
       const cover = Math.max(width / sw, height / sh);
       // A reference that fills its frame is matched without bars: cover the frame and keep the
       // subject as centered as the footage allows.
+      // In every mode: bars never belong in a frame the reference fills.
       const fill =
-        close &&
         controls.format !== "vertical" &&
-        (camera?.letterbox ?? 0) < 0.03;
+        !barred(camera);
       // Bars baked into the raw footage are not picture: cover the frame with the measured content.
       const content = fill ? s.source.aperture : undefined;
       const contentW = 1 - (content?.left ?? 0) - (content?.right ?? 0),
@@ -670,7 +729,7 @@ export function buildRecreation(
           if (c.property === "x" || c.property === "y") c.value = 0;
         }
     }
-    if (barsBox) {
+    if (barsBox && barred(camera)) {
       const f0 = Math.min(width / asset.width, height / asset.height),
         sw = asset.width * f0,
         sh = asset.height * f0,
@@ -839,7 +898,13 @@ export function buildRecreation(
       referenceEndMs: ref.endMs,
       why: candidate.terms,
       selection: fromChoice ? "global" : "local",
-      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives, reuse: pick.reuse, role: pick.role, reasons: pick.why, confidence: pick.confidence, certainty: pick.certainty, coverage: pick.coverage, shortfall: pick.shortfall, speed: pick.speed } : {}),
+      // Source frames available before the in-point inside the same cut-safe stretch (for a dissolve).
+      preroll: Math.max(0, Math.min(sourceIn - s.first, (() => {
+        const at = (sourceIn * 1000) / rate;
+        const seg = footage.segments.find((g) => g.sourceId === asset.id && g.startMs <= at && at < g.endMs);
+        return seg ? Math.floor(((at - seg.startMs) * rate) / 1000) : 0;
+      })())),
+      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives?.map((a) => ({ ...a, curves: curves ? takeCurves(sources.find((x) => x.asset.id === a.sourceId)?.tone, a.inMs, a.outMs, curves) : undefined })), reuse: pick.reuse, role: pick.role, reasons: pick.why, confidence: pick.confidence, certainty: pick.certainty, coverage: pick.coverage, shortfall: pick.shortfall, speed: pick.speed } : {}),
       peak: { fraction: Number(requirements[index].peakFraction.toFixed(3)), source: requirements[index].peakSource },
     });
     cursor += duration;
@@ -855,7 +920,7 @@ export function buildRecreation(
     );
     if (!measured || measured.kind === "cut") continue;
     if (
-      !["flash", "blur", "zoom", "whip", "motion"].includes(measured.kind) ||
+      !["flash", "blur", "zoom", "whip", "motion", "dissolve"].includes(measured.kind) ||
       measured.confidence < 0.65
     ) {
       warnings.push(
@@ -890,6 +955,16 @@ export function buildRecreation(
       ),
     );
     if (after < 2 || command.length >= 500) continue;
+    // A dissolve borrows source frames before the incoming in-point; only frames inside the same
+    // cut-safe stretch, never across a cut in the raw footage. It is rebuilt ending at the cut.
+    let span = before;
+    if (measured.kind === "dissolve") {
+      span = Math.min(before + after, right.preroll ?? 0, left.duration, 120);
+      if (span < 2) {
+        warnings.push(`Shot ${i + 1}: dissolve measured, but the incoming take has no clean footage before it; retained a cut.`);
+        continue;
+      }
+    }
     command.push({
       tool: "sequence.transition",
       sequenceId: id,
@@ -897,7 +972,7 @@ export function buildRecreation(
       trackId: transitionTrack,
       leftId: left.clipId,
       rightId: right.clipId,
-      kind: measured.kind as "flash" | "blur" | "zoom" | "whip" | "motion",
+      kind: measured.kind as "flash" | "blur" | "zoom" | "whip" | "motion" | "dissolve",
       ...(measured.direction ? { direction: measured.direction } : {}),
       ...(measured.zoomDirection
         ? { zoomDirection: measured.zoomDirection }
@@ -905,7 +980,7 @@ export function buildRecreation(
       protection: protection.filter(
         (r) => r.clipId === left.clipId || r.clipId === right.clipId,
       ),
-      before,
+      before: span,
       after,
       strength: clamp(measured.strength, 0.05, 1),
     });
@@ -944,8 +1019,10 @@ export function buildRecreation(
     pulseLayers.set(pulse, (command.at(-1) as { id: string }).id);
   }
   command.push(...grade);
+  // Bars only over the reference shots that show them (bars baked into one source must not
+  // letterbox the whole edit).
   if (barsBox && ap && cursor > 0)
-    command.push({ tool: "sequence.letterbox", sequenceId: id, trackId: uid(), id: uid(), start: 0, duration: cursor, top: Math.min(0.45, ap.top), bottom: Math.min(0.45, ap.bottom), left: Math.min(0.45, ap.left), right: Math.min(0.45, ap.right) });
+    for (const run of barredRuns(matches, referenceShots)) command.push({ tool: "sequence.letterbox", sequenceId: id, trackId: uid(), id: uid(), start: run.start, duration: run.duration, top: Math.min(0.45, ap.top), bottom: Math.min(0.45, ap.bottom), left: Math.min(0.45, ap.left), right: Math.min(0.45, ap.right) });
   // Reference-clock milliseconds to a frame of this sequence, through the shot matches (which
   // carry pace and Smart/Remix length changes).
   const toFrame = (ms: number) => {

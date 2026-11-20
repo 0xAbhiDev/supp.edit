@@ -1,5 +1,29 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**20 November universal reference-to-edit engine.** What a user gets from a reference and raw footage alone, measured on the final build in the Windows app (`--untouched`: only the reference and the raw videos chosen, Recreate pressed, everything else automatic; full flow through save, reopen, Inspector edit and Deliver; every MP4 checked by `scripts/validate-export.mjs`):
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| One-click recreation (defaults, automatic title tracing, reference soundtrack) | verified | travel 6/6, multi 9/9, 26 min 9/9; preview lists the automatic choices |
+| Search of all footage, up to 26 minutes (15 fps past 20 min) | verified | 7 of 9 picks after minute 20; 0 cut crossings |
+| Cuts: hard, punch-in, same-scene, out of moving shots, 15 fps | verified | `matrix-ue/reference-cuts-after2.json`: 0 false positives on 14 references |
+| Dissolves (detect, split, rebuild) | verified | 2/2 detected, 0 false; rebuilt as a fade-in layer |
+| Flash, blur | verified | fixture spans 8134–8301 and 9900–10167 ms |
+| Whip | known failure | classified as a cut |
+| Caches (per stage HIT/MISS, dependency-aware, titles v2) | verified | cached 7 s vs 77 s; changed clip only; word correction re-traces titles only |
+| Close Match selection on generated gym / travel / long cases | verified | 9/9, 6/6, 6/6, 9/9, 9/9 |
+| Cooking (small directional motion) | partially working | 4/6 in the app; still-vs-still and pour-vs-stir misses |
+| Creative Remix | partially working | 7/9 and 8/9 (was 3/9 and 1/9); its own 14.4 s rhythm |
+| Unseen real-footage holdouts | partially working | right clip 4/5 and 4/6, exact moment rarely; 2 wrong clips flagged |
+| Framing for mixed shapes (fill, per-shot bars) | verified | vertical beach holdout re-run: no letterbox, bars only where the reference has them |
+| Titles (reading vs trace agreement, reviewed words) | partially working | sizes and colours right; uncertain words stay flagged; burned-in source text duplicated (known failure) |
+| Reference soundtrack | verified | correlation 1.00, 0 ms lag and drift |
+| Recreated audio structure | partially working | S4 relations 0.955 / 0.667, 0 inversions; effect levels off (bass hit masked) |
+| Person masks (skip on unchanged frames) | verified | 2.2–2.9× faster; mean outline difference ≤ 0.65 % |
+| ReferenceGrammar (measurement / confidence / interpretation / generated) | implemented | `matrix-ue/grammar-travel.json`; planner still reads the DNA |
+| Shared decoding | planned, not justified | vision is ~83 % model inference |
+
+
 **19 November Long Footage 2.1.** Five cases ran the full Windows flow on the current build (final matrix: `test-results/footage/*/native21-final`). Picks are graded from the preview's own explanation. Cached times vary with machine load (the 7 m 10 s case: 22 s quiet, 38 s under load):
 
 | Case | Raw pool | Shots measured | In planted action | Right action | Cut crossings | Reuse | Preview first / cached |

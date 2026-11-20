@@ -178,3 +178,62 @@ describe("cut versus zoom, still pictures, file-identity caches", () => {
     expect(before[0]).not.toContain("ref");
   });
 });
+
+describe("directional local motion and activity envelope", () => {
+  // Frames whose local motion is given per cell: a small moving thing on a still picture.
+  const withLocal = (count: number, flowAt: (k: number) => { cx: number; cy: number; cells: [number, number, number][] }, still = false) =>
+    Array.from({ length: count }, (_, k) => {
+      const { cx, cy, cells } = flowAt(k);
+      const flow = new Array<number>(32).fill(0);
+      for (const [c, dx, dy] of cells) {
+        flow[2 * c] = dx;
+        flow[2 * c + 1] = dy;
+      }
+      return {
+        timeMs: Math.round((k * 1000) / 30),
+        luma: 0.5,
+        contrast: 0.2,
+        saturation: 0.1,
+        temperature: 0,
+        sharpness: 0.15,
+        change: still ? 0.00001 : 0.0012,
+        whiteFraction: 0,
+        blackFraction: 0,
+        layout: new Array(16).fill(0.5),
+        flow: { panX: 0, panY: 0, expansion: 0, confidence: 0.9 },
+        ...(still ? {} : { local: { cx, cy, area: 0.004, flow } }),
+      } as VisualFrame;
+    });
+  // Downward transport in a column (a stream falling) against motion circling a centre.
+  const falling = (k: number) => ({ cx: 0.5, cy: 0.3 + ((k % 10) / 10) * 0.3, cells: [[5, 0.05, 1.8], [9, -0.05, 1.9], [6, 0.02, 1.7]] as [number, number, number][] });
+  const circling = (k: number) => {
+    const a = (k / 24) * 2 * Math.PI;
+    // Tangential flow around the frame centre in the four central cells.
+    return {
+      cx: 0.5 + 0.08 * Math.cos(a),
+      cy: 0.5 + 0.08 * Math.sin(a),
+      cells: [
+        [5, 1.5, -1.5],
+        [6, 1.5, 1.5],
+        [10, -1.5, 1.5],
+        [9, -1.5, -1.5],
+      ].map(([c, dx, dy]) => [c, dx * Math.cos(a) * 0 + dx, dy]) as [number, number, number][],
+    };
+  };
+  it("tells a falling stream from circling motion by direction, rotation and path, without labels", () => {
+    const pourA = actionSignature(withLocal(45, falling), undefined, 0, 1500, 16 / 9)!;
+    const pourB = actionSignature(withLocal(45, (k) => falling(k + 3)), undefined, 0, 1500, 16 / 9)!;
+    const stir = actionSignature(withLocal(45, circling), undefined, 0, 1500, 16 / 9)!;
+    expect(pourA.direction!.vertical).toBeGreaterThan(0.8);
+    expect(stir.direction!.rotation).toBeGreaterThan(pourA.direction!.rotation + 0.3);
+    expect(actionSimilarity(pourA, pourB).direction!).toBeGreaterThan(actionSimilarity(pourA, stir).direction! + 0.25);
+    // Small moving area: direction dominates the overall movement match.
+    expect(actionSimilarity(pourA, pourB).overall).toBeGreaterThan(actionSimilarity(pourA, stir).overall + 0.1);
+  });
+  it("scores an active window above one that drifts into idle frames", () => {
+    const active = actionSignature(withLocal(45, falling), undefined, 0, 1500, 16 / 9)!;
+    const drifting = actionSignature([...withLocal(20, falling), ...withLocal(25, falling, true).map((f, k) => ({ ...f, timeMs: Math.round(((k + 20) * 1000) / 30) }))], undefined, 0, 1500, 16 / 9)!;
+    expect(drifting.envelope!.trail).toBeGreaterThan(0.3);
+    expect(actionSimilarity(active, active).envelope!).toBeGreaterThan(actionSimilarity(active, drifting).envelope! + 0.3);
+  });
+});

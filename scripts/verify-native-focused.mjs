@@ -13,9 +13,12 @@ import { spawn, execFileSync } from "node:child_process";
 import { chromium } from "@playwright/test";
 import { mediaEnvironment } from "./runtime.mjs";
 const [projectArg, outArg, start, end, reviewFile] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
-// --audio=music|reference|recreate chooses the Audio mode control; --exclude=id,id withholds raw clips.
+// --audio=music|reference|recreate chooses the Audio mode control; --exclude=id,id withholds raw clips;
+// --mode="Smart Adaptation"|"Creative Remix" chooses the Recreation mode (default Close Match).
 const option = (name) => process.argv.find((a) => a.startsWith("--" + name + "="))?.slice(name.length + 3);
 const audioMode = option("audio"),
+  recreationMode = option("mode") ?? "Close Match",
+  untouched = process.argv.includes("--untouched"),
   excluded = new Set((option("exclude") ?? "").split(",").filter(Boolean));
 if (!end) throw Error("Supply a project copy, an output directory and the reference in/out milliseconds.");
 const project = path.resolve(projectArg),
@@ -102,19 +105,31 @@ const before = await sequences(page);
 step("Opened project in the Windows application", { sequences: before });
 await page.getByRole("button", { name: "AI Studio", exact: true }).click();
 const panel = page.getByRole("region", { name: "Recreate an edit" });
-await panel.getByLabel("Output framing").selectOption("reference");
-await panel.getByLabel("Reference video", { exact: true }).selectOption(assets[0].id);
-for (const a of assets.slice(1).filter((a) => a.kind === "video" && !excluded.has(a.id))) await panel.getByLabel("Add raw video").selectOption(a.id);
-const music = assets.find((a) => a.kind === "audio");
-if (music) await panel.getByRole("combobox", { name: "Music", exact: true }).selectOption(music.id);
-await panel.getByRole("combobox", { name: "Recreation mode", exact: true }).selectOption("Close Match");
-await panel.getByLabel("Reference text", { exact: true }).selectOption("original");
-await panel.getByLabel("Text layering").selectOption("reference");
-if (audioMode) await panel.getByLabel("Audio mode").selectOption(audioMode);
-await panel.getByText("Style controls", { exact: true }).click();
-await panel.getByLabel("Reconstruct a focused title interval").check();
-await panel.getByLabel("Reference in (seconds)").fill(String(Number(start) / 1000));
-await panel.getByLabel("Reference out (seconds)").fill(String(Number(end) / 1000));
+// --untouched: the user path. Only the reference and the raw videos are chosen; every other
+// control keeps the app's default and Recreate This Style is pressed.
+if (untouched) {
+  await panel.getByLabel("Reference video", { exact: true }).selectOption(assets[0].id);
+  for (const a of assets.slice(1).filter((a) => a.kind === "video" && !excluded.has(a.id))) await panel.getByLabel("Add raw video").selectOption(a.id);
+  step("Chose only the reference and the raw footage", { reference: assets[0].name, raw: assets.slice(1).filter((a) => a.kind === "video" && !excluded.has(a.id)).map((a) => a.name) });
+} else {
+  await panel.getByLabel("Output framing").selectOption("reference");
+  await panel.getByLabel("Reference video", { exact: true }).selectOption(assets[0].id);
+  for (const a of assets.slice(1).filter((a) => a.kind === "video" && !excluded.has(a.id))) await panel.getByLabel("Add raw video").selectOption(a.id);
+  const music = assets.find((a) => a.kind === "audio");
+  if (music) await panel.getByRole("combobox", { name: "Music", exact: true }).selectOption(music.id);
+  await panel.getByRole("combobox", { name: "Recreation mode", exact: true }).selectOption(recreationMode);
+  step("Recreation mode", { mode: recreationMode });
+  await panel.getByLabel("Reference text", { exact: true }).selectOption("original");
+  await panel.getByLabel("Text layering").selectOption("reference");
+  if (audioMode) await panel.getByLabel("Audio mode").selectOption(audioMode);
+  await panel.getByText("Style controls", { exact: true }).click();
+  // The focused title interval exists in Close Match only; the other modes use the whole reference.
+  if (recreationMode === "Close Match") {
+    await panel.getByLabel("Reconstruct a focused title interval").check();
+    await panel.getByLabel("Reference in (seconds)").fill(String(Number(start) / 1000));
+    await panel.getByLabel("Reference out (seconds)").fill(String(Number(end) / 1000));
+  }
+}
 if (review) await panel.getByLabel(/Visually reviewed words/).fill(review);
 await shot(page, "1-controls.png");
 const began = Date.now();
@@ -129,7 +144,7 @@ for (;;) {
   if (status && Math.round((Date.now() - began) / 1000) % 30 < 2) log("  ", status.replace("Cancel", "").trim());
   await page.waitForTimeout(2000);
 }
-const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music|Analysis time|Raw footage|No source interval|Low confidence|Analysis:|Tone sampling|Cache:|Reference coverage|Reference analysis|repeat one action|near tie|No close source match/.test(t));
+const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music|Analysis time|Raw footage|No source interval|Low confidence|Analysis:|Tone sampling|Cache:|Reference coverage|Reference analysis|Reference cache|Reference grammar|repeat one action|near tie|No close source match/.test(t));
 // The audio evidence the preview shows, opened as a user would.
 const audioEvidence = panel.getByText(/^Audio events/);
 if (await audioEvidence.count()) {
@@ -146,6 +161,8 @@ step("Preview ready", { seconds: Math.round((Date.now() - began) / 1000), summar
     await why.scrollIntoViewIfNeeded();
     await shot(page, "2c-why-each-moment.png");
     const rows = await panel.locator("details", { has: page.getByText("Why each source moment was chosen", { exact: true }) }).locator("table tbody tr").allInnerTexts();
+    // The full explanation of every pick (every factor and its share) goes to the evidence folder.
+    fs.writeFileSync(path.join(out, "explanations.json"), JSON.stringify(rows.map((t) => t.replace(/\s+/g, " ")), null, 1));
     step("Explained each choice", { rows: rows.map((t) => t.replace(/\s+/g, " ").slice(0, 600)) });
   }
 }

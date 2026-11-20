@@ -183,9 +183,18 @@ export function ReferenceEditor() {
       // speed curve (or add a constant one) so the edit timing never changes.
       const was = m.speed ?? 1,
         speed = alt.speed ?? 1;
-      let commands = result.preview.plan.commands.map((call) =>
-        call.tool === "sequence.insert" && call.clipId === m.clipId ? { ...call, assetId: asset.id, fingerprint: asset.fingerprint, sourceIn } : call,
-      );
+      // The tone curve was fitted to the replaced footage: use the one fitted to this take, or none
+      // (a neutral look) when this take has no measured tone, never the old footage's curve.
+      const takeCurves = "curves" in alt ? alt.curves : undefined;
+      let commands = result.preview.plan.commands
+        .filter((call) => !(takeCurves === null && call.tool === "sequence.effect" && call.clipId === m.clipId && call.type === "curves"))
+        .map((call) =>
+          call.tool === "sequence.insert" && call.clipId === m.clipId
+            ? { ...call, assetId: asset.id, fingerprint: asset.fingerprint, sourceIn }
+            : takeCurves && call.tool === "sequence.effect" && call.clipId === m.clipId && call.type === "curves"
+              ? { ...call, parameters: takeCurves }
+              : call,
+        );
       if (speed !== was) {
         const curve = commands.find((call) => call.tool === "sequence.speed" && call.clipId === m.clipId);
         if (curve && curve.tool === "sequence.speed") {
@@ -198,7 +207,9 @@ export function ReferenceEditor() {
           commands.splice(at + 1, 0, { tool: "sequence.speed", sequenceId, clipId: m.clipId, curve: { sourceOffset: 0, keys: [{ frame: 0, speed, easing: "smooth" }, { frame: m.duration, speed, easing: "smooth" }] } });
         }
       }
-      const previous = { sourceId: m.source, inMs: Math.round((m.sourceIn * 1000) / rate), outMs: Math.round(((m.sourceIn + m.duration * was) * 1000) / rate), speed: was, score: 0, match: m.match ?? {}, lostOn: "the take chosen before" };
+      // The take chosen before keeps its own curve, so choosing it again restores its look.
+      const oldCurve = result.preview.plan.commands.find((call) => call.tool === "sequence.effect" && call.clipId === m.clipId && call.type === "curves");
+      const previous = { sourceId: m.source, inMs: Math.round((m.sourceIn * 1000) / rate), outMs: Math.round(((m.sourceIn + m.duration * was) * 1000) / rate), speed: was, score: 0, match: m.match ?? {}, lostOn: "the take chosen before", curves: oldCurve && oldCurve.tool === "sequence.effect" ? (oldCurve.parameters as typeof takeCurves) : undefined };
       const matches = result.matches.map((x, k) =>
         k === index ? { ...x, source: asset.id, sourceIn, speed, match: alt.match, alternatives: [previous, ...(x.alternatives ?? []).filter((a) => a !== alt)] } : x,
       );
@@ -211,6 +222,13 @@ export function ReferenceEditor() {
           if (!clip) throw Error("That shot is no longer in the recreated sequence.");
           clip.assetId = asset.id;
           clip.sourceIn = sourceIn;
+          if (takeCurves !== undefined && clip.effectStack) {
+            const at = clip.effectStack.findIndex((e) => e.type === "curves");
+            if (at >= 0) {
+              if (takeCurves) clip.effectStack[at] = { ...clip.effectStack[at], parameters: takeCurves };
+              else clip.effectStack.splice(at, 1);
+            }
+          }
           if (speed !== was) {
             if (clip.timeRemap) {
               for (const k of clip.timeRemap.keys) k.speed = (k.speed * speed) / was;

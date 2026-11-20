@@ -129,6 +129,8 @@ export const analysisResultSchema = z
     assetId: identitySchema,
     fingerprint: z.string().min(1).max(8192),
     cacheKey: z.string().regex(/^[a-f0-9]{64}$/),
+    /** Served from the native analysis cache. */
+    cached: z.boolean().optional(),
     algorithm: z.literal("media-analysis-1"),
     processing: z.literal("LOCAL"),
     durationMs: ms,

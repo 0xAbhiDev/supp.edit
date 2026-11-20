@@ -12,7 +12,7 @@ export const referenceTransitionSchema = z
     trackId: id,
     leftId: id,
     rightId: id,
-    kind: z.enum(["flash", "blur", "zoom", "whip", "motion"]),
+    kind: z.enum(["flash", "blur", "zoom", "whip", "motion", "dissolve"]),
     direction: z.enum(["left", "right", "up", "down"]).optional(),
     zoomDirection: z.enum(["in", "out"]).optional(),
     protection: z
@@ -135,6 +135,7 @@ export function addReferenceTransition(
       );
       return;
     }
+    // A dissolve (and the flash below) is an editable layer on a transition track above the shots.
     let track = p.tracks.find((t) => t.id === call.trackId);
     if (track?.locked || track?.kind === "audio" || track?.id === left.trackId)
       throw Error("Choose a separate unlocked video track for transitions");
@@ -148,6 +149,27 @@ export function addReferenceTransition(
         name: "Reference transitions",
       };
       p.tracks.splice(sourceOrder, 0, track);
+    }
+    if (call.kind === "dissolve") {
+      // The incoming shot, same framing and grade, starts `before` frames early on the track above
+      // and fades in over the outgoing one; its sound stays silent (the shots below carry it).
+      // A retimed shot has no clean earlier frames to borrow, so its cut stays a cut.
+      const overlap = Math.min(call.before, right.sourceIn, left.duration);
+      if (overlap < 2 || right.timeRemap) return;
+      const c: Clip = JSON.parse(JSON.stringify(right));
+      c.id = call.id;
+      c.trackId = track.id;
+      c.name = "Dissolve";
+      c.start = right.start - overlap;
+      c.duration = overlap;
+      c.sourceIn = right.sourceIn - overlap;
+      c.gain = -60;
+      c.keyframes = { ...c.keyframes, opacity: [
+        { frame: 0, value: 0, easing: "linear" as const },
+        { frame: overlap - 1, value: 1, easing: "linear" as const },
+      ] };
+      p.clips.push(c);
+      return;
     }
     const c = newClip(
       track.id,

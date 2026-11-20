@@ -1,3 +1,37 @@
+## Resume after the universal reference-to-edit engine — 20 November 2026
+
+**State:**
+- Start of phase: `690a96e` (Long Footage 2.1). Nothing from this phase is committed (waiting for approval); `.claude/` stays uncommitted; nothing pushed.
+- `bin/supp-edit.exe` is built from the working tree.
+
+**Reproduce:**
+1. **One click:** `node scripts/run-native-verification.mjs COPY.supp OUT 0 END_MS --untouched`. Only the reference and the raw videos are chosen.
+2. **Other driver options:** `--mode="Creative Remix"`, `--audio=reference|recreate`, `--exclude=id`, or a reviewed-words file as the 5th argument.
+3. **Batches:**
+   - the matrix: `test-results/footage/run-matrix-ue.sh`;
+   - the follow-ups: `run-followups-ue.sh`, `run-final-ue.sh`, `run-oneclick-ue.sh`;
+   - the regression: `run-regression-ue2.sh`;
+   - the last checks: `run-final2-ue.sh`.
+
+   Templates are clean `*.template.supp` files. Never use `.bak` files: the app writes those on save.
+4. **Grading:**
+   - footage selection: `scripts/measure-footage-selection.mjs`;
+   - export validity: `scripts/validate-export.mjs RENDER SECONDS`; Remix and recreated audio compose their own length, so validate against the timeline;
+   - audio structure: `scripts/measure-av-fidelity.mjs`.
+5. **Cuts and transitions:**
+   - `scripts/reference-cut-audit.mjs --out=FILE` (true and false positives per cut);
+   - `scripts/make-transition-generalization.mjs`, then `scripts/evaluate-transitions.mjs DIR`.
+6. **Holdouts:** `scripts/make-holdout-case.mjs workshop|street`, and `scripts/make-unseen-holdout.mjs OUT SEED vertical|landscape`. Run each once, read its truth only after.
+7. **Grammar:** `scripts/print-reference-grammar.mjs INVENTORY OUT.json`.
+8. **Person masks:** `test-results/footage/verify-person-masks.sh`. It uses `SUPP_PERSON_MASK_EXHAUSTIVE=1`, which is for verification only.
+
+**Next (measured failures, in order of user impact):**
+1. **Burned-in text:** text already in the raw footage is recreated again as an overlay. Read the text in each chosen raw range and skip overlays the footage already shows.
+2. **Exact moment on real footage:** picks often land in the right clip at another moment. Two clips were wrong in the landscape holdout.
+3. **Stills and camera-only shots:** still pictures across palettes and camera-only shots are matched on the wrong evidence.
+4. **Effect levels in recreated audio:** they mix a peak with a loudness measure.
+5. **Whip, dissolve and banding:** the whip is classified as a cut; a dissolve is rebuilt ending at the cut, not centred on it; strong curves band flat skies.
+
 ## Resume after Long Footage 2.1 — 19 November 2026
 
 **State:**

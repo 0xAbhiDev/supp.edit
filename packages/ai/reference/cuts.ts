@@ -64,6 +64,10 @@ export interface Overlay {
 export function frameCuts(frames: readonly VisualFrame[], people: readonly PersonSample[] = [], overlays: readonly Overlay[] = [], strict = false): FrameCut[] {
   const cuts: FrameCut[] = [];
   const n = frames.length;
+  // Neighbourhoods are spans of time, not frame counts: dense analysis runs at 30 fps, or 15 fps on
+  // very long footage, and the same ±267 ms holds 8 frames at one rate and 4 at the other.
+  const step = median(frames.slice(1, 200).map((f, k) => f.timeMs - frames[k].timeMs)) || 33;
+  const R = Math.max(4, Math.round(267 / step));
   // A subject never stops dead within one frame: a discontinuity between moving picture on one
   // side and a static one (a held still, a paused stream) on the other needs less change.
   const activity = (from: number, to: number) => {
@@ -83,7 +87,7 @@ export function frameCuts(frames: readonly VisualFrame[], people: readonly Perso
     // Gaps in the frame clock (a chunk boundary or a dropped frame) are not evidence.
     if (frames[i].timeMs - frames[i - 1].timeMs > 80) continue;
     const around: number[] = [];
-    for (let k = Math.max(1, i - 8); k <= Math.min(n - 1, i + 8); k++) if (k !== i) around.push(frames[k].change);
+    for (let k = Math.max(1, i - R); k <= Math.min(n - 1, i + R); k++) if (k !== i) around.push(frames[k].change);
     // Footage below the delivery frame rate repeats frames, which pulls a plain median towards
     // zero and makes every real update look like a spike: compare with the frames that update.
     const updates = around.filter((x) => x >= 0.0015);
@@ -91,13 +95,25 @@ export function frameCuts(frames: readonly VisualFrame[], people: readonly Perso
     // A moving camera raises per-frame change everywhere but barely moves the coarse layout; a cut
     // during camera movement shows as a layout jump far above its neighbourhood.
     const layoutNear: number[] = [];
-    for (let k = Math.max(1, i - 8); k <= Math.min(n - 1, i + 8); k++) if (k !== i) layoutNear.push(layoutDelta(frames[k], frames[k - 1]));
+    for (let k = Math.max(1, i - R); k <= Math.min(n - 1, i + R); k++) if (k !== i) layoutNear.push(layoutDelta(frames[k], frames[k - 1]));
     // Repeated frames (footage below the delivery rate) do not count as layout neighbours.
     const layoutUpdates = layoutNear.filter((v) => v >= 0.0005);
     const layoutRatio = layoutDelta(f, frames[i - 1]) / Math.max(layoutUpdates.length >= 3 ? median(layoutUpdates) : median(layoutNear), 0.0008);
-    if (c < (stillSide ? 2.5 : 4) * typical && !(layoutRatio >= 8 && c >= 2.5 * typical)) continue;
-    // One-frame discontinuity, not the middle of a dissolve or a fast whip.
-    if (Math.max(frames[i - 1].change, frames[i + 1]?.change ?? 0) > 0.72 * c) continue;
+    // Beside a held picture the moving side's change per sample grows with the sampling step when
+    // the footage itself updates every sample (two source frames of movement per 15 fps sample),
+    // while the cut's own change does not: compare at the 30 fps scale. Footage that updates less
+    // often than it is sampled (repeated frames) moves the same amount per update at any step.
+    let stillFactor = 2.5;
+    if (stillSide && step > 40) {
+      const moving = isStatic(before6) ? frames.slice(i + 1, Math.min(n, i + 1 + R)) : frames.slice(Math.max(1, i - R), i);
+      if (moving.length >= 3 && moving.every((x) => x.change >= 0.0015)) stillFactor = 2.5 * (33.3 / step);
+    }
+    if (c < (stillSide ? stillFactor : 4) * typical && !(layoutRatio >= 8 && c >= 2.5 * typical)) continue;
+    // One-frame discontinuity, not the middle of a dissolve or a fast whip. Beside a held or frozen
+    // picture a dissolve still builds into the moving side (its next frame changes at least as
+    // much), while a cut into movement is followed by that shot's own motion, which at a coarser
+    // frame step (two source frames per sample) comes close to the cut's own change.
+    if (Math.max(frames[i - 1].change, frames[i + 1]?.change ?? 0) > (stillSide ? 0.95 : 0.72) * c) continue;
     const prev = frames[i - 1];
     // A flash or glitch returns to the old picture within a few frames.
     const back = frames[Math.min(n - 1, i + 3)];
@@ -105,14 +121,16 @@ export function frameCuts(frames: readonly VisualFrame[], people: readonly Perso
     if (back !== f && layoutDelta(back, prev) < 0.3 * jump && paletteDelta(back, prev) < 0.01) continue;
     const evidence: string[] = [];
     const layoutAround: number[] = [];
-    for (let k = Math.max(1, i - 8); k <= Math.min(n - 1, i + 8); k++) if (k !== i) layoutAround.push(layoutDelta(frames[k], frames[k - 1]));
+    for (let k = Math.max(1, i - R); k <= Math.min(n - 1, i + R); k++) if (k !== i) layoutAround.push(layoutDelta(frames[k], frames[k - 1]));
     if (jump >= Math.max(0.006, 3 * median(layoutAround))) evidence.push("layout jump");
     if (paletteDelta(f, prev) >= 0.01) evidence.push("palette jump");
     // Global flow loses its match at the cut, against how well it matched just before (a frozen
     // picture after the cut has nothing to match, so only the side before counts).
     const conf = f.flow?.confidence;
     const confBefore = median(frames.slice(Math.max(1, i - 6), i).map((x) => x.flow?.confidence ?? 1));
-    if (conf !== undefined && conf < 0.75 && conf <= confBefore - 0.15 && confBefore >= 0.6) evidence.push("flow reset");
+    // A shot with a moving or handheld camera matches only moderately to begin with: there the
+    // match must collapse (to half or less) rather than fall from a high level.
+    if (conf !== undefined && conf < 0.75 && conf <= confBefore - 0.15 && (confBefore >= 0.6 || (confBefore >= 0.3 && conf <= 0.5 * confBefore))) evidence.push("flow reset");
     // Cut or zoom: a continuous zoom (or pan) is coherent over many frames; a punch-in cut or a
     // cut between two set-ups shows a scale or translation jump at one frame only.
     const nbFlow = frames.slice(Math.max(1, i - 6), i).concat(frames.slice(i + 1, Math.min(n, i + 7)));
@@ -158,8 +176,14 @@ export function frameCuts(frames: readonly VisualFrame[], people: readonly Perso
     if (strict) {
       // The picture's geometry breaks (flow loses its match, or the scale or position jumps for
       // one frame, as at a punch-in) AND its palette, level or motion regime changes.
-      const geometry = evidence.includes("flow reset") || evidence.includes("scale jump") || evidence.includes("camera transform jump");
-      if (!geometry || !(evidence.includes("palette jump") || evidence.includes("motion regime switch") || evidence.includes("level shift"))) continue;
+      const transform = evidence.includes("scale jump") || evidence.includes("camera transform jump");
+      const geometry = evidence.includes("flow reset") || transform;
+      // A cut between two set-ups of one unchanged scene (a jump cut, a second camera, a punch-in
+      // on the same subject) keeps its palette and level. There the geometry must break twice over
+      // — global flow loses its match AND the frame jumps in scale or position for that frame only —
+      // and the layout must jump. Effects that imitate this return (checked below).
+      const sameScene = evidence.includes("flow reset") && transform && evidence.includes("layout jump");
+      if (!geometry || !(sameScene || evidence.includes("palette jump") || evidence.includes("motion regime switch") || evidence.includes("level shift"))) continue;
       const returns = (from: number, to: number, target: VisualFrame) => {
         // Layout alone: a strobing effect returns the layout while its colour is still pulsing.
         for (let k = Math.max(0, from); k <= Math.min(n - 1, to); k++) if (layoutDelta(frames[k], target) < 0.3 * jump) return true;
@@ -194,4 +218,87 @@ export function cutSafeSegments(
     if (iv.endMs - start >= minMs) out.push({ startMs: start, endMs: iv.endMs, cutBefore, cutAfter: false });
   }
   return out;
+}
+
+/** A measured dissolve: two shots blended over a span of frames. */
+export interface Dissolve {
+  startMs: number;
+  endMs: number;
+  /** The blend's midpoint, where the new shot begins in a shot list. */
+  midMs: number;
+  /** How far the layout travels from the old picture to the new one (RMS, 0–1). */
+  strength: number;
+  /** Mean departure from a linear blend of the two end pictures, relative to the travel. */
+  residual: number;
+}
+
+/** Dissolves in a finished reference, from the dense per-frame measurements. Over 0.2–1.2 s the
+ * picture travels from one steady shot to another as far as a cut does (layout, and palette or
+ * level), every frame lies close to a linear blend of the two end pictures and moves
+ * monotonically from one to the other, no single frame carries most of the change (that is a
+ * cut), and the pictures just before and after are steady (a continuous camera move is not). */
+export function dissolves(frames: readonly VisualFrame[]): Dissolve[] {
+  const n = frames.length;
+  if (n < 12) return [];
+  const step = median(frames.slice(1, 200).map((f, k) => f.timeMs - frames[k].timeMs)) || 33;
+  const minW = Math.max(4, Math.round(200 / step)),
+    maxW = Math.max(minW + 1, Math.round(1200 / step)),
+    side = Math.max(3, Math.round(200 / step));
+  const found: Dissolve[] = [];
+  for (let i = side; i + minW + side < n; i++) {
+    let best: Dissolve | undefined;
+    for (let w = minW; w <= maxW && i + w + side < n; w++) {
+      const a = frames[i],
+        b = frames[i + w];
+      const travel = layoutDelta(b, a);
+      // A dissolve between two shots moves the picture far (weak travel is movement in one shot).
+      if (travel < 0.05) continue;
+      if (paletteDelta(a, b) < 0.01 && Math.abs(a.luma - b.luma) < 0.02) continue;
+      // A blend into or out of black is a fade (a shot's fade-out or fade-in), not a new shot.
+      if ([a, b, frames[i - side], frames[Math.min(n - 1, i + w + side)]].some((f) => f.blackFraction >= 0.85)) continue;
+      // Steady on both sides (relative to the travel).
+      if (layoutDelta(a, frames[i - side]) > 0.3 * travel || layoutDelta(frames[i + w + side], b) > 0.3 * travel) continue;
+      // Linear-blend fit and monotone progress; no single step dominates.
+      const d = a.layout.map((v, j) => b.layout[j] - v);
+      const dd = d.reduce((s, v) => s + v * v, 0) || 1e-9;
+      let last = 0,
+        monotone = true,
+        resid = 0,
+        maxStep = 0;
+      for (let k = i + 1; k < i + w; k++) {
+        const f = frames[k];
+        const alpha = f.layout.reduce((s, v, j) => s + (v - a.layout[j]) * d[j], 0) / dd;
+        if (alpha < last - 0.12 || alpha < -0.1 || alpha > 1.1) monotone = false;
+        last = Math.max(last, alpha);
+        resid += Math.sqrt(f.layout.reduce((s, v, j) => s + (v - (a.layout[j] + alpha * d[j])) ** 2, 0) / f.layout.length);
+        maxStep = Math.max(maxStep, layoutDelta(f, frames[k - 1]));
+      }
+      maxStep = Math.max(maxStep, layoutDelta(b, frames[i + w - 1]));
+      const residual = resid / Math.max(1, w - 1) / travel;
+      // A crossfade is exactly a linear blend (codec noise aside); movement only resembles one.
+      if (!monotone || residual > 0.06 || maxStep > 0.5 * travel) continue;
+      // Progress must actually spread over the span (a cut with a slow drift is not a dissolve).
+      const quarter = frames[i + Math.round(w / 4)],
+        threeQuarter = frames[i + Math.round((3 * w) / 4)];
+      const progress = (f: VisualFrame) => f.layout.reduce((s, v, j) => s + (v - a.layout[j]) * d[j], 0) / dd;
+      if (progress(threeQuarter) - progress(quarter) < 0.3) continue;
+      // The span is where the blend actually runs: from 5% to 95% of the way.
+      let first = i,
+        lastK = i + w;
+      for (let k = i; k <= i + w; k++) if (progress(frames[k]) < 0.05) first = k;
+      for (let k = i + w; k >= i; k--) if (progress(frames[k]) > 0.95) lastK = k;
+      const startMs = frames[first].timeMs,
+        endMs = frames[Math.max(first + 1, lastK)].timeMs;
+      const candidate = { startMs, endMs, midMs: Math.round((startMs + endMs) / 2), strength: Number(travel.toFixed(4)), residual: Number(residual.toFixed(3)) };
+      if (!best || candidate.residual < best.residual - 0.02 || (candidate.residual <= best.residual + 0.02 && candidate.strength > best.strength)) best = candidate;
+    }
+    if (best) {
+      const prev = found.at(-1);
+      if (prev && best.startMs < prev.endMs) {
+        if (best.strength > prev.strength) found[found.length - 1] = best;
+      } else found.push(best);
+      i = frames.findIndex((f) => f.timeMs >= best!.endMs) - 1;
+    }
+  }
+  return found;
 }

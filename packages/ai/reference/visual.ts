@@ -39,6 +39,16 @@ export const visualFrameSchema = measuredColorSchema
       .strict()
       .nullable()
       .optional(),
+    /** Local motion: centroid and share of changing pixels, and a flow vector per 4×4 cell. */
+    local: z
+      .object({
+        cx: unit,
+        cy: unit,
+        area: unit,
+        flow: z.array(z.number().finite().min(-4).max(4)).length(32),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type VisualFrame = z.infer<typeof visualFrameSchema>;
@@ -55,6 +65,7 @@ export const transitionSchema = z
       "whip",
       "motion",
       "match-cut",
+      "dissolve",
       "unresolved",
     ]),
     confidence: unit,

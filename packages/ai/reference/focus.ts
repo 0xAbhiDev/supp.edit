@@ -109,6 +109,22 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
   // Lettering the negative model cannot isolate (a flat colored fill) keeps the chroma-band reading.
   const chroma=(await chromaTitles(frames,range.endMs,seeds,w/h,transcript,reviews)).filter(c=>!measured.some(m=>Math.min(m.endMs,c.endMs)-Math.max(m.startMs,c.startMs)>(c.endMs-c.startMs)*.3));
   measured=[...measured,...chroma];
+  // Two independent measurements of the same lettering must agree before the dense trace
+  // replaces the text reading: about the same size and the same ink lightness. A trace that
+  // swells to several times the read line height or inverts its ink has segmented something else
+  // (a subject or the scene under the title) and is set aside; the reading is kept.
+  const disagreements:string[]=[];
+  measured=measured.filter(m=>{
+    const under=seeds.filter(s=>s.content && s.role!=="persistent-overlay" && Math.min(m.endMs,s.endMs)-Math.max(m.startMs,s.startMs)>0 && Math.abs(s.y+s.height/2-(m.y+m.height/2))<Math.max(s.height,m.height));
+    if(!under.length)return true;
+    const ratio=m.height/Math.max(1e-3,[...under.map(s=>s.height)].sort((a,b)=>a-b)[under.length>>1]);
+    const ink=(hex?:string)=>hex&&/^#[0-9a-f]{6}$/i.test(hex)?(0.2126*parseInt(hex.slice(1,3),16)+0.7152*parseInt(hex.slice(3,5),16)+0.0722*parseInt(hex.slice(5,7),16))/255:undefined;
+    const a=ink(m.foreground),b=ink(under[0].foreground);
+    const inverted=a!==undefined&&b!==undefined&&Math.abs(a-b)>0.35;
+    if(ratio<=2&&ratio>=0.5&&!inverted)return true;
+    disagreements.push(`Dense title analysis at ${(m.startMs/1000).toFixed(2)} s disagreed with the text reading (${ratio>2||ratio<0.5?`${ratio.toFixed(1)}× its size`:"inverted ink"}); the reading "${under.map(s=>s.content).join(" ")}" was kept.`);
+    return false;
+  });
   const top=band.y/h, bottom=(band.y+band.height)/h;
   // A re-measured interval replaces the coarse observation of the same pixels, whatever it read.
   const preserved=seeds.filter(s=>!measured.some(m=>Math.min(m.endMs,s.endMs)-Math.max(m.startMs,s.startMs)>(s.endMs-s.startMs)*.3 && s.role!=="persistent-overlay" && s.y+s.height/2>top && s.y+s.height/2<bottom && Math.abs(s.x+s.width/2-(m.x+m.width/2))<Math.max(s.width,m.width)));
@@ -119,7 +135,7 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
     if(last && last.endMs===f.timeMs && [1,3,5].every(c=>Math.abs(parseInt(last.color.slice(c,c+2),16)-parseInt(f.flash!.slice(c,c+2),16))<=5))last.endMs=end;
     else flashes.push({startMs:f.timeMs,endMs:end,color:f.flash});
   }
-  return {dna:{...focused,text:[...preserved,...measured].sort((a,b)=>a.startMs-b.startMs),personFlashes:flashes},warnings:[...(measured.length?[]:["Dense title analysis could not corroborate additional lettering."]),...read.notes,
+  return {dna:{...focused,text:[...preserved,...measured].sort((a,b)=>a.startMs-b.startMs),personFlashes:flashes},warnings:[...(measured.length?[]:["Dense title analysis could not corroborate additional lettering."]),...disagreements,...read.notes,
     // Name the moments rather than guess the words; the reviewer can supply them.
     ...read.unread.filter(u=>!measured.some(m=>m.startMs<u.endMs&&m.endMs>u.startMs)).map(u=>"Lettering at "+(u.startMs/1000).toFixed(2)+"–"+(u.endMs/1000).toFixed(2)+" s was isolated but not read with enough evidence"+(u.hints.length?" ("+u.hints.join("; ")+")":"")+". Enter it under visually reviewed words to include it.")]};
 }

@@ -25,6 +25,8 @@ export const colorStatsSchema = z
     neutralTemperature: z.number().finite().min(-1).max(1).nullable(),
     neutralFraction: unit,
     sampleCount: z.literal(5),
+    /** Served from the native measurement cache. */
+    cached: z.boolean().optional(),
   })
   .strict();
 export type ColorStats = z.infer<typeof colorStatsSchema>;

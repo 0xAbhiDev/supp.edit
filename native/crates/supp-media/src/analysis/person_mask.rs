@@ -78,6 +78,28 @@ fn contour(mask: &[bool]) -> Vec<[f32; 2]> {
     (0..96).map(|i| best[i * best.len() / 96]).collect()
 }
 
+/// No 16×16 block of the frame differs by more than 3/255 on average from the last frame segmented.
+fn unchanged(a: &[u8], b: &[u8]) -> bool {
+    const B: usize = 16;
+    for by in (0..N).step_by(B) {
+        for bx in (0..N).step_by(B) {
+            let mut sum = 0u32;
+            for y in by..(by + B).min(N) {
+                for x in bx..(bx + B).min(N) {
+                    let i = (y * N + x) * 3;
+                    for c in 0..3 {
+                        sum += u32::from(a[i + c].abs_diff(b[i + c]));
+                    }
+                }
+            }
+            if sum > 3 * (B * B * 3) as u32 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 pub fn run(
     root: &Path,
     source: &Path,
@@ -101,7 +123,13 @@ pub fn run(
     let mut session = runtime::session(&model)?.0;
     // The whole clip, 4 s at a time (pixels released per chunk).
     let seconds = asset.duration;
-    let mut out = vec![];
+    let mut out: Vec<MaskSample> = vec![];
+    // The last frame segmented and its outline: a frame where no 16×16 block changed visibly
+    // shows the same person outline, so segmentation is skipped and the outline carried over.
+    let mut last: Option<(Vec<u8>, Vec<[f32; 2]>)> = None;
+    // Verification only: SUPP_PERSON_MASK_EXHAUSTIVE=1 segments every sample, to measure what the
+    // skip costs in fidelity. The cache key is unchanged, so never set it for the app.
+    let exhaustive = std::env::var("SUPP_PERSON_MASK_EXHAUSTIVE").is_ok_and(|v| v == "1");
     for start in (0..seconds.ceil() as usize).step_by(4) {
         check(cancel)?;
         let bytes = execute(
@@ -136,6 +164,12 @@ pub fn run(
         )?;
         for (i, rgb) in bytes.chunks_exact(PLANE * 3).enumerate() {
             check(cancel)?;
+            if let Some((prev, points)) = last.as_ref().filter(|_| !exhaustive) {
+                if unchanged(prev, rgb) {
+                    out.push(MaskSample { time_ms: (start * 1000 + i * 100) as u32, points: points.clone() });
+                    continue;
+                }
+            }
             let mut input = vec![0.; 3 * PLANE];
             for (j, p) in rgb.chunks_exact(3).enumerate() {
                 for c in 0..3 {
@@ -150,9 +184,11 @@ pub fn run(
                 return Err("Unexpected PP-HumanSeg output".into());
             }
             let mask: Vec<_> = (0..PLANE).map(|j| v[PLANE + j] > v[j]).collect();
+            let points = contour(&mask);
+            last = Some((rgb.to_vec(), points.clone()));
             out.push(MaskSample {
                 time_ms: (start * 1000 + i * 100) as u32,
-                points: contour(&mask),
+                points,
             });
         }
         report(Progress {
@@ -162,4 +198,28 @@ pub fn run(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn segmentation_is_skipped_only_when_no_block_changes() {
+        let frame: Vec<u8> = (0..PLANE * 3).map(|i| (i % 251) as u8).collect();
+        assert!(unchanged(&frame, &frame));
+        // Codec noise of one level everywhere is not a change.
+        let noisy: Vec<u8> = frame.iter().map(|&v| v.saturating_add(1)).collect();
+        assert!(unchanged(&frame, &noisy));
+        // A small thing moving in one 16×16 block is: the outline must be re-measured.
+        let mut moved = frame.clone();
+        for y in 40..52 {
+            for x in 100..112 {
+                for c in 0..3 {
+                    let i = (y * N + x) * 3 + c;
+                    moved[i] = moved[i].wrapping_add(40);
+                }
+            }
+        }
+        assert!(!unchanged(&frame, &moved));
+    }
 }

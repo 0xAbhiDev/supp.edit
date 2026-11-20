@@ -15,7 +15,7 @@ import {
 } from "../media-analysis/model";
 import { nativeColorBackend } from "../rough-cut/matching";
 import { extractDNA, type StyleDNA } from "./dna";
-import { buildRecreation, type Controls, type SourceEvidence } from "./planner";
+import { autonomousControls, buildRecreation, type Controls, type SourceEvidence } from "./planner";
 import { audioTimeline, generatedSound, soundtrackAsset } from "../audio/service";
 import type { AudioTimeline } from "../audio/timeline";
 import type { SoundKind } from "../audio/synth";
@@ -26,6 +26,11 @@ import { actionSignature, shotSpan } from "./action-signature";
 import { medianSharpness, sceneSignature } from "./scene-signature";
 import type { VisualFrame } from "./visual";
 import { derivedReads, readDerived, writeDerived } from "../../platform/derived";
+import { restrictReference } from "./interval";
+import { referenceGrammar } from "./grammar";
+import { dnaSchema } from "./dna";
+
+import { applyTitleCache, titleCacheEntry, titleCacheKey, type TitleCacheEntry } from "./title-cache";
 import { INDEX_VERSION, indexSource, sourceIndexKey, type SourceIndex } from "./footage-index";
 
 /** Time and cache use of one analysis stage of one clip. */
@@ -87,12 +92,16 @@ export function recreate(
     )
   )
     throw Error("Choose audio assets for music or voiceover");
+  // A reference and raw footage alone are enough: what was not chosen is chosen here, and said.
+  const auto = autonomousControls(controls, reference, !!music);
+  controls = auto.controls;
   return mediaAnalysis.jobs.enqueue({
     scope: project.id,
     label: "Recreate this style · LOCAL",
     run: async (job) => {
       const caps = await mediaAnalysis.capabilities(),
         warnings: string[] = [];
+      if (auto.chosen.length) warnings.push("Chosen automatically: " + auto.chosen.join("; ") + ".");
       const run = (a: Asset, task: AnalysisTask) =>
         mediaAnalysis.runTask(a, defaultAnalysisSettings(task), {
           ...job,
@@ -126,8 +135,10 @@ export function recreate(
       const quiet = { ...job, report: () => {} };
       let referenceTranscript: Project["transcripts"][number] | undefined;
       let referenceFrames: VisualFrame[] | undefined;
-      // Where reference analysis spends its time (each step, for the analysis profile).
+      // Where reference analysis spends its time (each step, for the analysis profile), and which
+      // steps came from a cache (HIT), had to be measured (MISS) or are always recomputed.
       const referenceSteps: Record<string, number> = {};
+      const referenceCache: Record<string, "HIT" | "MISS" | "RECOMPUTED"> = {};
       const step = async <T,>(name: string, work: Promise<T>): Promise<T> => {
         const t = performance.now();
         try {
@@ -137,6 +148,8 @@ export function recreate(
         }
       };
       const referenceStarted = performance.now();
+      // Cache reads made by this reconstruction only (the read log is shared across runs).
+      const readsFrom = derivedReads.length;
       async function measureReference() {
         const measured = await step("scenes, colour, per-frame visual", visuals(reference));
         referenceFrames = measured.visual;
@@ -166,7 +179,10 @@ export function recreate(
           );
         }
         const refMusic = reference.hasAudio
-          ? (await step("beat map", run(reference, "audio"))).audio?.beatMap
+          ? await step("beat map", run(reference, "audio")).then((r) => {
+              referenceCache["beat map"] = r.cached ? "HIT" : "MISS";
+              return r.audio?.beatMap;
+            })
           : undefined;
         let transcript = project.transcripts.find(
           (t) =>
@@ -180,8 +196,9 @@ export function recreate(
           caps.model?.installed
         ) {
           try {
-            transcript =
-              (await step("speech", run(reference, "speech"))).transcript ?? undefined;
+            const speech = await step("speech", run(reference, "speech"));
+            referenceCache.speech = speech.cached ? "HIT" : "MISS";
+            transcript = speech.transcript ?? undefined;
           } catch (e) {
             await job.checkpoint();
             warnings.push(
@@ -209,15 +226,33 @@ export function recreate(
       if(controls.interval){
         const contours=caps.personModel?.installed ? await step("person masks", personMasks(reference,quiet)) : [];
         referencePeople=contours;
-        const focused=await step("titles", traceTitles(reference,dna,controls.interval,contours,referenceTranscript,quiet,undefined,controls.reviewedTitleCues));
-        dna=focused.dna;
-        warnings.push(...focused.warnings);
+        // Title tracing is the costliest reference step: cache everything it changes (text,
+        // person flashes, per-shot tone with the title band masked, plate tint) under everything
+        // it reads (title-cache.ts). A word correction re-traces titles only.
+        const titleKey = titleCacheKey({ fingerprint: reference.fingerprint, interval: controls.interval, reviewedTitleCues: controls.reviewedTitleCues, dna, contours: contours.length, transcript: referenceTranscript?.segments });
+        const cachedTitles = await readDerived<TitleCacheEntry>(titleKey).catch(() => undefined);
+        const applied = cachedTitles ? applyTitleCache(restrictReference(dna, controls.interval), cachedTitles) : undefined;
+        const reused = applied ? dnaSchema.safeParse(applied) : undefined;
+        if (reused?.success) {
+          referenceCache.titles = "HIT";
+          dna = reused.data;
+          warnings.push(...cachedTitles!.warnings);
+        } else {
+          referenceCache.titles = "MISS";
+          const focused=await step("titles", traceTitles(reference,dna,controls.interval,contours,referenceTranscript,quiet,undefined,controls.reviewedTitleCues));
+          dna=focused.dna;
+          warnings.push(...focused.warnings);
+          const entry = titleCacheEntry(focused.dna, focused.warnings);
+          await writeDerived(titleKey, entry, JSON.stringify(entry).length * 2 + 4096).catch(() => {});
+        }
       }
       const closeMatch = controls.mode === "Close Match";
       // Modes that keep the reference's measured look need its tone and the footage's.
       const keepsLook = controls.mode !== "Creative Remix";
-      // Pose-aware shot choice: the reference subject's shape per shot.
-      if (caps.personModel?.installed && controls.mode !== "Creative Remix") {
+      // Pose-aware shot choice: the reference subject's shape and movement per shot. Every mode
+      // needs it: Creative Remix reinterprets rhythm and framing, but its picks must still do what
+      // the reference shots do (without it Remix matched on look alone: 3/9 and 1/9 in the app).
+      if (caps.personModel?.installed) {
         try {
           if (!referencePeople.length) referencePeople = await step("person masks", personMasks(reference, quiet));
           const annotated = { ...dna, shots: dna.shots.map((shot) => ({ ...shot })) };
@@ -274,6 +309,25 @@ export function recreate(
       }
       stage(1, "Extracted Style DNA");
       const referenceMs = Math.round(performance.now() - referenceStarted);
+      // Exact cache results of the reference steps that have a cache.
+      const refHit = (prefix: string) => {
+        const fp = reference.fingerprint;
+        const reads = derivedReads.slice(Math.min(readsFrom, derivedReads.length)).filter((x) => x.key.startsWith(prefix) && (x.key.endsWith(fp) || x.key.includes(fp + ":")));
+        return reads.length ? (reads.some((x) => x.hit) ? "HIT" : "MISS") : undefined;
+      };
+      for (const [name, prefix] of [["per-frame visual", "reference-visual-v6:"], ["person masks", "person-mask-pphumanseg-552d8a98-v3:"], ["tone", "source-tone-v4:"], ["aperture", "source-aperture-v3:"], ["text", "reference-text-v8:"], ["motion", "reference-blocks-v2:"], ["audio timeline", "audio-timeline-v2:"]] as const) {
+        const v = refHit(prefix);
+        if (v) referenceCache[name] = v;
+      }
+      // A step that ran but left no cache evidence is reported as recomputed, never as a hit.
+      for (const step of ["text", "motion", "beat map", "audio timeline", "speech"]) if (referenceSteps[step] !== undefined) referenceCache[step] ??= "RECOMPUTED";
+      warnings.push(
+        "Reference cache: " +
+          Object.entries(referenceCache)
+            .map(([k, v]) => `${k} ${v}`)
+            .join(", ") +
+          ".",
+      );
       warnings.push(
         `Reference analysis: ${clock(referenceMs)} — ` +
           Object.entries(referenceSteps)
@@ -338,6 +392,8 @@ export function recreate(
         const snapshot = mediaAnalysis.getSnapshot().find((x) => x.assetId === a.id && x.fingerprint === a.fingerprint);
         const vision = caps.visionModel?.installed || !!snapshot?.vision;
         const measured = !!snapshot && (vision ? !!snapshot.vision : !!snapshot.video);
+        let colourHit = false,
+          analysisHit = false;
         const soft = <T,>(what: string, work: () => Promise<T>) =>
           work().catch(async (e) => {
             await job.checkpoint();
@@ -345,11 +401,19 @@ export function recreate(
             return undefined;
           });
         const [analysis, color, visual, aperture, tone, people, speech] = await Promise.all([
-          timed(vision ? "scenes + vision" : "scenes", () => measured, () => run(a, vision ? "vision" : "video")),
-          // Colour samples are cached natively (invisible here): a cached answer returns in about a
-          // second whatever the footage length, a cold pass takes many; reuse is inferred from that.
-          timed("colour", () => true, () => nativeColorBackend(a, { startMs: 0, endMs: Math.max(1, Math.floor(Math.min(a.duration, 300) * 1000)) }, quiet)),
-          timed("per-frame visual", hit("reference-visual-v5:"), () => referenceVisual(a, quiet)),
+          // Reused when this project already holds it, or when the native analysis reports its own cache hit.
+          timed(vision ? "scenes + vision" : "scenes", () => measured || analysisHit, async () => {
+            const result = await run(a, vision ? "vision" : "video");
+            analysisHit = !!result.cached;
+            return result;
+          }),
+          // The native colour measurement reports its own cache hits.
+          timed("colour", () => colourHit, async () => {
+            const stats = await nativeColorBackend(a, { startMs: 0, endMs: Math.max(1, Math.floor(Math.min(a.duration, 300) * 1000)) }, quiet);
+            colourHit = !!stats.cached;
+            return stats;
+          }),
+          timed("per-frame visual", hit("reference-visual-v6:"), () => referenceVisual(a, quiet)),
           // Portrait delivery crops to the content; Close Match fill framing crops baked bars.
           controls.format === "vertical" || closeMatch ? timed("aperture", hit("source-aperture-v3:"), () => sourceAperture(a, quiet)) : undefined,
           keepsLook ? timed("tone", hit("source-tone-v4:"), () => soft("Footage tone could not be measured: ", () => sourceTone(a, quiet))) : undefined,
@@ -372,7 +436,6 @@ export function recreate(
             await writeDerived(key, evidence.index, JSON.stringify(evidence.index).length * 2).catch(() => {});
           }
         });
-        for (const st of stages) if (st.stage === "colour") st.reused = st.ms < 1500;
         const tp = toneProfiles.get(a.fingerprint);
         const toneStage = stages.find((st) => st.stage === "tone");
         if (tp && toneStage && !toneStage.reused) toneStage.detail = tp;
@@ -420,6 +483,7 @@ export function recreate(
         const all = analysisProfile.flatMap((c) => c.stages.filter((st) => st.stage === stage));
         return { stage, hits: all.filter((st) => st.reused).length, total: all.length };
       });
+      // Stages without any cache are recomputed every time by design (footage index rebuilds are cheap).
       const referenceReads = derivedReads.filter((x) => x.key.endsWith(reference.fingerprint));
       const cache: CacheDiagnostics = {
         stages: cacheStages,
@@ -501,10 +565,16 @@ export function recreate(
       warnings.push(
         "Cache: " +
           cache.stages.map((st) => `${st.stage} ${st.hits === st.total ? "HIT" : st.hits ? `HIT ${st.hits}/${st.total}` : "MISS"}`).join(", ") +
-          `; reference analysis ${cache.reference.total && cache.reference.hits === cache.reference.total ? "HIT" : cache.reference.hits ? `HIT ${cache.reference.hits}/${cache.reference.total}` : "MISS"} (${clock(referenceMs)}); matching recomputed (${clock(cache.matchingMs)}).`,
+          `; reference analysis ${clock(referenceMs)} (titles ${referenceCache.titles ?? "not traced"}); matching RECOMPUTED (${clock(cache.matchingMs)}).`,
+      );
+      // The consolidated description of how the reference was edited.
+      const grammar = referenceGrammar(dna);
+      const count = (xs: string[]) => Object.entries(xs.reduce<Record<string, number>>((m, k) => ((m[k] = (m[k] ?? 0) + 1), m), {})).map(([k, n]) => `${n} ${k}`).join(", ");
+      warnings.push(
+        `Reference grammar: ${grammar.shots.length} shots (roles: ${count(grammar.shots.map((x) => x.role.interpretation))}; motion: ${count(grammar.shots.map((x) => x.motion.interpretation))}; camera: ${count(grammar.shots.map((x) => x.camera.interpretation))}); ${grammar.transitions.length} transitions (${count(grammar.transitions.map((x) => x.interpretation)) || "none"}); ${grammar.audio.anchored} of ${grammar.audio.links} visual events tied to audio; ${grammar.text.length} text intervals (${grammar.text.filter((t) => t.generated?.flagged).length} uncertain); ${grammar.depth.filter((d) => d.interpretation === "behind").length} behind the subject; ${grammar.effects.colorPulses.length} colour pulses.`,
       );
       stage(total, "Ready to preview");
-      return { ...edit, dna, warnings: [...edit.warnings, ...warnings], analysisProfile: { referenceMs, footageMs, footageWallMs, clips: analysisProfile, cache } };
+      return { ...edit, dna, grammar, warnings: [...edit.warnings, ...warnings], analysisProfile: { referenceMs, footageMs, footageWallMs, clips: analysisProfile, cache } };
     },
   });
 }

@@ -66,9 +66,90 @@ export const actionSignatureSchema = z
       })
       .strict()
       .nullable(),
+    /** Which way things move locally (per-cell flow over changing pixels): share of movement by
+     * direction (8 bins from rightward, y down), how consistent the direction is, net vertical and
+     * horizontal transport, rotation about the motion centre, how straight and how turning the
+     * motion centre's path is, and the share of the frame that moves. */
+    direction: z
+      .object({
+        histogram: z.array(z.number().min(0).max(1)).length(8),
+        consistency: z.number().min(0).max(1),
+        vertical: z.number().min(-1).max(1),
+        horizontal: z.number().min(-1).max(1),
+        rotation: z.number().min(0).max(1),
+        straightness: z.number().min(0).max(1),
+        turning: z.number().min(0).max(1),
+        area: z.number().min(0).max(1),
+      })
+      .strict()
+      .optional(),
+    /** Activity over the stretch: active share, idle share before the movement starts and after it ends. */
+    envelope: z.object({ active: z.number().min(0).max(1), lead: z.number().min(0).max(1), trail: z.number().min(0).max(1) }).strict().optional(),
   })
   .strict();
 export type ActionSignature = z.infer<typeof actionSignatureSchema>;
+
+/** Direction, rotation and path of local motion over frames (see the schema). */
+function directionOf(frames: readonly VisualFrame[], aspect: number): ActionSignature["direction"] {
+  const local = frames.filter((f) => f.local);
+  if (local.length < 3) return undefined;
+  const hist = new Array<number>(8).fill(0);
+  let sx = 0,
+    sy = 0,
+    sm = 0,
+    st = 0;
+  for (const f of local) {
+    const L = f.local!;
+    for (let c = 0; c < 16; c++) {
+      const dx = L.flow[2 * c],
+        dy = L.flow[2 * c + 1];
+      const m = Math.hypot(dx, dy);
+      if (m < 0.05) continue;
+      const bin = ((Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) % 8) + 8) % 8;
+      hist[bin] += m;
+      sx += dx;
+      sy += dy;
+      sm += m;
+      // Tangential component about the motion centre: circling motion turns around it.
+      const rx = (((c % 4) + 0.5) / 4 - L.cx) * aspect,
+        ry = (Math.floor(c / 4) + 0.5) / 4 - L.cy;
+      const rn = Math.hypot(rx, ry);
+      if (rn > 0.05) st += (rx * dy - ry * dx) / rn;
+    }
+  }
+  const pts = local.filter((f) => f.local!.area >= 0.0005).map((f) => [f.local!.cx * aspect, f.local!.cy] as const);
+  let len = 0,
+    turn = 0,
+    turns = 0,
+    prevAngle: number | undefined;
+  for (let i = 1; i < pts.length; i++) {
+    const dx = pts[i][0] - pts[i - 1][0],
+      dy = pts[i][1] - pts[i - 1][1];
+    const step = Math.hypot(dx, dy);
+    len += step;
+    if (step < 0.004) continue;
+    const angle = Math.atan2(dy, dx);
+    if (prevAngle !== undefined) {
+      let d = Math.abs(angle - prevAngle);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      turn += d;
+      turns++;
+    }
+    prevAngle = angle;
+  }
+  const net = pts.length > 1 ? Math.hypot(pts.at(-1)![0] - pts[0][0], pts.at(-1)![1] - pts[0][1]) : 0;
+  const r = (v: number) => Number(v.toFixed(3));
+  return {
+    histogram: sm > 0 ? hist.map((v) => r(v / sm)) : hist.map(() => 0.125),
+    consistency: r(sm > 0 ? Math.min(1, Math.hypot(sx, sy) / sm) : 0),
+    vertical: r(sm > 0 ? sy / sm : 0),
+    horizontal: r(sm > 0 ? sx / sm : 0),
+    rotation: r(sm > 0 ? Math.min(1, Math.abs(st) / sm) : 0),
+    straightness: r(len > 0 ? Math.min(1, net / len) : 0),
+    turning: r(turns ? turn / turns / Math.PI : 0),
+    area: Number(mean(local.map((f) => f.local!.area)).toFixed(4)),
+  };
+}
 
 const mean = (xs: readonly number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 /** Resample (time, value) points to STEPS values across [start, end), by bin means with
@@ -242,7 +323,22 @@ export function actionSignature(
     if (v > smooth[peakAt]) peakAt = i;
   });
   const smoothMean = mean(smooth);
+  // Activity envelope: an active stretch filled mostly with idle frames is not the same shot.
+  const top = Math.max(0, ...smooth);
+  const threshold = Math.max(STILL_LEVEL, 0.3 * top);
+  const activeIdx = smooth.map((v, i) => (v >= threshold ? i : -1)).filter((i) => i >= 0);
+  const envelope =
+    top < STILL_LEVEL || !activeIdx.length
+      ? { active: 0, lead: 0, trail: 0 }
+      : {
+          active: Number((activeIdx.length / smooth.length).toFixed(3)),
+          lead: Number((activeIdx[0] / smooth.length).toFixed(3)),
+          trail: Number(((smooth.length - 1 - activeIdx.at(-1)!) / smooth.length).toFixed(3)),
+        };
+  const direction = directionOf(moving, frameAspect);
   return {
+    envelope,
+    ...(direction ? { direction } : {}),
     durationMs: Math.round(endMs - startMs),
     level: Math.min(1, level),
     energy: energy.map((v) => Number(v.toFixed(3))),
@@ -286,6 +382,10 @@ export interface ActionMatch {
   rhythm: number;
   /** Subject outline trajectory (null when either side has no measured person). */
   subject: number | null;
+  /** Which way things move locally: direction mix, transport, rotation, path shape. */
+  direction: number | null;
+  /** Activity envelope: active share and idle lead/tail against the reference's. */
+  envelope: number | null;
   /** Weighted movement-geometry agreement, 0–1. */
   overall: number;
 }
@@ -299,7 +399,7 @@ export function actionSimilarity(a: ActionSignature, b: ActionSignature): Action
   if (stillA || stillB) {
     const same = stillA && stillB ? 1 : 0.25;
     const r = (v: number) => Number(v.toFixed(3));
-    return { trajectory: same, regions: same, camera: same, rhythm: same, subject: null, overall: r(same) };
+    return { trajectory: same, regions: same, camera: same, rhythm: same, subject: null, direction: null, envelope: null, overall: r(same) };
   }
   const trajectory = 0.5 * shape(a.energy, b.energy) + 0.5 * Math.max(0, 1 - mean(a.energy.map((v, i) => Math.abs(v - b.energy[i]))) / 1.5);
   const regions = intersection(a.regions, b.regions);
@@ -328,17 +428,54 @@ export function actionSimilarity(a: ActionSignature, b: ActionSignature): Action
     const posture = Math.exp(-Math.abs(Math.log(mean(sa.aspect) / Math.max(1e-3, mean(sb.aspect)))) / 0.5);
     subject = 0.3 * intersection(sa.limbs, sb.limbs) + 0.2 * direction + 0.15 * amount + 0.15 * curves + 0.2 * posture;
   }
+  let direction: number | null = null;
+  if (a.direction && b.direction) {
+    const da = a.direction,
+      db = b.direction;
+    const na = Math.hypot(da.horizontal, da.vertical),
+      nb = Math.hypot(db.horizontal, db.vertical);
+    // Net transport only means something when the movement keeps one direction.
+    const transport = na > 0.15 && nb > 0.15 ? Math.max(0, (da.horizontal * db.horizontal + da.vertical * db.vertical) / (na * nb)) : na <= 0.15 && nb <= 0.15 ? 0.8 : 0.3;
+    direction =
+      0.3 * intersection(da.histogram, db.histogram) +
+      0.2 * transport +
+      0.15 * Math.exp(-Math.abs(da.consistency - db.consistency) / 0.25) +
+      0.15 * Math.exp(-Math.abs(da.rotation - db.rotation) / 0.2) +
+      0.1 * Math.exp(-Math.abs(da.straightness - db.straightness) / 0.3) +
+      0.1 * Math.exp(-Math.abs(da.turning - db.turning) / 0.2);
+  }
+  const envelope =
+    a.envelope && b.envelope
+      ? Math.exp(-Math.abs(a.envelope.active - b.envelope.active) / 0.3) * Math.exp(-(Math.max(0, b.envelope.lead - a.envelope.lead) + Math.max(0, b.envelope.trail - a.envelope.trail)) / 0.25)
+      : null;
   // Weights from measured discrimination (scripts/action-feature-confusion.mjs): where the
   // movement happens and the subject's outline carry most of the meaning; the energy curve,
-  // rhythm and camera help less on short shots.
+  // rhythm and camera help less on short shots. Small-motion mode (the reference's moving pixels
+  // under 2% of the frame: a spoon, a stream, a distant car): which way things move locally and
+  // when the shot is active decide; whole-frame and outline measures say little.
+  const small = !!a.direction && a.direction.area < 0.02;
+  const w = small
+    ? { trajectory: 0.1, regions: 0.2, rhythm: 0.05, camera: 0.05, subject: 0.1, direction: 0.45, envelope: 0.15 }
+    : { trajectory: 0.15, regions: 0.35, rhythm: 0.075, camera: 0.075, subject: 0.35, direction: 0.12, envelope: 0.1 };
   const parts: [number, number][] = [
-    [trajectory, 0.15],
-    [regions, 0.35],
-    [rhythm, 0.075],
-    [camera, 0.075],
-    ...(subject === null ? [] : ([[subject, 0.35]] as [number, number][])),
+    [trajectory, w.trajectory],
+    [regions, w.regions],
+    [rhythm, w.rhythm],
+    [camera, w.camera],
+    ...(subject === null ? [] : ([[subject, w.subject]] as [number, number][])),
+    ...(direction === null ? [] : ([[direction, w.direction]] as [number, number][])),
+    ...(envelope === null ? [] : ([[envelope, w.envelope]] as [number, number][])),
   ];
   const overall = parts.reduce((s, [v, w]) => s + v * w, 0) / parts.reduce((s, [, w]) => s + w, 0);
   const r = (v: number) => Number(v.toFixed(3));
-  return { trajectory: r(trajectory), regions: r(regions), camera: r(camera), rhythm: r(rhythm), subject: subject === null ? null : r(subject), overall: r(overall) };
+  return {
+    trajectory: r(trajectory),
+    regions: r(regions),
+    camera: r(camera),
+    rhythm: r(rhythm),
+    subject: subject === null ? null : r(subject),
+    direction: direction === null ? null : r(direction),
+    envelope: envelope === null ? null : r(envelope),
+    overall: r(overall),
+  };
 }

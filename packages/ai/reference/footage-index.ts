@@ -72,7 +72,7 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 
 /** Version of the per-clip index (segments, frame cuts, candidates). Part of its cache key with
  * the file identity, the vision model and whether person contours were measured. */
-export const INDEX_VERSION = "cut-safe-segments-2";
+export const INDEX_VERSION = "cut-safe-segments-4";
 export interface SourceIndex extends FootageIndex {
   version: string;
 }
@@ -143,7 +143,9 @@ function indexClips(sources: SourceEvidence[]): FootageIndex {
       // Frame-accurate second stage: cuts between similar material the scene pass missed.
       const cuts = frameCuts(visual, source.people ?? []);
       for (const c of cuts) allCuts.push({ sourceId: id, timeMs: c.timeMs, evidence: c.evidence });
-      segments = cutSafeSegments(scenes, cuts, 67, 400);
+      // Two frames clear of every cut at the dense rate actually measured (30 fps, or 15 past 20 min).
+      const step = median(visual.slice(1, 200).map((f, k) => f.timeMs - visual[k].timeMs));
+      segments = cutSafeSegments(scenes, cuts, Math.max(67, Math.round(2 * step)), 400);
       // A frozen run (no codec change for at least 0.5 s: a held still, a paused stream) beside live
       // footage is its own stretch, so live windows are never judged by the hold next to them.
       const frozenRuns: { startMs: number; endMs: number }[] = [];
@@ -356,7 +358,9 @@ export interface ShotChoice {
 const weights: Record<RecreationMode, Record<string, number>> = {
   "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 },
   "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6, scene: 1 },
-  "Creative Remix": { action: 0.8, pose: 0.2, look: 0.3, framing: 0.2, motion: 1.0, peak: 0.5, composition: 0.15, tone: 0.15, quality: 0.6, scene: 0.5 },
+  // Remix reinterprets rhythm (durations), grade and framing, but still performs what each
+  // reference shot does: movement geometry and pose lead; look, framing and tone barely count.
+  "Creative Remix": { action: 1.0, pose: 0.7, look: 0.25, framing: 0.15, motion: 0.7, peak: 0.6, composition: 0.1, tone: 0.1, quality: 0.6, scene: 0.5 },
 };
 /** What each role cares about more. */
 const roleEmphasis: Partial<Record<ShotRole, Record<string, number>>> = {
@@ -384,6 +388,8 @@ export const termLabels: Record<string, string> = {
   subject: "body trajectory",
   duration: "duration fit",
   scene: "scene and role",
+  direction: "motion direction",
+  envelope: "activity timing",
 };
 
 /** Score one candidate for one reference shot, trimmed so its peak lands on the shot's peak.
@@ -531,6 +537,8 @@ export function scoreCandidate(
     match.regions = action.regions;
     match.camera = action.camera;
     if (action.subject !== null) match.subject = action.subject;
+    if (action.direction !== null) match.direction = action.direction;
+    if (action.envelope !== null) match.envelope = action.envelope;
   }
   match.duration = speed;
   if (scene === null) delete match.scene;

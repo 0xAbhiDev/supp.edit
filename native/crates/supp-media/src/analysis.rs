@@ -75,6 +75,9 @@ pub struct Range {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnalysisResult {
+    /// Served from this analysis's file cache (never stored in the cache itself).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cached: bool,
     pub asset_id: String,
     pub fingerprint: String,
     pub cache_key: String,
@@ -156,11 +159,12 @@ pub fn run(
         }) {
             if value.cache_key == key && value.fingerprint == asset.fingerprint {
                 check(cancel)?;
-                return Ok(value);
+                return Ok(AnalysisResult { cached: true, ..value });
             }
         }
     }
     let mut result = AnalysisResult {
+        cached: false,
         asset_id: asset.id.clone(),
         fingerprint: asset.fingerprint.clone(),
         cache_key: key,
@@ -220,3 +224,34 @@ pub fn execute(
 }
 pub mod reference;
 pub mod reference_text;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cache_hits_are_reported_but_never_stored() {
+        let fresh = AnalysisResult {
+            cached: false,
+            asset_id: "a".into(),
+            fingerprint: "f".into(),
+            cache_key: "k".into(),
+            algorithm: VERSION.into(),
+            processing: "LOCAL".into(),
+            duration_ms: 1000,
+            settings: Settings::default(),
+            transcript: None,
+            speech_detected: None,
+            audio: None,
+            video: None,
+            vision: None,
+        };
+        // What the cache file holds: no flag, and an older file without it still loads.
+        let stored = serde_json::to_string(&fresh).unwrap();
+        assert!(!stored.contains("cached"));
+        let loaded: AnalysisResult = serde_json::from_str(&stored).unwrap();
+        assert!(!loaded.cached);
+        // What a hit returns.
+        let hit = serde_json::to_string(&AnalysisResult { cached: true, ..loaded }).unwrap();
+        assert!(hit.contains("\"cached\":true"));
+    }
+}

@@ -1,5 +1,91 @@
 # Reference-to-Edit
 
+## Universal reference-to-edit engine: direction, caches, very long footage
+
+This phase targets what 2.1 could not tell apart or could not afford: which way small things move, footage beyond 20 minutes, the cost of person masks, and reconstructions that re-read the reference's titles every time.
+
+- **Local motion** (`native/crates/supp-media/src/analysis/visual.rs`, `local_motion`): every dense frame now also measures where and which way the picture moves locally (`VisualFrame.local`).
+  - **Method:** a 3×3 blur, then per cell of a 4×4 grid a Lucas–Kanade solve over the pixels that changed by at least 0.02. The result is one flow vector per cell, the change-weighted motion centre (`cx`, `cy`) and the moving area.
+  - **Cache:** the per-frame cache key is `reference-visual-v6`.
+- **Directional action signature** (`action-signature.ts`):
+  - **`direction`:**
+    - an 8-bin histogram of local flow direction;
+    - how consistent the direction is;
+    - net vertical and horizontal transport;
+    - rotation (tangential flow about the motion centre);
+    - straightness and turning of the motion centre's path;
+    - the moving area.
+
+    It separates a falling stream (consistent, downward, straight) from a circling spoon (rotational, turning), whatever the palette.
+  - **`envelope`:** the active share of the window and its idle lead and tail (activity above max(still level, 30% of the window's peak)). A window that drifts idle for most of its length no longer passes for an active shot.
+  - **Similarity:** direction = 0.3 histogram + 0.2 transport + 0.15 consistency + 0.15 rotation + 0.1 straightness + 0.1 turning.
+  - **Small-motion mode:** when the reference's moving area is below 2% of the frame, direction (0.45) and envelope (0.15) dominate the action score. Otherwise they are minor terms (0.12, 0.1) beside trajectory, regions and subject.
+- **Frame cuts at any sampling step** (`cuts.ts`): dense analysis runs at 15 fps past 20 minutes, and the detector now reasons in time, not frames.
+  - **Neighbourhood:** ±267 ms (8 frames at 30 fps, 4 at 15 fps).
+  - **Beside a held or frozen picture:** a dissolve still builds into the moving side, so a cut is rejected only when the moving-side neighbour changes at least 0.95× as much as the cut (0.72× elsewhere).
+  - **Footage that updates every sample:** the moving side's change per sample grows with the step, so the still-side threshold is judged at the 30 fps scale. Footage with repeated frames moves the same per update and keeps its threshold.
+  - **Cut-safety margin** (`footage-index.ts`): two samples at the measured rate, max(67 ms, 2 × step).
+  - **Invariance:** at 30 fps nothing changes, and every 30 fps truth set gives identical cuts.
+- **Person masks** (`person_mask.rs`): segmentation is skipped when no 16×16 block of the 192² frame differs by more than 3/255 on average from the last segmented frame; the previous outline is carried. Held frames, idle stretches and static shots cost almost nothing.
+- **Reference cache** (`service.ts`):
+  - **Title tracing:** cached under `reference-titles-2` (see title-tracing cache v2 below), keyed by the reference file, the interval, the reviewed words and everything tracing reads (title seeds, shot boundaries, contour count, transcript). A word correction re-traces titles only.
+  - **Colour:** the native colour measurement reports its own cache hits (`ColorStats.cached`). Reuse is no longer inferred from elapsed time.
+  - **Report:** each reconstruction reports `Reference cache: <stage> HIT|MISS|RECOMPUTED` per reference stage, each from its own cache evidence (see native analysis cache hits below).
+- **ReferenceGrammar** (`packages/ai/reference/grammar.ts`): one consolidated description of how the reference was edited.
+  - **Contents:** canvas; shots with how each cut was found, motion class, camera move (static / pan / tilt / push-in / pull-out), composition role, local direction (downward / upward / leftward / rightward / rotational / mixed) and audio tie; transitions; text; colour; effects; the audio-visual event graph.
+  - **Separation:** every property keeps `measurement`, `confidence` (null where uncalibrated) and `interpretation` apart.
+  - **Output:** the preview prints a one-line summary ("Reference grammar: …").
+- **Creative Remix weights:** action 1.0, pose 0.7, look 0.25, framing 0.15, motion 0.7, peak 0.6, composition 0.1, tone 0.1, quality 0.6, scene 0.5. Remix follows how shots move and land rather than how they look, and stays distinct from Close Match.
+- **Export validation** (`scripts/validate-export.mjs`):
+  - **Streams:** a decodable video and audio stream.
+  - **Duration:** the expected length, within 0.1 s.
+  - **Drift:** audio and video lengths agree within 60 ms.
+  - **Content:** no black stretch (2+ frames below 10% luma) and no silence (0.5 s at −60 dB).
+- **Same-scene cuts in strict reference mode** (`cuts.ts`):
+  - **The gap:** a cut between two set-ups of one unchanged scene (a jump cut, a second camera, a punch-in) keeps palette and level. Strict mode used to need a palette, level or motion-regime change besides the geometry break, so it could not find these.
+  - **The rule:** it now accepts them when the geometry breaks twice over (a flow reset **and** a one-frame scale or position jump) together with a layout jump. A picture that returns within half a second is still an effect.
+  - **Origin:** found by the untouched workshop holdout (`test-results/footage/holdout-workshop/UNTOUCHED-RESULT.md`).
+- **Flow collapse:** a shot with a moving or handheld camera only matches moderately (about 0.45). A flow reset there needs the match to fall to half or less, where before it needed a high match to begin with. This recovers hard cuts out of moving shots.
+- **Audit:** `scripts/reference-cut-audit.mjs` checks every reference with cut ground truth (true positives, false positives and false negatives per cut) and freezes the strict cut lists of references without truth (reels 54 and 55, coastal) as a regression baseline.
+- **Index version:** `INDEX_VERSION` is `cut-safe-segments-4`, because raw-footage cuts share these rules.
+- **Title-tracing cache v2** (`title-cache.ts`):
+  - **Contents:** tracing changes the text, the person flashes, and per shot the tone (measured with the title band masked) and the plate tint. Version 1 cached only the first two, so a cached reconstruction measured a different shot tone than an uncached one. Version 2 caches all four.
+  - **Key:** it also holds the shot boundaries tracing measured.
+  - **Tested:** the key and its equivalence are unit-tested.
+- **Native analysis cache hits:**
+  - **Explicit flag:** `AnalysisResult.cached` is reported but never written into the cache file. "Scenes + vision", beat map and speech use it instead of the project-snapshot heuristic.
+  - **Honest report:** text, motion and the audio timeline report their real derived-cache state, considering only this reconstruction's reads. A step without cache evidence reports RECOMPUTED, never HIT.
+- **ReferenceGrammar v2:**
+  - **Contents:** per-shot role (`shotRole`), timing, tone, depth (text in front of or behind the subject), colour pulses, and the evidence behind every cut.
+  - **Generated value:** a fourth field, `generated`, separate from measurement, confidence and interpretation. An uncertain OCR read stays `lettering, word not established` with `generated.text = null`, because the planner never renders uncertain words.
+  - **Role:** it is a view computed from the stored StyleDNA, not a second model. The planner still reads the DNA.
+  - **Example:** `scripts/print-reference-grammar.mjs` prints one.
+- **Person-mask verification switch:** `SUPP_PERSON_MASK_EXHAUSTIVE=1` (examples only) segments every sample, to measure what the skip costs.
+- **Shared decoding (measured, not built):**
+  - **Decode share:** on a 200 s 720p clip one full decode costs 6–10 s per stage input, against stage times of 21–78 s that run in parallel.
+  - **Critical path:** vision, at 87 s fresh, of which seeking and decoding its 81 frames is 15 s and model inference about 72 s.
+  - **Decision:** a shared decode would not shorten the critical path, so it was not built.
+- **One click** (`planner.ts`, `autonomousControls`): a reference and raw footage alone produce the full recreation.
+  - **Defaults:** Close Match, the reference's own words, the reference's own framing.
+  - **Chosen automatically when the user does not choose:**
+    - titles traced over the whole reference (up to 90 s, `AUTO_TITLE_MAX_MS`);
+    - the reference soundtrack when no music is supplied (otherwise the raw clips' own sound would play).
+  - **Review:** each automatic choice is listed in the preview ("Chosen automatically: …").
+  - **Validation path:** the driver's `--untouched` mode chooses only the reference and the raw videos.
+- **Creative Remix:** the reference's per-shot movement and subject signatures are measured in every mode. Remix had skipped them, so it matched on look alone.
+- **Framing in every mode:**
+  - **Fill:** when a reference shot fills its frame, the footage covers it, whatever the footage's shape.
+  - **No detected subject:** the crop follows the footage's measured local motion centre.
+  - **Per-shot bars:** a reference shot counts as barred only when most of its samples show bars (`barred`, `barredRuns`). Letterbox layers cover only the barred shots' spans, never the whole edit for bars baked into one source.
+- **Title agreement** (`focus.ts`): the dense title trace replaces the text reading only when the two independent measurements agree, within 0.5–2× in size and the same ink lightness. A disagreement keeps the reading and is reported.
+- **Alternative takes carry their own look:** the planner fits each offered alternative's tone curve to its own measured tone. "Choose another take" swaps the curve with the footage, or removes it when the take has no measured tone; it never keeps the replaced footage's curve. Choosing the earlier take again restores its look.
+- **Dissolves** (`cuts.ts`, `dissolves`):
+  - **Detection:** over 0.2–1.2 s the picture travels from one steady shot to another as far as a cut does. Every frame is a near-linear blend of the two end pictures (departure ≤ 0.06), progress is monotone, no single frame carries most of the change, and blends into or out of black are fades, not dissolves.
+  - **In the reference:** the blend's midpoint starts the new shot, and the transition records kind `dissolve` with its span and linearity.
+  - **Rebuild** (`reference-transition.ts`): the incoming shot, same framing and grade, starts early on the transition track and fades in, silent. It borrows only frames inside the same cut-safe stretch (`preroll`); a retimed shot keeps its cut. The rebuilt blend ends at the cut.
+- **Flash ramps** (`dna.ts`, `absorbFlashSlivers`): scene detection can see a flash's brightening as its own boundary. A sliver under 150 ms between two flash boundaries joins the outgoing shot, and one flash remains at the real cut, spanning both. A short insert of other picture between plain cuts is kept.
+- **Driver:** `verify-native-focused.mjs` takes `--mode=` (the focused title interval exists in Close Match only) and writes every pick's full explanation to `explanations.json`.
+
 ## Long footage 2.1: global semantic planning, scarcity and generalization
 
 Selection now plans the whole reference sequence against the whole source inventory (`packages/ai/reference/sequence-planner.ts`), instead of finding a good candidate shot by shot.

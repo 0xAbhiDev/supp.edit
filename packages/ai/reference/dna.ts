@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { frameCuts } from "./cuts";
+import { dissolves, frameCuts } from "./cuts";
 import { actionSignature, actionSignatureSchema, shotSpan } from "./action-signature";
 import { medianSharpness, sceneSignature, sceneSignatureSchema } from "./scene-signature";
 import { toneSchema } from "./tone";
@@ -169,6 +169,37 @@ export function describeShots(a: Asset, analysis: MediaAnalysis): Shot[] {
     })
     .filter((s) => s.endMs > s.startMs);
 }
+/** A sliver of a few frames between two flash boundaries is the flash's own ramp (scene detection
+ * sees its brightening as a boundary), not a shot: it joins the outgoing shot and one flash
+ * remains at the real cut, spanning both. Edits shots in place; returns the transitions. */
+export function absorbFlashSlivers(shots: { startMs: number; endMs: number }[], transitions: ReturnType<typeof characterizeTransitions>) {
+  let out = [...transitions];
+  for (let k = shots.length - 2; k >= 1; k--) {
+    const sliver = shots[k];
+    if (sliver.endMs - sliver.startMs >= 150) continue;
+    const into = out.find((t) => Math.abs(t.cutMs - sliver.startMs) < 1),
+      out_ = out.find((t) => Math.abs(t.cutMs - sliver.endMs) < 1);
+    if (into?.kind !== "flash" || out_?.kind !== "flash") continue;
+    shots[k - 1] = { ...shots[k - 1], endMs: sliver.endMs };
+    shots.splice(k, 1);
+    out = out.filter((t) => t !== into).map((t) => (t === out_ ? { ...t, startMs: Math.min(t.startMs, into.startMs), endMs: Math.max(t.endMs, into.endMs) } : t));
+  }
+  return out;
+}
+/** Measured dissolves take the place of whatever the boundary was characterised as: the blend's
+ * span, its linearity as confidence, and the evidence. */
+function withDissolves(transitions: ReturnType<typeof characterizeTransitions>, blends: ReturnType<typeof dissolves>, shots: readonly { startMs: number }[]) {
+  const out = [...transitions];
+  for (const d of blends) {
+    const boundary = shots.find((x) => Math.abs(x.startMs - d.midMs) < 250);
+    if (!boundary) continue;
+    const entry = { cutMs: boundary.startMs, startMs: Math.min(d.startMs, boundary.startMs), endMs: Math.max(d.endMs, boundary.startMs), kind: "dissolve" as const, confidence: Number(Math.max(0.5, Math.min(0.95, 1 - d.residual * 5)).toFixed(3)), strength: Number(Math.min(1, d.strength * 4).toFixed(3)), direction: null, evidence: [`Linear blend of two shots over ${d.endMs - d.startMs} ms (departure ${d.residual}).`] };
+    const at = out.findIndex((t) => Math.abs(t.cutMs - boundary.startMs) < 150);
+    if (at >= 0) out[at] = entry;
+    else out.push(entry);
+  }
+  return out.sort((a, b) => a.cutMs - b.cutMs);
+}
 export function extractDNA(
   asset: Asset,
   analysis: MediaAnalysis,
@@ -224,6 +255,14 @@ export function extractDNA(
     if (j < 0 || shots.some((x) => Math.abs(x.startMs - cut.timeMs) < 250)) continue;
     const old = shots[j];
     shots.splice(j, 1, { ...old, endMs: cut.timeMs, fadeOut: false }, { ...old, startMs: cut.timeMs, fadeIn: false, boundaryConfidence: null });
+  }
+  // Dissolves: two shots blended over a span. The new shot begins at the blend's midpoint.
+  const blends = dissolves(visual);
+  for (const d of blends) {
+    const j = shots.findIndex((x) => d.midMs > x.startMs + 300 && d.midMs < x.endMs - 300);
+    if (j < 0 || shots.some((x) => Math.abs(x.startMs - d.midMs) < 250)) continue;
+    const old = shots[j];
+    shots.splice(j, 1, { ...old, endMs: d.midMs, fadeOut: false }, { ...old, startMs: d.midMs, fadeIn: false, boundaryConfidence: null });
   }
   const colorPulses = separateColorPulses(shots, visual);
   refineFlashBoundaries(shots, visual);
@@ -292,7 +331,7 @@ export function extractDNA(
     width: asset.width,
     height: asset.height,
     shots,
-    transitions: characterizeTransitions(shots, visual, motion),
+    transitions: absorbFlashSlivers(shots, withDissolves(characterizeTransitions(shots, visual, motion), blends, shots)),
     colorPulses,
     text:
       text &&
