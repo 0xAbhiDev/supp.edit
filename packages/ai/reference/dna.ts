@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { dissolves, frameCuts } from "./cuts";
-import { actionSignature, actionSignatureSchema, shotSpan } from "./action-signature";
+import { dissolves, frameCuts, whipAt } from "./cuts";
+import { actionSignature, actionSignatureSchema, effectSpans, shotSpan } from "./action-signature";
 import { medianSharpness, sceneSignature, sceneSignatureSchema } from "./scene-signature";
 import { toneSchema } from "./tone";
 import { subjectShapeSchema } from "./subject-shape";
@@ -54,6 +54,8 @@ export const dnaSchema = z
             subjectShape: subjectShapeSchema.optional(),
             /** The subject's outline at eight moments across the shot (pose trajectory). */
             subjectPath: z.array(subjectShapeSchema.nullable()).length(8).optional(),
+            /** Person segmentation measured this shot and found nobody (after the detector check). */
+            subjectAbsent: z.literal(true).optional(),
             /** How the shot moves over time (movement geometry, not a label). */
             action: actionSignatureSchema.optional(),
             /** What the shot shows when it barely moves: structure, horizon, role. */
@@ -172,6 +174,18 @@ export function describeShots(a: Asset, analysis: MediaAnalysis): Shot[] {
 /** A sliver of a few frames between two flash boundaries is the flash's own ramp (scene detection
  * sees its brightening as a boundary), not a shot: it joins the outgoing shot and one flash
  * remains at the real cut, spanning both. Edits shots in place; returns the transitions. */
+/** A boundary characterised as a plain cut (or unresolved movement) that sits inside a measured
+ * whip is a whip: the shot boundary stays, its treatment is the sweep (direction, span, travel).
+ * Flashes, blurs and dissolves keep their own evidence. */
+function withWhips(transitions: ReturnType<typeof characterizeTransitions>, visual: readonly VisualFrame[]) {
+  if (visual.length < 12) return transitions;
+  return transitions.map((t) => {
+    if (!["cut", "motion", "unresolved"].includes(t.kind)) return t;
+    const w = whipAt(visual, t.cutMs);
+    if (!w) return t;
+    return { ...t, kind: "whip" as const, startMs: Math.min(w.startMs, t.cutMs), endMs: Math.max(w.endMs, t.cutMs), direction: w.direction, confidence: w.confidence, strength: Number(Math.min(1, w.travel).toFixed(3)), evidence: [`The picture sweeps ${w.direction} ${Math.round(w.travel * 100)}% of the frame over ${w.endMs - w.startMs} ms around the boundary (peak ${(w.peakMs / 1000).toFixed(2)} s).`] };
+  });
+}
 export function absorbFlashSlivers(shots: { startMs: number; endMs: number }[], transitions: ReturnType<typeof characterizeTransitions>) {
   let out = [...transitions];
   for (let k = shots.length - 2; k >= 1; k--) {
@@ -292,7 +306,7 @@ export function extractDNA(
         shot.endMs - 100,
       );
       const [from, to] = shotSpan(shot);
-      const action = actionSignature(visual, undefined, from, to, asset.width / Math.max(1, asset.height));
+      const action = actionSignature(visual, undefined, from, to, asset.width / Math.max(1, asset.height), effectSpans({ colorPulses }));
       if (action) shot.action = action;
       const scene = sceneSignature(visual, from, to, action, vision?.find((f) => f.subject)?.subject?.bounds.height ?? null, (vision ?? []).flatMap((f) => f.detections ?? []), medianSharpness(visual));
       if (scene) shot.scene = scene;
@@ -331,7 +345,7 @@ export function extractDNA(
     width: asset.width,
     height: asset.height,
     shots,
-    transitions: absorbFlashSlivers(shots, withDissolves(characterizeTransitions(shots, visual, motion), blends, shots)),
+    transitions: withWhips(absorbFlashSlivers(shots, withDissolves(characterizeTransitions(shots, visual, motion), blends, shots)), visual),
     colorPulses,
     text:
       text &&

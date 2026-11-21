@@ -1,3 +1,122 @@
+## Resume after the 4.3 selection fixes — 22 November 2026
+
+**State:**
+- Checkpoint `1f06d94` plus uncommitted 4.1–4.3 work. Nothing committed or pushed; `.claude/` stays uncommitted.
+- **Final build:** `bin/supp-edit.exe` sha256 `218c7a9b…` (`test-results/final43c/build-identity.txt`).
+- **Evidence:**
+
+  | Folder | What it holds |
+  | --- | --- |
+  | `test-results/final43c/` | final matrix, fresh titles |
+  | `test-results/final43b/` | cached-title matrix, plus `README.md`: what was tried, kept and reverted |
+  | `test-results/final43/` | interim build |
+  | `test-results/final43-debug/` | unplaced-pick diagnosis |
+  | `test-results/final43/offline/` | offline base-vs-new comparison |
+
+**Reproduce:**
+- **Matrix:** `bash test-results/footage/run-final43c.sh`, then `node test-results/final43c/summarize.mjs` and `node test-results/final43c/check-binaries.mjs test-results/final43c`.
+- **Offline comparison against a copy of an earlier source:** `bash test-results/footage/offline-compare-43.sh BASE_DIR`. `BASE_DIR` holds `packages`, `scripts` and junctions to `node_modules` and `target`. `ONLY="gym street"` limits the cases.
+- **A/B footage offline:** `node test-results/final43/grade-offline-labels.mjs LABELS SHOTS SELECTION.json`.
+- **Unplaced plan picks:** search the run's `app-console.log` for "planned pick not placed".
+
+**Next, in order of impact:**
+1. **Recognise the action from body pose, not outlines.**
+   - The gym deadlift is retrieved and then outranked, by incline press on shot 1 and by beach squat on shot 3.
+   - Framing, movement level, look and the vision model's labels cannot separate the two across recordings.
+   - Joint positions and angles from a pose model (standing hip hinge vs lying on a bench) are framing- and background-invariant.
+   - Measure on the gym reel, the A/B assets and the holdouts offline, then in the app.
+2. **Calibrate confidence on shots with nobody in them.**
+   - Movement geometry alone gave three close-match labels on wrong picks: vertical holdout shot 3, formerly sealed shot 1, A/B shot 5.
+   - Two moments of one clip move alike; confidence needs a term that separates them, or a ceiling without one.
+3. **Keep a dissolve's lead-in:** prefer in-points with footage before them (transition-heavy shot 5).
+4. **Narrow the still-shot rule:** street still 4/6 vs 4.1's 5/6 (shot 2).
+5. **Titles:** MOUTH across colour pulses; the Tiger size veto.
+6. **A meaningful "best available"** (a gym row gets a beach).
+7. **A wider real evaluation set:** 20–30 reel-plus-footage pairs, labelled before any run.
+
+## Resume after Universal Reference-to-Edit 4.2 — 21 November 2026
+
+**State:**
+- Checkpoint `1f06d94` plus uncommitted 4.1 and 4.2 work. Nothing committed or pushed; `.claude/` stays uncommitted. Waiting for review.
+- **Final build:** `bin/supp-edit.exe` sha256 `e3ebf2f9af4450fcf4e18e37642f60fdc1b6b161ecdf1c7bebe322737060279f` (`test-results/final42b/build-identity.txt`).
+- **Other binaries:**
+  - frozen 4.2 (blind A/B): `test-results/final42/frozen-bin/supp-edit.exe` (`18fac9fb…`);
+  - preserved 4.1: `test-results/preserved-4.1/bin/supp-edit.exe` (`7e12e200…`).
+- **Evidence:**
+
+  | Folder | What it holds |
+  | --- | --- |
+  | `test-results/final42b/` | final matrix; `summary.md`, `binaries.txt`, `street-attribution.md` |
+  | `test-results/final42b-titles/` | HONORABLE fix |
+  | `test-results/final42/` | frozen regressions; `cooking-diagnosis/`, `gym-inspection/` |
+  | `test-results/footage/different42/` | blind A/B: sealed labels, `ab-41`, `ab-42`, `warm-42` |
+  | `test-results/audio42/` | effect timing and level, takes on the earlier build |
+  | `test-results/person42/` | offline person check |
+
+**Reproduce:**
+1. **Final matrix:** `bash test-results/footage/run-final42b.sh`. It writes `test-results/final42b/`.
+   - Stop it by killing the bash, node and `supp-edit.exe` processes. A stopped background shell can leave the script running and holding `bin/supp-edit.exe` open.
+2. **Summary:** grade each truth case with `node scripts/measure-footage-selection.mjs RUN/final.supp TRUTH RUN.grade.json --log=RUN.log`, then:
+   - `node test-results/final42b/summarize.mjs` (per case: build, first edit, labels, baselines, playback, editability, Save/Reopen, export);
+   - `node test-results/final42b/check-binaries.mjs DIR…` (which executable each run launched).
+3. **Different footage:** `node scripts/grade-different-footage.mjs LABELS REFERENCE_SHOTS RUN.log OUT.json`. Labels must be recorded before any build runs, and sealed with a hash.
+4. **Blind A/B against another binary:** `SUPP_EXE=path/to/supp-edit.exe node scripts/run-native-verification.mjs …`.
+5. **Offline selection:** `node scripts/check-footage-selection.mjs INVENTORY TRUTH [--identity] [--peaks=RUN.log] [--inspect=1,3] [--ungated]`.
+   - `--peaks` reuses the app's action peaks.
+   - `--ungated` uses person outlines unchecked, as builds before the person check did.
+   - `TOP=40 FINE=1 FULL=1` lists more candidates with every term.
+6. **Effects:** `node scripts/measure-effect-tracks.mjs RENDER.mp4 SAVED.supp OUT.json` (isolated tracks rebuilt from the saved project) and `scripts/measure-effect-placement.mjs` (controlled cases).
+7. **Takes:** `node scripts/verify-native-takes.mjs COPY.supp OUT`.
+8. **The 4.1 source, for attribution:** `git archive 1f06d94`, overlay `test-results/preserved-4.1/tracked-files` and `untracked`, junction `node_modules`, then run the harness there (as in `street-attribution.md`).
+
+**Next (measured, in order of user impact).** The two gym misses point at selection, not retrieval: the right deadlift windows are scored, and they lose.
+1. **Score what the shot does above how it is framed.**
+   - The deadlift lost shot 1 on subject size (framing 0.76 vs 0.94) and movement level (0.52 vs 0.78), despite better action agreement. It lost shot 3 mainly on framing (0.37 vs 0.60).
+   - The editor already crops and zooms. Subject size should be a correction the edit applies (when the source has resolution to spare), not a selection penalty.
+   - Measure the reference shot's movement outside its transition span (shot 3 opens with a blur).
+   - Re-run the gym reel, the A/B assets and the holdouts offline, then in the app.
+2. **Make the planner keep its own picks.**
+   - A plan pick that starts within a frame or two of a pool range, or right after a consumed interval, must not fall to the local matcher.
+   - This cost gym shot 3 (squat at 40 ms vs a range starting at frame 2) and street shot 6.
+3. **Narrow the still-shot rule** (`STILL_LEVEL`/`bothStill`). Reverting it alone restores street's 4.1 picks. Cooking shot 4 needs a narrower form, e.g. only when nothing moves in the reference shot at all.
+4. **Keep a dissolve's lead-in.** When the reference shot enters by dissolve, prefer in-points with footage before them (transition-heavy shot 5).
+5. **Titles:**
+   - Read lettering across colour-pulse style changes as one word (MOUTH, 8 frames).
+   - Do not let an unrelated uncertain reading veto a trace on size (Tiger).
+6. **A meaningful "best available":** a gym row should get a gym clip, not a beach (A/B shot 4).
+7. **Carried over:** same-footage misses near titles and transitions, and on repeated actions (vertical holdout shot 2: a false identity claim at 93%); banding; the 26-minute reopen incident.
+
+## Resume after Universal Reference-to-Edit 4.1 — 20 November 2026
+
+**State:**
+- Start of phase: checkpoint `1f06d94` (the only commit authorised by the 4.1 brief). Nothing since is committed; nothing is pushed; `.claude/` stays uncommitted.
+- `bin/supp-edit.exe` is the final 4.1 build (`test-results/final41/build-identity.txt`), including same-footage identity.
+- Evidence: `test-results/final41/`:
+  - `matrix.out` and the per-run folders: the final matrix on the identity build;
+  - `baseline/`: the same matrix on the build before identity;
+  - `offline/` and `previous-holdout-analysis.md`;
+  - `reopen-stress.md`;
+  - `stuck-after-export/` (minidump);
+  - `sealed-truth.sha256`.
+
+**Reproduce:**
+1. **Final matrix:** `bash test-results/footage/run-final41.sh`. It ends with the sealed holdout; that holdout is now spent.
+2. **Matrix summary:** `node scripts/summarize-matrix.mjs test-results/final41`.
+3. **Offline selection with identity:** `node scripts/check-footage-selection.mjs INVENTORY TRUTH "Close Match" --identity`. Native matches are cached as `identity-N.json` in the inventory.
+4. **Identity on any pair:** `target/debug/examples/identity.exe REFERENCE SOURCE PROBE_MS,... [START-END ...]`. Build with `cargo build --offline -p supp-media --examples`; set `SUPP_FFMPEG` and `SUPP_FFPROBE`.
+5. **Save/reopen stress:** `node scripts/stress-reopen.mjs COPY.supp OUT [CYCLES] [--export]`. The lifecycle log is `%APPDATA%/studio.supp.edit/lifecycle.log`.
+6. **Effect levels:** `node scripts/measure-sfx-levels.mjs RENDER.mp4 SAVED.supp`. It works at 16 kHz mono (the analysis domain) and rebuilds the music track to separate an effect from a beat of the music.
+7. **Banding:** `node scripts/measure-banding.mjs A.mp4 B.mp4 FRAMES`.
+8. **Export validity against the reference:** `node scripts/validate-export.mjs RENDER SECONDS --reference=REF`. Silences or black frames that the reference has at the same time count as intended.
+9. **New holdouts:** `node scripts/make-unseen-holdout.mjs OUT SEED vertical|landscape|square`. Seal the truth (hash it), never read it before the one graded run.
+
+**Next (measured gaps, in order of user impact):**
+1. **Exact moment in look-alike footage that is not the same frames:** identity proves "same footage". When the reference is another repetition of the raw's action, selection still relies on likeness.
+2. **Riser level:** about 20 dB under the reference's relation to its music; impact and bass hit are audible (`recreated-audio/sfx-levels.json`).
+3. **Banding:** steps −31% on the steepest grade, but the tone then differs by about 11 codes. A real fix needs grading in float before quantisation, or dithering.
+4. **26-minute reopen incident:** not reproduced in 25 instrumented cycles. Read `lifecycle.log` if it recurs.
+5. **Alternative takes:** an alternative take may duplicate a moment another shot already uses; it is not flagged.
+
 ## Resume after the universal reference-to-edit engine — 20 November 2026
 
 **State:**

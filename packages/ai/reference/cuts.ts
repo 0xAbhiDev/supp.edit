@@ -302,3 +302,96 @@ export function dissolves(frames: readonly VisualFrame[]): Dissolve[] {
   }
   return found;
 }
+
+/** A measured whip: the picture swept across the frame for a few frames around a boundary. */
+export interface Whip {
+  startMs: number;
+  peakMs: number;
+  endMs: number;
+  /** Which way the picture content travels. */
+  direction: "left" | "right" | "up" | "down";
+  /** Distance swept, in frame widths (or heights). */
+  travel: number;
+  confidence: number;
+}
+
+/** Sub-cell shift that best aligns frame b's 4×4 layout with frame a's (+1 = content moved one
+ * column left / one row up), from a parabola through the costs at −1, 0 and +1. */
+function layoutShift(a: VisualFrame, b: VisualFrame, axis: "x" | "y") {
+  const cost = (s: number) => {
+    let c = 0,
+      n = 0;
+    for (let r = 0; r < 4; r++)
+      for (let col = 0; col < 4; col++) {
+        const sc = axis === "x" ? col - s : col,
+          sr = axis === "y" ? r - s : r;
+        if (sc < 0 || sc > 3 || sr < 0 || sr > 3) continue;
+        c += (a.layout[r * 4 + col] - b.layout[sr * 4 + sc]) ** 2;
+        n++;
+      }
+    return c / Math.max(1, n);
+  };
+  const c = [cost(-1), cost(0), cost(1)];
+  const at = c.indexOf(Math.min(...c)) - 1;
+  const d = c[0] - 2 * c[1] + c[2];
+  return at === 0 && d > 1e-9 ? Math.max(-1, Math.min(1, (c[0] - c[2]) / (2 * d))) : at;
+}
+
+/** A whip at a boundary, or undefined. Whole-frame motion far beyond what block flow can follow:
+ * several consecutive frames shift the coarse layout the same way (a third of a column or more
+ * each), together sweeping at least 1.5 columns, no single frame carrying most of the change
+ * (that is a cut), steady pictures on both sides (a continuous pan is not a whip), and the sweep
+ * overlaps the boundary. */
+export function whipAt(frames: readonly VisualFrame[], cutMs: number): Whip | undefined {
+  const step = median(frames.slice(1, 200).map((f, k) => f.timeMs - frames[k].timeMs)) || 33;
+  const i0 = frames.findIndex((f) => f.timeMs >= cutMs - 450),
+    i1 = frames.findIndex((f) => f.timeMs > cutMs + 450);
+  if (i0 < 2) return undefined;
+  const end = i1 < 0 ? frames.length : i1;
+  let best: Whip | undefined;
+  for (const axis of ["x", "y"] as const) {
+    const shifts = frames.slice(i0, end).map((f, k) => layoutShift(frames[i0 + k - 1], f, axis));
+    for (const sign of [1, -1]) {
+      // The longest run of frames moving this way.
+      let runStart = -1,
+        bestRun: [number, number] | undefined;
+      shifts.forEach((s, k) => {
+        const moving = s * sign >= 0.33 && frames[i0 + k].change >= 0.02;
+        if (moving && runStart < 0) runStart = k;
+        if ((!moving || k === shifts.length - 1) && runStart >= 0) {
+          const last = moving ? k : k - 1;
+          if (!bestRun || last - runStart > bestRun[1] - bestRun[0]) bestRun = [runStart, last];
+          runStart = -1;
+        }
+      });
+      if (!bestRun) continue;
+      const [a, b] = bestRun;
+      const length = b - a + 1;
+      if (length < Math.max(3, Math.round(100 / step)) || length * step > 600) continue;
+      const run = frames.slice(i0 + a, i0 + b + 1);
+      if (run[0].timeMs > cutMs + step || run.at(-1)!.timeMs < cutMs - step) continue;
+      const travel = shifts.slice(a, b + 1).reduce((t, s) => t + s * sign, 0) / 4;
+      if (travel < 0.375) continue;
+      const changes = run.map((f) => f.change);
+      const total = changes.reduce((t, c) => t + c, 0);
+      if (Math.max(...changes) > 0.5 * total) continue;
+      // Steady on both sides.
+      const before = frames.slice(Math.max(1, i0 + a - 4), i0 + a),
+        after = frames.slice(i0 + b + 1, Math.min(frames.length, i0 + b + 5));
+      const steady = (xs: readonly VisualFrame[]) => xs.length >= 2 && xs.every((f, k) => Math.abs(layoutShift(k ? xs[k - 1] : frames[frames.indexOf(f) - 1], f, axis)) < 0.2);
+      if (!steady(before) || !steady(after)) continue;
+      const peak = run[changes.indexOf(Math.max(...changes))];
+      const direction = axis === "x" ? (sign > 0 ? "left" : "right") : sign > 0 ? "up" : "down";
+      const candidate: Whip = {
+        startMs: run[0].timeMs - Math.round(step),
+        peakMs: peak.timeMs,
+        endMs: run.at(-1)!.timeMs,
+        direction,
+        travel: Number(travel.toFixed(3)),
+        confidence: Number(Math.min(0.95, 0.45 + 0.08 * length + 0.2 * Math.min(1, travel)).toFixed(3)),
+      };
+      if (!best || candidate.travel > best.travel) best = candidate;
+    }
+  }
+  return best;
+}

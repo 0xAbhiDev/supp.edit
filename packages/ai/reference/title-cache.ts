@@ -9,8 +9,11 @@
  * and the transcript. Raw footage never enters it, so a word correction re-traces titles only. */
 import type { StyleDNA } from "./dna";
 
-/** Bump when traceTitles changes what it measures. 2: shot tone and plate tint are cached too. */
-export const TITLE_CACHE_VERSION = "2";
+/** Bump when traceTitles changes what it measures. 2: shot tone and plate tint are cached too.
+ * 3–4: partial OCR readings of one word may correct each other (fragmentMerges), and agreeing
+ * uncertain pieces no longer veto the traced word on ink. 5: titles re-traced once so the person
+ * check is verified on first-run (freshly traced) references. */
+export const TITLE_CACHE_VERSION = "5";
 
 /** Short stable digest of a string, for cache keys. */
 export const digest = (s: string) => {

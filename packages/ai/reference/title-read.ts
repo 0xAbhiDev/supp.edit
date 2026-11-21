@@ -362,6 +362,48 @@ export function sharedFace(shapes: { shape: TitleShape; content: string }[]) {
 /** Wordings built letter by letter from two equally long readings of the same lettering, taking
  * each differing letter from one or the other. Every letter of every result was read by some
  * measurement; none is invented. At most four differing positions are combined. */
+/** Wordings assembled from several partial OCR readings of one lettering. A shorter reading that
+ * sits inside a longer one (at its start, end or middle, in exactly one best place) and differs
+ * from it in at most one letter in three corrects the longer reading where they disagree: OCR
+ * read "HON" at the start and "HOFORABLE" across a word gives "HONORABLE". Nothing here is
+ * accepted on its own: each wording competes on how well it draws the measured strokes. */
+export function fragmentMerges(fragments: readonly string[]) {
+  const words = [...new Set(fragments.filter((f) => f.length >= 3))];
+  const out = new Set<string>();
+  for (const long of words) {
+    if (long.length < 5) continue;
+    const merged = [...long];
+    let changed = false;
+    for (const short of words) {
+      if (short.length >= long.length) continue;
+      const misses = Array.from({ length: long.length - short.length + 1 }, (_, at) => [...short].filter((ch, i) => ch !== long[at + i]).length);
+      const fewest = Math.min(...misses);
+      if (fewest === 0 || fewest > Math.floor(short.length / 3) || misses.filter((m) => m === fewest).length > 1) continue;
+      const at = misses.indexOf(fewest);
+      [...short].forEach((ch, i) => {
+        if (merged[at + i] !== ch) {
+          merged[at + i] = ch;
+          changed = true;
+        }
+      });
+    }
+    const word = merged.join("");
+    if (changed && !words.includes(word)) out.add(word);
+  }
+  return [...out];
+}
+
+/** Whether an OCR piece is part of a word: it sits inside it (letters only, any case) with at
+ * most one letter in three different. */
+export function pieceOf(piece: string, word: string) {
+  const a = piece.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase(),
+    b = word.replace(/[^\p{L}\p{N}]/gu, "").toLocaleUpperCase();
+  if (a.length < 2 || a.length > b.length) return false;
+  for (let at = 0; at + a.length <= b.length; at++)
+    if ([...a].filter((ch, i) => ch !== b[at + i]).length <= Math.floor(a.length / 3)) return true;
+  return false;
+}
+
 export function letterCombinations(a: string, b: string) {
   if (a.length !== b.length || a === b) return [];
   const differ = [...a].flatMap((ch, i) => (ch !== b[i] ? [i] : []));

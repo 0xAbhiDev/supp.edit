@@ -1,5 +1,64 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**22 November, 4.3 selection fixes.**
+- **Build:** final `218c7a9b…`. Windows app; one click; every title traced fresh.
+- **Evidence:** `test-results/final43c/` (`summary.md`, `binaries.txt` 19/19); what was tried and reverted is in `test-results/final43b/README.md`.
+- **Tests:** TypeScript 300/300, native 52/52.
+
+| Capability | Status | Tested scope | Evidence |
+| --- | --- | --- | --- |
+| Plan picks placed as planned (no fallback from frame rounding or slowed-shot consumption) | VERIFIED | 19 runs, 0 fallback placements (4 on 4.2). Street 3/6 → 4/6. Gym export valid again. | `final43c/*/explanations.json`, `app-console.log` |
+| Person check identical on first and repeat runs | VERIFIED | Fresh-title matrix equals cached-title matrix on every graded result and label | `final43c/` vs `final43b/` |
+| Reference movement without colour pulses and person flashes | VERIFIED (neutral) | No pick changed. One label moved from missing to weak. | `final43/offline/`, `final43c/gym/` |
+| Different footage: right action when the raw is another recording | FAILED (unchanged) | Gym 0 of 2 usable-deadlift shots; blind A/B 2/4 | `final42/gym-inspection/`, `different42/` |
+| Confidence on shots with nobody in them | FAILED | 3 close-match labels on wrong picks, previously hidden by a first-run leak | `CURRENT_STATE.md` (4.3) |
+| Everything else in the 4.2 table | unchanged | Same results on `218c7a9b` (cooking 6/6, travel 6/6, long 9/9, Remix, Smart, audio, takes, HONORABLE) | `final43c/summary.md` |
+
+**21 November, Universal Reference-to-Edit 4.2.**
+- **Build:** final `e3ebf2f9…`, in the Windows app; one click unless noted.
+- **Scoring:** the first automatic edit is graded before any take or Inspector edit. Then each run went through playback, Save → Exit → Reopen, an Inspector edit and Deliver.
+- **Evidence:** `test-results/final42b/` (`summary.md`), the blind A/B in `test-results/footage/different42/`, and `CURRENT_STATE.md` (4.2).
+- **Tests:** TypeScript 295/295, native 52/52.
+
+| Capability | Status | Tested scope | Evidence |
+| --- | --- | --- | --- |
+| Full one-click workflow | VERIFIED | 19 runs + take check on `e3ebf2f9`. All played, reopened identically and exported valid MP4s (0 drift, 0 black, 0 decode errors). | `final42b/summary.md`, `binaries.txt` |
+| Generated whoosh timing | VERIFIED | Controlled 6 cases 484 → 23 ms. App −27 / −26 ms (2 exports). | `audio42/README.md`, `final42b/{s1-whoosh,s4-montage}/effect-tracks.json` |
+| Generated riser level | VERIFIED | Controlled 14.5 → 0.6 dB at peak. App −0.3 dB, +6 ms (reel 55). No clipping. Listening not done (excerpts provided). | same; `audio42/listen/` |
+| Impact and bass hit | VERIFIED (regression) | Onset on frame; −0.7 to −2.2 dB vs plan | `final42b/*/effect-tracks.json` |
+| Alternative take reuse warning | VERIFIED | 63 takes; 0 mismatches after Apply, take, Undo, Redo and Save/Reopen. 20 separate moments of the same clips not warned. | `final42b/takes-case5.log` |
+| Different footage: blind A/B, frozen 4.2 vs 4.1 | FAILED (no gain) | One unseen case. Both builds: right clip 3/4, right moment 2/4, unavailable flagged 2/3, 2 false confident. | `different42/ab-41`, `ab-42/grade.json` |
+| Different footage: cooking (seen case) | VERIFIED | App 4/6 → 6/6 right action after the person check | `final42b/cooking.log`, `final42/cooking-diagnosis/` |
+| Different footage: personal gym reel | FAILED | 0 of 2 shots with usable deadlift footage picked; labels honest (0/4 close match) | `final42/gym-inspection/` |
+| Person-outline check | VERIFIED (scope: this matrix) | Rejected phantom outlines on 3 references; kept 0-contradicted gym clips | `CURRENT_STATE.md` (4.2) |
+| "Best available" / fallback labels | VERIFIED | Fallback shots now labelled (gym 3, street 6, sealed 2, transitions 8). A/B assets: false confident 2 → 0 (regression check, seen). | `final42b/*/explanations.json` |
+| Generated, long, multi-clip, travel, Remix, Smart | VERIFIED | Equal to 4.1: travel 6/6, 26 min 9/9, multi 9/9, Remix 8/9 and 7/9, Smart 6/6 | `final42b/summary.md` |
+| Same-footage identity | PARTIAL | 13 claims across 3 holdouts, 12 right. Vertical holdout shot 2 claimed another repetition at 93%. | `final42b/holdout-*.log` |
+| Real holdouts | PARTIAL, one REGRESSION | Landscape 5/6, vertical 4/6, workshop 4/6 action, sealed 3/6 (6/6 clip); **street 5/6 → 3/6 action** (still-shot rule, planner fallback) | `final42b/street-attribution.md` |
+| Transitions | PARTIAL, REGRESSION | 9 boundaries detected; flash and whip rebuilt; **dissolve kept as a cut** (pick starts at the clip's first frame) | `final42b/transitions.log` |
+| Titles traced from the reference | PARTIAL | HONORABLE restored (timing ±1 frame, placement within 5 px of 360). Tiger vetoed on size. MOUTH (8 frames) split by colour pulses and withheld. | `final42b-titles/README.md`, `final42b/gym/` |
+| Colour banding | PARTIAL (unchanged) | Steps −31%, tone shift about 11 codes | `final41/` |
+| Save/reopen reliability | VERIFIED (prior stress); incident unresolved | 20/20 and 5/5 with export (4.1). 19/19 identical reopens in this matrix. | `final41/reopen-stress.md` |
+| Copied framing pixel accuracy, multilingual text, references over 90 s, non-Windows | PLANNED | not verified | — |
+
+**21 November, Universal Reference-to-Edit 4.1.** Final build `7e12e200…`. Windows app; one click unless noted; full flow through save, exit, reopen, Inspector edit and Deliver. Every MP4 was checked by `scripts/validate-export.mjs --reference`. Evidence: `test-results/final41/`.
+
+| Capability | Status | Evidence |
+| --- | --- | --- |
+| One-click recreation, any reference + raw footage | VERIFIED | 15 matrix runs plus the sealed holdout: all completed, all exports valid, 0 black frames |
+| Same-footage identity (exact source frames under regrade, crop/zoom, ±speed) | VERIFIED | previous holdout in app 0/6 → 5/6; sealed holdout 3 claims, 3 correct; real gym reel 0 false claims |
+| Exact moment when the raw only resembles the reference | PARTIAL | sealed 3/6 exact, 5/6 right clip; cooking 4/6 in app |
+| Generated long / multi-clip / travel cases | VERIFIED | 26 min 9/9, multi 9/9, 90 s 6/6, travel 6/6; 0 cut crossings anywhere |
+| Confidence and labels (close match / best available) | VERIFIED (calibrated offline) | AUC 0.50 → 0.69; sealed misses: 2 of 3 flagged best available |
+| Burned-in source text (no duplicate titles) | VERIFIED | previous holdout: "BENCH PRESS" kept from the footage, not re-added |
+| Transitions: cut, punch-in, dissolve, flash, blur, whip | VERIFIED | transition-heavy reference: 9/9 kinds; dissolve, flash and whip rebuilt as editable layers |
+| Framing from the matched region (the reference's exact crop/zoom) | VERIFIED (code path), PARTIAL (no pixel audit yet) | applied on identity shots without bars |
+| Generated effect audibility | VERIFIED for bass hit and impact; FAILED for whoosh | bass +2.3 dB, impact −2.9 dB vs music; whoosh −11.3 dB (peak placed 0.5 s early); riser about 20 dB under the reference relation |
+| Tone-curve banding | PARTIAL | steps −31%, tone shift about 11 codes on the steepest grade |
+| Save / reopen reliability | VERIFIED (25 cycles); original incident unresolved | 20/20 plain and 5/5 with export, exit 0, exact restore |
+| Creative Remix / Smart Adaptation | VERIFIED | Smart 6/6 (90 s); Remix stays distinct: 8/9 multi, 7/9 11 min (baseline 7/9, 8/9) |
+| Relational small-object motion | PLANNED | — |
+
 **20 November universal reference-to-edit engine.** What a user gets from a reference and raw footage alone, measured on the final build in the Windows app (`--untouched`: only the reference and the raw videos chosen, Recreate pressed, everything else automatic; full flow through save, reopen, Inspector edit and Deliver; every MP4 checked by `scripts/validate-export.mjs`):
 
 | Capability | Status | Evidence |

@@ -98,15 +98,24 @@ export function shapeFit(a: SubjectShape, b: SubjectShape) {
   return (both / Math.max(1, any)) * Math.exp(-0.8 * Math.abs(Math.log(a.aspect / b.aspect)));
 }
 
-/** Record the reference subject's typical shape on each shot that shows a person. */
+/** Person segmentation measured [start, end) and outlined nobody there (samples the object
+ * detector contradicted arrive emptied, person-evidence.ts). Unmeasured is not absent. */
+export function personAbsent(samples: readonly PersonSample[] | undefined, startMs: number, endMs: number) {
+  const inside = (samples ?? []).filter((s) => s.timeMs >= startMs && s.timeMs < endMs);
+  return inside.length >= 2 && inside.every((s) => s.points.length < 3);
+}
+
+/** Record the reference subject's typical shape on each shot that shows a person, and mark the
+ * shots measured with nobody in them. */
 export function annotateSubjects(
-  dna: { shots: { startMs: number; endMs: number; subjectShape?: SubjectShape; subjectPath?: (SubjectShape | null)[] }[] },
+  dna: { shots: { startMs: number; endMs: number; subjectShape?: SubjectShape; subjectPath?: (SubjectShape | null)[]; subjectAbsent?: true }[] },
   people: PersonSample[],
   frameAspect: number,
 ) {
   for (const shot of dna.shots) {
     const shape = shapeOver(people, shot.startMs, shot.endMs, frameAspect);
     if (shape) shot.subjectShape = shape;
+    else if (personAbsent(people, shot.startMs, shot.endMs)) shot.subjectAbsent = true;
     const path = shapePath(people, shot.startMs, shot.endMs, frameAspect);
     if (path.filter(Boolean).length * 2 >= path.length) shot.subjectPath = path.map((p) => p ?? null);
   }

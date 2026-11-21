@@ -129,6 +129,10 @@ export class GpuRenderer {
   private width = 0;
   private height = 0;
   private lost = false;
+  /** Working targets keep half-float precision between effect passes where the GPU can render
+   * to it: each pass otherwise rounds to 8 bits, and strong grades step smooth gradients. Only
+   * the final picture is quantised. */
+  private preciseTargets = false;
   constructor() {
     const gl = this.canvas.getContext("webgl2", {
       alpha: true,
@@ -139,6 +143,7 @@ export class GpuRenderer {
     });
     if (!gl) throw new Error("WebGL2 is unavailable");
     this.gl = gl;
+    this.preciseTargets = !!gl.getExtension("EXT_color_buffer_float");
     const extension = gl.getExtension("WEBGL_debug_renderer_info");
     this.device = String(
       gl.getParameter(extension?.UNMASKED_RENDERER_WEBGL ?? gl.RENDERER),
@@ -197,7 +202,7 @@ export class GpuRenderer {
       this.uniforms.set(name, this.gl.getUniformLocation(this.program, name));
     return this.uniforms.get(name)!;
   }
-  private texture(width: number, height: number): Texture {
+  private texture(width: number, height: number, precise = false): Texture {
     const gl = this.gl,
       texture = gl.createTexture();
     if (!texture) throw new Error("GPU texture allocation failed");
@@ -206,17 +211,19 @@ export class GpuRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.RGBA,
-      width,
-      height,
-      0,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      null,
-    );
+    if (precise && this.preciseTargets) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        width,
+        height,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
     return { texture, width, height };
   }
   get bytes() {
@@ -229,7 +236,7 @@ export class GpuRenderer {
       (this.maskTexture
         ? this.maskTexture.width * this.maskTexture.height * 4
         : 0) +
-      this.targets.reduce((n, t) => n + t.width * t.height * 4, 0)
+      this.targets.reduce((n, t) => n + t.width * t.height * (this.preciseTargets ? 8 : 4), 0)
     );
   }
   begin(width: number, height: number, background = "#000000") {
@@ -248,7 +255,7 @@ export class GpuRenderer {
       this.canvas.width = width;
       this.canvas.height = height;
       this.targets.forEach((t) => gl.deleteTexture(t.texture));
-      this.targets = [this.texture(width, height), this.texture(width, height)];
+      this.targets = [this.texture(width, height, true), this.texture(width, height, true)];
     }
     gl.useProgram(this.program);
     gl.bindVertexArray(this.vao);

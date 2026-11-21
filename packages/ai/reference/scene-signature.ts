@@ -31,6 +31,9 @@ export const sceneSignatureSchema = z
     /** Detail relative to the whole video's typical detail (below ~0.6: smooth by design). */
     relativeDetail: z.number().nonnegative().optional(),
     objects: z.record(z.string(), z.number()).optional(),
+    /** Where the picture's structure is: mean 8×8 edge energy over the window (sums to 1),
+     * independent of palette, grade and polarity. */
+    edges: z.array(z.number().min(0).max(1)).length(64).optional(),
     role: z.enum(visualRoles),
   })
   .strict();
@@ -84,7 +87,9 @@ export function sceneSignature(
   const role = inferRole({ rows, localized, camera, level, subjectSize });
   const sharpness = Number((inside.reduce((s, f) => s + f.sharpness, 0) / inside.length).toFixed(4));
   const relativeDetail = medianSharpness ? Number((sharpness / Math.max(1e-6, medianSharpness)).toFixed(3)) : undefined;
-  return { structure, rows, horizon: (at + 1) / 4, sharpness, ...(relativeDetail !== undefined ? { relativeDetail } : {}), localized: Number(localized.toFixed(3)), camera: Number(camera.toFixed(4)), level, subjectSize, ...(Object.keys(objects).length ? { objects } : {}), role };
+  const edged = inside.filter((f) => f.edges);
+  const edges = edged.length ? Array.from({ length: 64 }, (_, k) => Number((edged.reduce((a, f) => a + f.edges![k], 0) / edged.length).toFixed(4))) : undefined;
+  return { ...(edges ? { edges } : {}), structure, rows, horizon: (at + 1) / 4, sharpness, ...(relativeDetail !== undefined ? { relativeDetail } : {}), localized: Number(localized.toFixed(3)), camera: Number(camera.toFixed(4)), level, subjectSize, ...(Object.keys(objects).length ? { objects } : {}), role };
 }
 
 /** The visual role from measured geometry only. */
@@ -145,6 +150,12 @@ export function sceneSimilarity(a: SceneSignature, b: SceneSignature) {
     objects = na && nb ? dot / (na * nb) : 0.5;
   } else if (a.objects || b.objects) objects = 0.3;
   const role = a.role === b.role ? 1 : related[a.role]?.includes(b.role) ? 0.5 : 0;
-  const overall = 0.3 * structure + 0.1 * rows + 0.1 * horizon + 0.15 * placement + 0.1 * size + 0.05 * objects + 0.2 * role;
-  return { structure, rows, horizon, placement, size, objects, role, overall: Number(overall.toFixed(3)) };
+  // Edge structure (where the outlines are) survives any grade or polarity: with it, a still is
+  // told apart by what it shows (a product, a hand, a skyline) rather than by its brightness.
+  const edges = a.edges && b.edges ? (1 + pearson(a.edges, b.edges)) / 2 : null;
+  const overall =
+    edges === null
+      ? 0.3 * structure + 0.1 * rows + 0.1 * horizon + 0.15 * placement + 0.1 * size + 0.05 * objects + 0.2 * role
+      : 0.2 * structure + 0.25 * edges + 0.1 * rows + 0.1 * horizon + 0.1 * placement + 0.1 * size + 0.05 * objects + 0.1 * role;
+  return { structure, rows, horizon, placement, size, objects, role, ...(edges === null ? {} : { edges }), overall: Number(overall.toFixed(3)) };
 }

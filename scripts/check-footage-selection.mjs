@@ -4,6 +4,10 @@
 // signatures; subject shapes and trajectories when 0-person.json exists).
 // Usage: node scripts/check-footage-selection.mjs INVENTORY_DIR [TRUTH.json] [MODE] [--json=OUT] [--inspect=2,6]
 // --inspect lists the best reranked candidates of those reference shots.
+// Person outlines pass the app's person check (person-evidence.ts: kept where the object detector
+// confirms a person); --ungated uses them unchecked, as builds before that check did.
+// --identity also runs same-footage identity (target/debug/examples/identity.exe, clips up to
+// 600 s searched end to end; results cached in the inventory as identity-N.json).
 import fs from "node:fs";
 import path from "node:path";
 import { createServer } from "vite";
@@ -20,26 +24,39 @@ const host = await createServer({ server: { middlewareMode: true, hmr: false, wa
 try {
   const { extractDNA } = await host.ssrLoadModule("/packages/ai/reference/dna.ts");
   const { buildFootageIndex, selectShots, shotRole, motionPeak } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
-  const { actionSignature, shotSpan } = await host.ssrLoadModule("/packages/ai/reference/action-signature.ts");
+  const { actionSignature, shotSpan, effectSpans } = await host.ssrLoadModule("/packages/ai/reference/action-signature.ts");
   const { sceneSignature, medianSharpness } = await host.ssrLoadModule("/packages/ai/reference/scene-signature.ts");
   const { annotateSubjects } = await host.ssrLoadModule("/packages/ai/reference/subject-shape.ts");
   const ref = project.assets[0];
   const refVisual = optional("0-visual.json") ?? [];
-  const refPeople = optional("0-person.json");
+  const { confirmedPeople } = await host.ssrLoadModule("/packages/ai/reference/person-evidence.ts");
+  const ungated = args.includes("--ungated");
+  const check = (outlines, vision) => {
+    if (!outlines || ungated) return { people: outlines, samples: outlines };
+    const c = confirmedPeople(outlines, vision?.vision?.frames);
+    if (c.outlined) console.error(`person check: ${c.rejected} of ${c.outlined} outlined frames not confirmed, ${c.unverified} unverified`);
+    return c;
+  };
+  const checked = (outlines, vision) => check(outlines, vision).people;
+  const refOutlines = optional("0-person.json");
+  const refChecked = check(refOutlines, optional("0-vision.json"));
+  const refPeople = refChecked.people;
   const text = optional("text.json");
   const dna = extractDNA(ref, optional("0-vision.json"), undefined, undefined, optional("motion.json") ?? [], Array.isArray(text) ? text : null, refVisual);
   const aspect = ref.width / Math.max(1, ref.height);
-  if (refPeople) {
-    annotateSubjects(dna, refPeople, aspect);
+  // As in the app: with the reference's outlines measured, its shots are re-signed with the
+  // confirmed outlines (none when the detector contradicted them all).
+  if (refOutlines) {
+    annotateSubjects(dna, refChecked.samples ?? [], aspect);
     for (const shot of dna.shots) {
       const [from, to] = shotSpan(shot);
-      shot.action = actionSignature(refVisual, refPeople, from, to, aspect) ?? shot.action;
+      shot.action = actionSignature(refVisual, refPeople ?? [], from, to, aspect, effectSpans(dna)) ?? shot.action;
       const scene = sceneSignature(refVisual, from, to, shot.action, shot.subjectShape?.height ?? shot.scene?.subjectSize ?? null, [], medianSharpness(refVisual));
       if (scene) shot.scene = shot.scene?.objects ? { ...scene, objects: shot.scene.objects } : scene;
     }
   }
   const sources = project.assets.flatMap((asset, i) =>
-    i && asset.kind === "video" ? [{ asset, analysis: optional(i + "-vision.json"), visual: optional(i + "-visual.json"), people: optional(i + "-person.json") }] : [],
+    i && asset.kind === "video" ? [{ asset, analysis: optional(i + "-vision.json"), visual: optional(i + "-visual.json"), people: checked(optional(i + "-person.json"), optional(i + "-vision.json")), outlines: optional(i + "-person.json") }] : [],
   );
   const t0 = performance.now();
   const index = buildFootageIndex(sources);
@@ -50,9 +67,33 @@ try {
         return m ? { peakFraction: Number(m[1]) / 100, peakSource: "audio event" } : undefined;
       })
     : [];
+  const identityMs = { measured: 0 };
+  let matchIdentity;
+  if (args.includes("--identity")) {
+    const id = await host.ssrLoadModule("/packages/ai/reference/identity.ts");
+    matchIdentity = id.matchIdentity;
+    const probes = id.identityProbes(dna.shots, dna.transitions);
+    const { execFileSync } = await import("node:child_process");
+    const { mediaEnvironment } = await import("./runtime.mjs");
+    const clean = (f) => (f.startsWith("\\\\?\\") ? f.slice(4) : f);
+    for (const [k, s] of sources.entries()) {
+      const cacheFile = path.join(dir, `identity-${k + 1}.json`);
+      const key = JSON.stringify({ version: 3, probes: probes.map((p) => p.refMs) });
+      let cached = fs.existsSync(cacheFile) ? read(cacheFile) : undefined;
+      if (cached?.key !== key) {
+        const t = performance.now();
+        const hits = JSON.parse(execFileSync(path.resolve("target/debug/examples/identity.exe"), [clean(ref.path), clean(s.asset.path), probes.map((p) => p.refMs).join(","), `0-${Math.min(600000, Math.floor(s.asset.duration * 1000))}`], { env: mediaEnvironment(), maxBuffer: 1 << 26 }).toString());
+        identityMs.measured += performance.now() - t;
+        cached = { key, hits };
+        fs.writeFileSync(cacheFile, JSON.stringify(cached));
+      }
+      s.identity = { probes, hits: cached.hits, windows: [{ startMs: 0, endMs: Math.min(600000, s.asset.duration * 1000) }] };
+    }
+  }
   const reqs = dna.shots.map((shot, i) => {
     const peak = appPeaks[i] ?? motionPeak(shot) ?? { peakFraction: 0.4, peakSource: "none" };
-    return { shot, durationMs: shot.endMs - shot.startMs, ...peak, role: shotRole(shot, i, dna.shots.length, peak.peakSource, dna.shots[i + 1]) };
+    const identity = matchIdentity?.(i, shot.startMs, shot.endMs, sources.map((s) => ({ id: s.asset.id, durationMs: s.asset.duration * 1000, identity: s.identity })));
+    return { shot, durationMs: shot.endMs - shot.startMs, ...peak, role: shotRole(shot, i, dna.shots.length, peak.peakSource, dna.shots[i + 1]), ...(identity ? { identity } : {}) };
   });
   const profile = {};
   const fileName = (id) => path.basename(sources.find((s) => s.asset.id === id).asset.path.replace(/^\\\\\?\\/, ""));
@@ -99,12 +140,19 @@ try {
       score: c.score,
       confidence: c.confidence,
       certainty: c.certainty,
+      margin: c.margin,
+      rival: c.rival,
+      semantic: c.semantic,
+      quality: c.match.quality,
       coverage: c.coverage,
       phase: c.phase ?? null,
       reuse: c.reuse?.reason ?? null,
       action: c.match.action,
       look: c.match.look,
       pose: c.match.pose,
+      match: c.match,
+      label: c.label ?? null,
+      identity: c.identity ? { score: c.identity.score, margin: c.identity.margin, timingMargin: c.identity.timingMargin, speed: c.identity.speed, motion: c.identity.motion, points: c.identity.points } : null,
       alternatives: c.alternatives.map((a) => `${fileOf(a.sourceId)} ${(a.inMs / 1000).toFixed(2)}: ${a.lostOn}`),
     };
   });
@@ -116,6 +164,8 @@ try {
     timingMs: { index: indexMs, ...profile },
     inPlantedAction: `${rows.filter((r) => r.planted).length}/${rows.length}`,
     correctSemanticAction: `${rows.filter((r) => r.correct).length}/${rows.length}`,
+    sameFootage: `${rows.filter((r) => r.identity).length}/${rows.length}`,
+    identitySeconds: Number((identityMs.measured / 1000).toFixed(1)),
     cutCrossings: rows.filter((r) => r.crossesCut).length,
     durationInfeasible: rows.filter((r) => !r.feasible).length,
     reused: overlaps,

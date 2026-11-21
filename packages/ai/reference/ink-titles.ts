@@ -26,7 +26,7 @@ import {
 import {
   connectedScript,
   installedFaces,
-  letterCombinations,
+  fragmentMerges, letterCombinations,
   decodeCapitals,
   rankReadings,
   sharedFace,
@@ -260,6 +260,9 @@ export async function inkTitles(input: InkTitleInput): Promise<InkTitles> {
       .map((q) => q.content!.replace(/\s+/g, "").toLocaleUpperCase())
       .filter((q) => /^\p{Lu}+$/u.test(q));
     for (const content of new Set(fragments)) candidates.push({ content, origin: "fragment" });
+    // Partial readings of one word that correct each other (a short clear piece and a long one
+    // with a misread letter).
+    for (const content of fragmentMerges(fragments)) candidates.push({ content, origin: "combined" });
     if (decoded)
       for (const fragment of new Set(fragments))
         for (const content of letterCombinations(decoded.content, fragment))

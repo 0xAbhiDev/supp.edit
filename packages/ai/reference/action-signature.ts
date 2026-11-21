@@ -1,3 +1,4 @@
+import { cameraSignature, cameraSignatureSchema, cameraSimilarity } from "./camera-signature";
 /** Temporal action signature: how a stretch of footage moves, measured as geometry, never named.
  *
  * Two lifts, a pour and a stir, a walk and a vehicle pass can look alike in a single frame (same
@@ -38,6 +39,8 @@ export const actionSignatureSchema = z
     regions: z.array(z.number().min(0).max(1)).length(16),
     /** Global camera movement per second: pan in frame widths/heights, zoom as relative scale. */
     camera: z.object({ panX: z.number().finite(), panY: z.number().finite(), zoom: z.number().finite() }).strict(),
+    /** The camera's own path over the window (sub-pixel flow): curves, speed, kind, confidence. */
+    cameraPath: cameraSignatureSchema.optional(),
     /** Dominant repetition period of the movement (ms) and how periodic it is (0–1). */
     periodMs: z.number().positive().nullable(),
     periodicity: z.number().min(0).max(1),
@@ -286,14 +289,33 @@ function subjectTrajectory(people: readonly PersonSample[], start: number, end: 
 
 /** Signature of [startMs, endMs) from dense per-frame measurements (and person contours when
  * measured). Undefined when too few frames lie inside. */
+/** Whole-frame edit effects measured in a reference: colour pulses and person flashes. Their
+ * frames, and the frame returning from each, are the edit's movement, not the shot's: a colour
+ * pulse changes the whole frame at once (about 50 times a lift's per-frame change). Transition
+ * spans are left in: removing them from a short shot leaves too little to measure, and calm
+ * footage then agrees with it too easily (two false close matches offline). */
+export function effectSpans(
+  dna: {
+    colorPulses?: readonly { startMs: number; endMs: number }[];
+    personFlashes?: readonly { startMs: number; endMs: number }[];
+  },
+  frameMs = 34,
+) {
+  return [...(dna.colorPulses ?? []), ...(dna.personFlashes ?? [])]
+    .filter((s) => s.endMs > s.startMs)
+    .map((s) => ({ startMs: s.startMs, endMs: s.endMs + frameMs }));
+}
+
 export function actionSignature(
   frames: readonly VisualFrame[],
   people: readonly PersonSample[] | undefined,
   startMs: number,
   endMs: number,
   frameAspect: number,
+  /** Spans to leave out (a reference's edit effects, effectSpans). */
+  exclude: readonly { startMs: number; endMs: number }[] = [],
 ): ActionSignature | undefined {
-  const inside = frames.filter((f) => f.timeMs >= startMs && f.timeMs < endMs);
+  const inside = frames.filter((f) => f.timeMs >= startMs && f.timeMs < endMs && !exclude.some((s) => f.timeMs >= s.startMs && f.timeMs <= s.endMs));
   if (inside.length < 4) return undefined;
   // The first frame's change measures what came before the stretch (often a cut): leave it out.
   const moving = inside.slice(1);
@@ -313,11 +335,13 @@ export function actionSignature(
   const flows = moving.filter((f) => f.flow && f.flow.confidence >= 0.5);
   const fps = 1000 / Math.max(1, stepMs);
   // Flow is measured on a 96×54 grid in pixels per frame.
+  // Sub-pixel flow where measured: slow pans read as zero in whole pixels.
   const camera = {
-    panX: Number(((mean(flows.map((f) => f.flow!.panX)) / 96) * fps).toFixed(4)),
-    panY: Number(((mean(flows.map((f) => f.flow!.panY)) / 54) * fps).toFixed(4)),
-    zoom: Number((mean(flows.map((f) => f.flow!.expansion)) * fps).toFixed(4)),
+    panX: Number(((mean(flows.map((f) => f.flow!.fineX ?? f.flow!.panX)) / 96) * fps).toFixed(4)),
+    panY: Number(((mean(flows.map((f) => f.flow!.fineY ?? f.flow!.panY)) / 54) * fps).toFixed(4)),
+    zoom: Number((mean(flows.map((f) => f.flow!.fineZoom ?? f.flow!.expansion)) * fps).toFixed(4)),
   };
+  const cameraPath = cameraSignature(frames, startMs, endMs);
   let peakAt = 0;
   smooth.forEach((v, i) => {
     if (v > smooth[peakAt]) peakAt = i;
@@ -344,6 +368,7 @@ export function actionSignature(
     energy: energy.map((v) => Number(v.toFixed(3))),
     regions: rt > 0 ? regions.map((v) => Number((v / rt).toFixed(4))) : regions.map(() => 1 / 16),
     camera,
+    ...(cameraPath ? { cameraPath } : {}),
     ...periodOf(smooth, stepMs),
     peak: moving.length ? Math.max(0, Math.min(1, (moving[peakAt].timeMs - startMs) / Math.max(1, endMs - startMs))) : 0.5,
     peakedness: smoothMean > 1e-6 ? Number((smooth[peakAt] / smoothMean).toFixed(3)) : 0,
@@ -405,7 +430,11 @@ export function actionSimilarity(a: ActionSignature, b: ActionSignature): Action
   const regions = intersection(a.regions, b.regions);
   const moves = (s: ActionSignature) => Math.abs(s.camera.panX) + Math.abs(s.camera.panY) + Math.abs(s.camera.zoom) > 0.02;
   const camera =
-    moves(a) || moves(b) ? Math.exp(-(Math.abs(a.camera.panX - b.camera.panX) + Math.abs(a.camera.panY - b.camera.panY)) / 0.15 - Math.abs(a.camera.zoom - b.camera.zoom) / 0.1) : 1;
+    a.cameraPath && b.cameraPath
+      ? cameraSimilarity(a.cameraPath, b.cameraPath)
+      : moves(a) || moves(b)
+        ? Math.exp(-(Math.abs(a.camera.panX - b.camera.panX) + Math.abs(a.camera.panY - b.camera.panY)) / 0.15 - Math.abs(a.camera.zoom - b.camera.zoom) / 0.1)
+        : 1;
   const rhythm =
     a.periodMs && b.periodMs && a.periodicity >= 0.35 && b.periodicity >= 0.35
       ? Math.exp(-Math.abs(Math.log(a.periodMs / b.periodMs)) / 0.35)
@@ -454,7 +483,12 @@ export function actionSimilarity(a: ActionSignature, b: ActionSignature): Action
   // under 2% of the frame: a spoon, a stream, a distant car): which way things move locally and
   // when the shot is active decide; whole-frame and outline measures say little.
   const small = !!a.direction && a.direction.area < 0.02;
-  const w = small
+  // Camera-driven mode: the reference shot's movement is the camera's (a confident pan, tilt,
+  // push or handheld move with no tracked subject): the camera path decides.
+  const cameraDriven = !small && a.subject === null && !!a.cameraPath && a.cameraPath.confidence >= 0.5 && !["static", "uncertain"].includes(a.cameraPath.kind);
+  const w = cameraDriven
+    ? { trajectory: 0.1, regions: 0.15, rhythm: 0.05, camera: 0.5, subject: 0.1, direction: 0.05, envelope: 0.05 }
+    : small
     ? { trajectory: 0.1, regions: 0.2, rhythm: 0.05, camera: 0.05, subject: 0.1, direction: 0.45, envelope: 0.15 }
     : { trajectory: 0.15, regions: 0.35, rhythm: 0.075, camera: 0.075, subject: 0.35, direction: 0.12, envelope: 0.1 };
   const parts: [number, number][] = [

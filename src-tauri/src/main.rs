@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod dialogs;
+mod lifecycle;
 mod analysis;
 mod media;
 mod project;
@@ -37,9 +38,18 @@ fn main() {
         .manage(analysis::AnalysisJobs::default())
         .setup(|app| {
             std::fs::create_dir_all(app.path().app_data_dir()?)?;
+            lifecycle::init(app.path().app_data_dir()?);
+            lifecycle::install_panic_hook();
+            lifecycle::mark("launch", env!("CARGO_PKG_VERSION"));
             Ok(())
         })
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { .. } => lifecycle::mark("window close requested", window.label()),
+            tauri::WindowEvent::Destroyed => lifecycle::mark("window destroyed", window.label()),
+            _ => {}
+        })
         .invoke_handler(tauri::generate_handler![
+            lifecycle::lifecycle_mark,
             project::open_project,
             project::save_project,
             project::autosave_project,
@@ -68,6 +78,8 @@ fn main() {
             analysis::sample_color,
             analysis::reference_motion,
             analysis::reference_text,
+            analysis::source_text,
+            analysis::source_identity,
             analysis::reference_visual,
             analysis::person_mask,
             analysis::source_aperture,
@@ -77,6 +89,11 @@ fn main() {
             render::cancel_export,
             render::save_png
         ])
-        .run(tauri::generate_context!())
-        .expect("supp.edit could not start");
+        .build(tauri::generate_context!())
+        .expect("supp.edit could not start")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                lifecycle::mark("exit", "");
+            }
+        });
 }

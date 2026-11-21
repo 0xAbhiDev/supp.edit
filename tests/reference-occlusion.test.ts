@@ -9,7 +9,7 @@ import {
   lettingDepth,
   trimRows,
 } from "../packages/ai/reference/title-ink";
-import { letterCombinations } from "../packages/ai/reference/title-read";
+import { fragmentMerges, letterCombinations, pieceOf } from "../packages/ai/reference/title-read";
 import { smoothOutlines, traceBoundaries } from "../packages/ai/reference/title-outline";
 import { shapeFit, silhouette } from "../packages/ai/reference/subject-shape";
 import {
@@ -125,6 +125,25 @@ it("combines two readings letter by letter without inventing letters", () => {
   expect(words).toContain("HONORABLE");
   expect(words.every((w) => [...w].every((ch, i) => ch === "HONCRABLE"[i] || ch === "HOFORABLE"[i]))).toBe(true);
   expect(letterCombinations("AB", "ABC")).toEqual([]);
+});
+
+it("lets partial readings of one word correct each other, and nothing else", () => {
+  // OCR saw the start clearly, the end clearly, and the whole word with one letter misread.
+  expect(fragmentMerges(["HON", "RABLE", "HOFORABLE"])).toEqual(["HONORABLE"]);
+  // Agreeing readings add nothing; a piece that fits two places equally says nothing.
+  expect(fragmentMerges(["HONORABLE", "RABLE"])).toEqual([]);
+  expect(fragmentMerges(["ABAB", "ABABXAB"]).length).toBe(0);
+  // A piece too different from the word (more than one letter in three) is not a correction.
+  expect(fragmentMerges(["XYZ", "HOFORABLE"])).toEqual([]);
+  // Merges only propose: a misread piece proposes a misread word, and the stroke fit decides.
+  expect(fragmentMerges(["HOF", "HONORABLE"])).toEqual(["HOFORABLE"]);
+});
+
+it("recognises OCR pieces of a word, misread letters included, and nothing else", () => {
+  for (const piece of ["HON", "RABLE", "HOF", "ORABLE", "honorable"]) expect(pieceOf(piece, "HONORABLE")).toBe(true);
+  expect(pieceOf("WAX", "HONORABLE")).toBe(false);
+  expect(pieceOf("INCLINE", "HONORABLE")).toBe(false);
+  expect(pieceOf("H", "HONORABLE")).toBe(false);
 });
 
 it("traces outer contours and counters, and smooths their edges", () => {

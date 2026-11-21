@@ -34,8 +34,13 @@ pub async fn open_project(app: AppHandle) -> Result<Option<Opened>, String> {
         else {
             return Ok(None);
         };
-        let p = supp_project::read(&path).map_err(|e| e.to_string())?;
+        crate::lifecycle::mark("open: reading", &path.to_string_lossy());
+        let p = supp_project::read(&path).map_err(|e| {
+            crate::lifecycle::mark("open: failed", &e.to_string());
+            e.to_string()
+        })?;
         let missing = authorize(&app, &p)?;
+        crate::lifecycle::mark("open: read", &format!("{} assets, {} compositions, {} missing", p.assets.len(), p.compositions.len(), missing.len()));
         *app.state::<Session>()
             .project_path
             .lock()
@@ -82,7 +87,12 @@ pub async fn save_project(
         ) {
             return Err("Save projects with the .supp or .suppedit extension.".into());
         }
-        supp_project::save(&path, &project).map_err(|e| e.to_string())?;
+        crate::lifecycle::mark("save: writing", &path.to_string_lossy());
+        supp_project::save(&path, &project).map_err(|e| {
+            crate::lifecycle::mark("save: failed", &e.to_string());
+            e.to_string()
+        })?;
+        crate::lifecycle::mark("save: written", &std::fs::metadata(&path).map(|m| m.len().to_string()).unwrap_or_default());
         *state.project_path.lock().map_err(|e| e.to_string())? = Some(path.clone());
         Ok(Some(path.to_string_lossy().into()))
     })

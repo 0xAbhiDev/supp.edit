@@ -1,5 +1,5 @@
 import { type Asset, type Clip, type Project, fps } from "../project-schema";
-import { sourceUrl, waitEvent } from "../platform";
+import { lifecycleMark, sourceUrl, waitEvent } from "../platform";
 import { LruCache } from "./lru";
 import { sourceFrameAt, speedAt } from "../time-remap/model";
 import { seekMedia } from "./seek-media";
@@ -229,6 +229,7 @@ export class ResourcePool {
         Math.max(-0.95, Math.min(0.95, i / 32768 - 1)),
       );
       this.limiter.connect(this.context.destination);
+      lifecycleMark("audio ready", `${this.context.sampleRate} Hz, ${this.context.state}`);
     }
     if (!r.gain) {
       r.source = this.context.createMediaElementSource(el);

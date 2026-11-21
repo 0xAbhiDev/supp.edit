@@ -1,3 +1,334 @@
+## 4.3 selection fixes — 22 November 2026 (not committed; awaiting approval)
+
+**Builds:**
+- **Final:** `bin/supp-edit.exe` sha256 `218c7a9be48ee51f2139dddd040ed5a6e6aceac9cd8fe61d0d23b6e1a40a3587` (`test-results/final43c/build-identity.txt`).
+- **Earlier builds of this round:** `e97a5b37` (`final43/`) and `bbe22ce7` (`final43b/`), each binary kept in its folder.
+- **4.2 final:** `e3ebf2f9`, kept at `final42b/bin/`.
+
+**Tests:** TypeScript 300/300 (43 files), native 52/52, type check clean. One earlier full-suite run had 2 timing failures that passed alone and in two reruns.
+
+**What changed, and why** (`test-results/final43b/README.md`):
+
+| Change | Status | Evidence |
+| --- | --- | --- |
+| Planner keeps its own picks (`plannedRange`: within two frames at either end of a range; `sourceFramesPlayed`: a slowed shot consumes only the source frames it plays) | VERIFIED | Street holdout 3/6 → 4/6 (shot 6 plays its planned cyclist moment). Gym, street, formerly sealed and transition cases: 0 fallback placements (4 before). Gym export valid again. |
+| Person check on first runs: title tracing's unchecked subject shapes are cleared | VERIFIED | Fresh-title matrix (`final43c/`) equals the cached-title matrix (`final43b/`) on every graded result and label. |
+| Reference movement without colour pulses and person flashes (`effectSpans`) | VERIFIED as neutral | No pick changed offline or in the app. Gym shot 3's label rose from "missing" to "weak". |
+| Scoring candidates at the zoom the edit could apply | Tried, reverted | Favoured the smallest, most distant subject (beach squat). |
+| Transition spans left out of reference movement | Tried, reverted | Two new false close matches offline. |
+| Vision-model activity labels as evidence | Measured, not used | Favours deadlift for gym shot 1 (0.78 vs 0.51) and against it for shot 3 (0.22). |
+
+**Final-build Windows matrix** (`test-results/final43c/summary.md`, `binaries.txt`):
+- **How it ran:** every title traced fresh. All 19 runs and the take check launched `218c7a9b`.
+- **Every check passed:** each run played, reopened identically and exported a valid MP4.
+
+| Case | Final 4.3 (exact · right action · right clip) | 4.2 final | 4.1 |
+| --- | --- | --- | --- |
+| Cooking | 6/6 · 6/6 · 6/6 | 6/6 · 6/6 | 5/6 · 4/6 |
+| Travel / 26 min / multi-clip | 6/6, 9/9, 9/9 | same | same |
+| Remix multi / Remix 11 min / Smart 90 s | 9/9 · 8/9; 9/9 · 7/9; 6/6 · 6/6 | same | same |
+| Previous landscape holdout | 5/6 · 5/6 · 6/6 | same | 5/6 · 5/6 |
+| First vertical holdout | 4/6 · 4/6 · 5/6 | same | — |
+| Workshop | 5/6 · 4/6 · 5/6 | same | 5/6 · 4/6 |
+| **Street** | 5/6 · **4/6** · 6/6 | 5/6 · 3/6 | 5/6 · 5/6 |
+| Formerly sealed | 3/6 · 3/6 · 5/6 | 3/6 · 3/6 · 6/6 | 3/6 · 3/6 |
+| A/B assets (seen; regression check) | right moment 2/4 · right clip 3/4 · unavailable flagged 3/3 · 1 false confident | 2/4 · 2/4 · 3/3 · 0 | blind: 2/4 · 3/4 · 2/3 · 2 |
+| Transition-heavy | dissolve still kept as a cut | same | rebuilt |
+| Gym reel | 0 of 2 usable-deadlift shots; labels honest; export valid | 0 of 2 | 0 of 2 |
+
+**Other checks on the final build:**
+- **Audio** (`final43c/*/effect-tracks.json`): whoosh −27 / −26 ms, riser −0.3 dB (+6 ms), impacts and bass hit −0.7 to −2.2 dB, no clipping.
+- **Takes** (`final43c/takes-case5.log`): 66 takes, 0 mismatches after Apply, take, Undo, Redo and Save/Reopen; Restore exact.
+- **Titles:** HONORABLE present on the fresh-title run.
+
+**Honest-label correction to 4.2:**
+- The 4.2 final matrix traced titles fresh, and its person check was then incomplete: phantom subject shapes from title tracing reached the scorer.
+- With the check now applied on every run, three shots carry close-match labels on wrong picks:
+  - vertical holdout shot 3, 63%;
+  - formerly sealed shot 1, 89%;
+  - A/B shot 5, 53%.
+- Those are calibration failures the 4.2 labels hid by accident. Confidence on shots with nobody on either side rests on movement geometry alone, which cannot separate two moments of one clip.
+
+**Still failing:**
+- the gym deadlift (ranking, not retrieval);
+- different-footage matching in general (blind A/B 2/4);
+- the transition case's dissolve;
+- the three false close matches above;
+- Tiger and MOUTH titles;
+- same-footage repetitions (vertical holdout shot 2, 93%).
+
+The limits listed under 4.2 still apply.
+
+## Universal Reference-to-Edit 4.2 — 21 November 2026 (not committed; awaiting approval)
+
+### Builds and evidence
+- **Checkpoint:** still `1f06d94` plus uncommitted work. Nothing committed or pushed; `.claude/` stays uncommitted.
+- **Preserved 4.1:** source and binary `7e12e200…` in `test-results/preserved-4.1/` (patch, byte-exact files, untracked files, manifest).
+- **Frozen 4.2:** `18fac9fb…`, kept at `test-results/final42/frozen-bin/`. It ran the blind A/B and the frozen regressions (`test-results/final42/`).
+- **Final build:** `bin/supp-edit.exe` sha256 `e3ebf2f9af4450fcf4e18e37642f60fdc1b6b161ecdf1c7bebe322737060279f`, written 21 Nov 21:04:57 (`test-results/final42b/build-identity.txt`). It is the frozen build plus the person check, presence evidence, the fallback label and the title fragment merge.
+- **Run identity:** all 20 final-build runs launched that executable. `test-results/final42b/binaries.txt` matches each run's recorded path, size and mtime; the running app's image hash was checked as `E3EBF2F9…`.
+- **Tests on the final source:** TypeScript 295/295 (42 files), native 52/52, type check clean (`final42b/tests-ts.txt`, `tests-native.txt`).
+
+**Runs not used, and why:**
+- **Frozen R6** (previous landscape holdout): Windows entered Modern Standby at 17:08:44 during Deliver and woke at 20:01:32 (System log, Kernel-Power 506/507). Its first edit was graded from the preview (5/6). Not rerun on the frozen build; the final build's F13 ran the full flow.
+- **`final42b-superseded/`:** F1–F5 on an intermediate build (`da4d15c2…`), stopped when the title fix replaced it.
+- **A discarded title test:** a copy into `bin/` failed because an orphaned matrix instance held the executable open. That attempt launched the old build and failed. The orphaned driver and app were stopped before `e3ebf2f9` was installed.
+- **Blind A/B outputs:** `footage/different42/ab-41`, `ab-42` are untouched since grading at 16:41. The labels hash still matches (`f683d4fa…`).
+
+### 1. Generated whoosh and riser — VERIFIED (controlled; Windows app on the final build)
+Causes, fixes and the controlled 24-case before/after: `test-results/audio42/README.md`.
+
+| Effect | Controlled, before → after |
+| --- | --- |
+| Whoosh | timing 484 → 23 ms, level 5.0 → 0.5 dB |
+| Riser | timing 737 → 70 ms, level 14.5 → 0.6 dB |
+
+**On the final build:** decoded exports, measured on isolated tracks rebuilt from the saved project (within 0.01–0.02 dB of the export): `final42b/{s1-whoosh,reel55,s4-montage}/effect-tracks.json`.
+
+| Effect | Timing error | Level error |
+| --- | --- | --- |
+| Whoosh, letterbox lyrics | −27 ms | −0.3 dB |
+| Whoosh, 22-shot montage | −26 ms | −0.2 dB |
+| Riser, reel 55 | +6 ms | −0.3 dB |
+| Impacts and bass hit | start on the frame | −0.7 to −2.2 dB |
+
+- No clipping: sample peaks 0.20–0.35.
+- Save/Reopen identical.
+- **Not done:** I cannot listen. Excerpts for listening in context are in `audio42/listen/`.
+
+### 2. Alternative takes that repeat another shot — VERIFIED (Windows app, final build)
+22-shot montage, `final42b/takes-case5/` (`takes-case5.log`). There are 63 takes; the app's warnings equal an independent overlap computation from the saved file at every stage (0 mismatches each):
+
+| Stage | Warned |
+| --- | --- |
+| After Apply | 43 |
+| After choosing a take | 40 |
+| After Undo | 42 |
+| After Redo | 40 |
+| After Save → Exit → Reopen | 40 |
+
+- The driver asserts that the timeline after Undo equals the timeline after Apply. It does; 42 vs 43 is which take buttons are on screen.
+- **Separate moments of the same clip stay available without a warning:** all 63 takes come from clips other shots also play. 43 overlap a played interval (warned); 20 are separate moments (not warned), one of them within 300 ms of another shot.
+- **Deliberate reuse:** the chosen take was labelled "Repeats shot 21 (0.3 s of the same moment)" before the click. "Restore the first choice" after the reopen restored the plan exactly.
+- Unit tests cover full, partial, adjacent and separate overlap, and intentional reuse (`tests/take-reuse.test.ts`).
+
+### 3. Blind A/B on unseen different footage (frozen implementation) — FAILED to improve
+**The case:** one reference against four real raw clips that are different recordings (gym and beach). Acceptable intervals and unavailable shots were recorded in `footage/different42/labels.json` before any build ran (sealed 16:07:28). Each build ran once, and both were graded after both outputs were saved.
+
+**Result: identical on both builds** (`ab-41/grade.json`, `ab-42/grade.json`).
+
+| Measure | 4.1 | Frozen 4.2 |
+| --- | --- | --- |
+| Available shots, right clip | 3/4 | 3/4 |
+| Available shots, right moment | 2/4 | 2/4 |
+| Unavailable shots flagged "best available" | 2/3 | 2/3 |
+| False confident matches | 2 | 2 |
+| Under-confident correct pick | 1 | 1 |
+
+| Shot | Shows | Both builds picked | Shown | Verdict |
+| --- | --- | --- | --- | --- |
+| 1 | sea under cloud | forster-beach 11.00–12.60 s | close 88% | right |
+| 2 | incline press | bench 0.80–2.23 s | best 33% | right, under-confident |
+| 3 | flower (unavailable) | forster-beach | close 76% | **false confident** |
+| 4 | bent-over row (unavailable) | forster-beach | best 32% | appropriately flagged |
+| 5 | rocky coast | forster-beach 16.33–17.57 s | close 53% | right clip, wrong moment, **false confident** |
+| 6 | incline press, another repetition | deadlift | best 31% | wrong clip, flagged |
+| 7 | two people (unavailable) | squat | best 30% | appropriately flagged |
+
+**Same assets on the final build** (a regression check; these assets are no longer unseen): `final42b/different42.grade.json`.
+
+| Measure | Blind result | Final build |
+| --- | --- | --- |
+| Right moment | 2/4 | 2/4 |
+| Right clip | 3/4 | 2/4 |
+| Unavailable flagged | 2/3 | 3/3 |
+| False confident | 2 | 0 |
+
+- Shot 3 is now flagged (squat, best 30%).
+- Shot 5 moved to the wrong clip (squat, flagged best 30%).
+- Shot 4 still puts a beach under a gym row (flagged).
+
+**Cold vs warm**, frozen build, same footage and hardware: preview 139 s cold (reference 64 s; 48 s of footage analysed in 36 s) vs 50 s warm (3.4 s analysis, 28/28 stages reused) (`ab-42.log`, `warm-42.log`).
+
+### 4. Final-build Windows matrix (first one-click edit) — `test-results/final42b/summary.md`
+- **How it was graded:** from the preview's own explanation of each choice ("Explained each choice"), before any take or Inspector edit.
+- **Full flow:** every run then did Apply/Undo/Redo, an alternative take, Save → Exit → Reopen (identical), playback, an Inspector tone edit (not applicable in Creative Remix, which keeps no matched curve; also skipped in 4.1), and Deliver.
+- **Every check passed:** every run played, reopened identically and exported a valid MP4 (0 drift, 0 black frames, 0 decode errors).
+- **Columns:** exact moment / right action / right clip; denominators are reference shots.
+
+| Case | Final build | 4.1 | Frozen 4.2 | Change |
+| --- | --- | --- | --- | --- |
+| Cooking (different recordings) | **6/6 · 6/6 · 6/6** (6/6 close match) | 5/6 · 4/6 | 5/6 · 4/6 | **+2** |
+| Travel | 6/6 · 6/6 · 6/6 | 6/6 · 6/6 | 6/6 · 6/6 | = |
+| 26-minute | 9/9 · 9/9 · 9/9 | 9/9 · 9/9 | 9/9 · 9/9 | = |
+| Multi-clip | 9/9 · 9/9 · 9/9 | 9/9 · 9/9 | 9/9 · 9/9 | = |
+| Multi-clip, Remix | 9/9 · 8/9 · 9/9 | 9/9 · 8/9 | 9/9 · 8/9 | = |
+| 11 min, Remix | 9/9 · 7/9 · 9/9 | 9/9 · 7/9 | — | = |
+| 90 s, Smart Adaptation | 6/6 · 6/6 · 6/6 | 6/6 · 6/6 | — | = |
+| Previous landscape holdout | 5/6 · 5/6 · **6/6** | 5/6 · 5/6 | 5/6 · 5/6 | shot 6: was the wrong clip labelled "close 51%"; now the right clip, wrong moment, "best 30%" |
+| First vertical holdout | 4/6 · 4/6 · 5/6 | not run (pre-identity app 1/6) | 4/6 · 4/6 | = |
+| Workshop holdout | 5/6 · 4/6 · 5/6 | 5/6 · 4/6 | — | = (two wrong picks swap, both labelled close) |
+| Street holdout | 5/6 · **3/6** · 6/6 | 5/6 · 5/6 | — | **−2, regression** |
+| Formerly sealed holdout | 3/6 · 3/6 · **6/6** | 3/6 · 3/6 (5/6 clip) | 3/6 · 3/6 | clip +1 |
+| Transition-heavy | 9 boundaries detected as in 4.1; flash and whip rebuilt, **dissolve kept as a cut** | 9/9 kinds; dissolve, flash, whip rebuilt | same as 4.1 | **dissolve lost, regression** |
+| Gym reel, recreated/reference audio, 22-shot montage | no selection truth (gym: by inspection, below) | — | — | — |
+
+**Identity (same footage):**
+- Landscape holdout: 5 claims, all right.
+- Formerly sealed holdout: 3 claims, all right.
+- First vertical holdout: 5 claims, **1 wrong**. Shot 2 claims squat 4.67–6.00 s at 93%, but the planted moment is squat 10.96–12.95 s: another repetition. The frozen build makes the same claim; that holdout was not in the 4.1 app matrix.
+
+### Material regressions on the final build
+1. **Street holdout, right action 5/6 → 3/6** (`final42b/street-attribution.md`).
+   - **Not the person check:** the app found no outlines on this reference.
+   - **Shot 2:** the 4.2 still-shot rule (`STILL_LEVEL`/`bothStill`, added before the A/B for cooking) reorders the plan. Reverting only that rule offline restores 4.1's picks.
+   - **Shot 6:** lost to the planner's fallback. Its planned moment was adjacent to shot 2's and judged "no longer free".
+2. **Transition-heavy: the 6.2–6.8 s dissolve became a cut.**
+   - The person check rejected 25 of 25 phantom reference outlines. That flipped shot 5's near tie (margin 0.018) to forster-beach starting at the clip's first frame, so there is no lead-in for a dissolve.
+   - The app says so: "dissolve measured, but the incoming take has no clean footage before it; retained a cut".
+3. **A/B assets, right clip 3/4 → 2/4** (regression check, shot 5), while false confident matches went 2 → 0.
+
+### Cooking: the offline gain holds in the Windows app — VERIFIED (this case)
+`final42b/cooking.log`; frozen `final42/cooking.log`; offline `final42/cooking-diagnosis/`.
+
+| Shot | Frozen 4.2 / 4.1 pick | Final build | Changed by the person check? |
+| --- | --- | --- | --- |
+| 1 pour | cook-B 9.00–10.60 s (stir), best 41% | **cook-A 7.03–8.63 s (pour 6–9.5)**, close 76% | yes |
+| 4 finished dish | cook-B 15.43–17.23 s (no labelled action), **close 83%: false confident** | **cook-A 59.73–61.53 s (finished 58–62)**, close 100% | yes |
+| 5 stir | cook-B 62.03–63.53 s | cook-B 9.03–10.53 s | moved, both right |
+| 6 pour | cook-A 7.07–8.37 s, best 46% | cook-A 77.03–78.33 s, close 70% | moved, both right |
+
+**What changed:**
+- **The reference check:** 84 outlined frames, all 84 contradicted by the detector, 0 without detector data, 4 detector frames (`cooking/app-console.log`, "reference person check 84 84 0 4"). So every reference frame was *measured as empty*; none was *unavailable*.
+- **The raw clips:** no reference shot kept a person, so the clips were not segmented at all; the "person masks" stage is absent. Neither measured-empty nor unavailable applies to them. On the frozen build they were segmented: phantom outlines on 920/920 and 780/780 frames.
+- **The scores:** the phantom "subject" movement term (0.51–0.72) and pose term disappear from the explanations.
+- **Attribution:** the only selection change between the frozen and final builds that applies to this case is the person check. Presence evidence is inert, because nobody is on either side. Offline, unchecked outlines reproduce the frozen misses, and checked outlines give 6/6.
+
+### Gym reel: usable deadlift footage still missed — FAILED (2 of 2)
+Inspection: `final42/gym-inspection/README.md`. Candidates from the final code with the app's own action peaks: `final42/gym-inspection/offline-final-build.txt`.
+
+| Shot | Usable raw interval | App picked (final build) | Shown | Where the right moment was lost |
+| --- | --- | --- | --- | --- |
+| 1 (0–2.97 s): sets up over the bar | deadlift.webm 3.63–6.60 s: bent over the bar, then the pull, inside the clip's one 2.97 s-capable cut-safe stretch (1.57–7.40 s). The clip's own opening set-up (0–1.5 s) is split off by its label animation. | incline.webm 2.67–5.63 s (incline press) | best available 34% | **Ranked below incline press.** Retrieved (#3, 0.634 vs 0.674) and better on action (0.63 vs 0.58), but lost on framing/subject size (0.76 vs 0.94) and movement level (0.52 vs 0.78). Not offered among the app's three alternatives. |
+| 3 (3.97–9.03 s): blur transition into the lift | deadlift.webm 1.57–6.63 s (the lift and lockout, same stretch) | squat.webm 5.40–10.47 s (beach kettlebell squat) | "best available, confidence low", fallback matcher | **Ranked below the beach squat (#10, 0.435 vs 0.476), then replaced by the fallback.** Look favours the deadlift (0.84 vs 0.70); framing (0.37 vs 0.60) and movement (0.28 vs 0.34) do not, and the reference's movement is dominated by the blur transition. Offline, the plan's own pick is squat 0.04–5.10 s, which starts one frame before the planner's range (scene start 36 ms → frame 2), so the fallback placed squat 5.40 s. Not lost in trimming: trimmed deadlift windows were scored. |
+
+Displayed confidence is honest on all four shots (no close match). Selection is wrong on both shots where usable footage exists.
+
+### Titles — PARTIAL
+**HONORABLE — VERIFIED** (`final42b-titles/README.md`; matrix run `final42b/gym/`):
+- Saved edit: a text layer "HONORABLE", Georgia, #9b0307, timeline 4.967–8.133 s.
+- Decoded export against the reference: the red lettering is on screen at frames 149–243 vs 148–243 (one frame later). Its line spans rows 219–308 vs 218–309 (of 640) and columns 16–341 vs 14–346 (of 360).
+- The subject passes in front through the "Subject flash · squat" layer, which has an editable person contour on the Foreground people track. The output's body covers less of the word (gaps up to 24 px vs 61 px), because it is different footage.
+- Frames: `final42b/gym/honorable-matrix-compare.png`.
+- A regression since 18 November; restored by `fragmentMerges` and the agreeing-pieces ink exception.
+
+**Tiger — FAILED:** traced, then set aside by the size check against an unrelated uncertain reading of the Instagram handle ("6NOTKlN", 4.9× its size). Kept as is: that check fixed the 4.1 holdout's oversized brown title.
+
+**MOUTH — FAILED, a reading defect, not timing:**
+- The reference shows it for **8 frames, 139–146 (4.633–4.900 s)**. It alternates style with the colour pulses (blue on yellow, pink-white, tilted). Frame 138 still shows "ITS"; frame 147 is clear.
+- The analysis split it into separate short runs ("MOUTL" 4.70–4.77 s, "MOOV" 4.83–4.90 s) and withheld each.
+- The output shows no MOUTH on any frame (`final42b/gym/mouth-reference-f138-147.png`, `mouth-output-f138-147.png`). My earlier "two frames" was wrong.
+
+### Person check — VERIFIED (scope: the references and clips in this matrix)
+- **What it did:** rejected phantom reference outlines on cooking (84/84), the transition-heavy reference (25/25) and the gym end card (38 of 121). It kept every outline on gym clips (0 contradicted).
+- **What it changed:** fixed cooking. Removed two false confident labels on the A/B assets. Kept the gym end card at "missing", through presence evidence.
+- **What it cost:** caused the transition-heavy dissolve regression.
+
+### Remaining limits
+- Same-footage misses near titles and transitions; short clips and repeated actions (vertical holdout shot 2: a false same-footage claim on another repetition).
+- Residual colour banding (4.1: steps −31%, tone shift about 11 codes; unchanged).
+- The 26-minute reopen incident is still unexplained. The observed stress results are the prior 20/20 reopen cycles and 5/5 cycles with export.
+- Not verified: pixel accuracy of copied framing, multilingual burned-in text, references longer than 90 s, behaviour outside Windows.
+- New in this phase:
+  - the still-shot rule's side effect (street);
+  - plan picks lost to the fallback on one-frame or adjacency bookkeeping (gym shot 3, street shot 6);
+  - dissolves lost when a pick starts at a clip's first frame;
+  - the Tiger size veto;
+  - MOUTH split by colour pulses;
+  - a gym row still gets a beach as "best available".
+
+## Universal Reference-to-Edit 4.1 — 20–21 November 2026 (not committed; awaiting approval)
+
+**Checkpoint and build:**
+- Starting checkpoint `1f06d94` is the only commit of this phase. Nothing since is committed or pushed.
+- Final build: `bin/supp-edit.exe` sha256 `7e12e200…`, built 21 Nov 21:07 from the working tree (`test-results/final41/build-identity.txt`).
+- Evidence: `test-results/final41/`.
+
+**Product answer:** "edit the raw footage like the reference, one click".
+- **VERIFIED for structure** (cuts, timing, transitions, titles, grade, framing, audio) on every case.
+- **VERIFIED for which footage** when the reference was cut from the supplied raw footage: same-footage identity is new in 4.1.
+- **PARTIAL** when the raw footage only resembles the reference: shots are matched by likeness and labelled close match or best available.
+
+### Final Windows matrix (identity build, one click unless noted) — VERIFIED
+Every run was Open → Recreate → Preview → Apply → Undo/Redo → alternative take → Save → Exit → Reopen → Playback → Inspector edit → Deliver. Every export was validated; 0 black frames.
+
+| Run | Case | Picks (planted / right action) | Cut crossings | Preview (final / baseline) | Export |
+| --- | --- | --- | --- | --- | --- |
+| M1 | real gym reel (user's) | not graded; 0 shots claimed same footage (correct: raw is not its source); 0/4 close match (labelled best available) | — | 22 s / 40 s | ok |
+| M2 | recreated audio | — | — | 15 s | ok; effects audible (see SFX) |
+| M3 | reference audio, letterbox lyrics | — | — | 68 s | ok (reference silence reproduced) |
+| M4 | mixed aspect, 22-shot vertical montage | — | — | 103 s | ok (failed on the prior build: harness false alarm, fixed) |
+| M5 | travel | 6/6 / 6/6 | 0 | 22 s / 25 s | ok |
+| M6 | cooking | 5/6 / **4/6** | 0 | 32 s / 29 s | ok |
+| M7 | 26-minute footage | 9/9 / 9/9 | 0 | 138 s / 247 s | ok |
+| M8 | multi-clip 7 min | 9/9 / 9/9 | 0 | 76 s / 49 s | ok |
+| M9 (rerun) | multi-clip, Creative Remix | 9/9 / 8/9 (baseline 7/9) | 0 | — | ok |
+| M10 (rerun) | 11 min, Creative Remix | 9/9 / 7/9 (baseline 8/9) | 0 | — | ok |
+
+M9 and M10 were rerun once: the first attempts broke when Windows entered Modern Standby (21:48 and 22:27, 20 Nov; System log Kernel-Power), not from an app fault. Both attempts are kept in `final41/sleep-interrupted/`.
+| M11 | 90 s, Smart Adaptation | 6/6 / 6/6 | 0 | 69 s | ok |
+| M12 | previous landscape holdout + burned-in text | **5/6 / 5/6 (baseline 0/6)** | 0 | 94 s / 50 s | ok |
+| M13 | transition-heavy (9 boundaries) | 9/9 kinds; dissolve, flash, whip rebuilt | — | 71 s | ok (reference has no audio) |
+| M14 | workshop holdout | 5/6 / 4/6 | 0 | 28 s | ok |
+| M15 | street holdout | 5/6 / 5/6 | 0 | 27 s | ok |
+| S1 | **sealed holdout, single run** | **3/6 / 3/6** | 0 | 410 s (cold) | ok |
+
+Baseline = the same matrix on the build before identity (`final41/baseline/`). Every graded case equals its baseline except M12 (0/6 → 5/6).
+
+### Sealed holdout (S1) — first and only run, reported as is
+- **The case:** square 1:1, desaturated high-contrast grade, ±10% speed, zoomed crops. Raw footage: a flower close-up, a two-person clip, squat, deadlift and a beach. Edit: a slide (whip-like) transition, a flash, a dissolve and a top title. Seed 1795182991; truth hashed before the run.
+- **Result:** exact moment 3/6, right clip 5/6, 0 cut crossings, valid export.
+- **Identity:** claimed 3 shots (0.99–1.00); all 3 correct.
+- **Misses:**
+  - Shot 1 (flower, right clip, other moment): labelled best available, 48%.
+  - Shot 2 (two-person clip, starts after the slide, under the title): wrong clip, labelled "No close source match", 34%.
+  - Shot 5 (squat, another repetition): labelled close match at 51%, so this one was over-confident.
+
+### The eight 4.1 failure modes
+1. **Burned-in source text — VERIFIED.** RawTextRegion via local OCR on candidate windows; equivalent / unrelated / absent / uncertain / unmeasured. Equivalent words suppress the duplicate title (M12: "BENCH PRESS" not re-added). Unrelated text costs ≤ 0.08; the shot reports "Source contains baked-in text."
+2. **Stills and camera-only shots — VERIFIED offline, PARTIAL in app.** Sub-pixel camera path (CameraSignature) and an 8×8 edge layout. Offline workshop 4→5/6 and street 4→5/6 at the start of the phase; in the app both equal baseline. Same-footage identity now settles stills that are the same footage.
+3. **Cooking / small objects — PARTIAL.** Offline 6/6; app 4/6 (unchanged; the app's person outlines differ from the offline inventory). Relational small-object motion: PLANNED.
+4. **Effect levels — VERIFIED audible, PARTIAL level.**
+   - Correction: the original "inaudible bass hit" was an error in my earlier measurement; the pre-4.1 export already had it at +2.3 dB over the music.
+   - The 4.1 power-subtraction rule briefly made effects worse; the audibility rule keeps every effect ≥ min(target, music − 3 dB).
+   - Measured from exports at 16 kHz with the music rebuilt from its source: bass hit +2.3 dB, impact −2.9 / +5.8 dB, riser −7.6 dB relative to the music where each plays; no clipping.
+   - **FAILED:** a whoosh plays its loudest moment about 0.5 s before its event and is masked there (−11.3 dB); the riser stands about 20 dB under the reference's relation.
+5. **Whip — VERIFIED.** Detected (fixture 9/9 kinds, no false whips on 15 references) and rebuilt as an editable motion transition with direction, span and strength (M13).
+6. **Tone banding — PARTIAL.** Curve slope cap 4: visible steps −31% on the steepest shot (10,667 → 7,339 jumps), but tone shifts about 11 codes there. Half-float targets: no measurable change (the curve runs in one pass on 8-bit input).
+7. **26-minute reopen incident — not reproduced; cause unknown.**
+   - Instrumented lifecycle log (host and page stages, panics).
+   - 20/20 Save → Close → Launch → Open → Verify cycles and 5/5 cycles with a Deliver export: every one exited 0 and restored every layer, curve and title exactly.
+   - A separate hang on the prior build (window ignored close after an export; minidump kept) was not reproduced on the instrumented build.
+8. **Previous holdout wrong picks — VERIFIED analysis, VERIFIED fix for same footage.**
+   - Analysis: `previous-holdout-analysis.md`.
+   - Calibration: confidence now rests on measured agreement (offline AUC 0.50 → 0.69; "high" right 35/39 vs 14/19).
+   - Each shot is labelled close match or best available candidate.
+   - With identity: in app 0/6 → 5/6.
+
+### New in 4.1: same-footage identity — VERIFIED
+- **Mechanism:** each reference shot's own frames are found in the raw clips regardless of regrade, crop/zoom or ±speed. A movement test separates the very frames from another repetition or a frozen copy. A detected cut is crossed only when continuity is proven.
+- **Framing:** the matched region also gives the reference's exact framing.
+- **Offline, all graded cases:** holdouts 0→5/6 and 1→4/6; every other case equal; 0 cut crossings.
+- **In app:** M12 0→5/6, sealed 3/3 identity claims correct, the real gym reel 0 false claims.
+- **Cost:** 17–80 s cold, cached afterwards.
+
+### Known gaps (in order of user impact)
+- Look-alike raw footage that is not the same frames still relies on likeness (sealed shots 1, 5; cooking 4/6).
+- Whoosh placement; riser level.
+- Banding is reduced but not removed.
+- The reopen incident is unexplained.
+- An alternative take can duplicate a moment another shot uses.
+
 ## Universal reference-to-edit engine — 19–20 November 2026 (not committed; awaiting approval)
 
 Start of phase: `690a96e` (Long Footage 2.1). Evidence: `test-results/footage/matrix-ue/` (per-run records `rec-*.json`, audits, grammar examples), each run folder (screenshots, `explanations.json`, `validation.json`), `test-results/audio-ue/`, `test-results/transitions-ue/`, `test-results/footage/person-masks-ue/`.

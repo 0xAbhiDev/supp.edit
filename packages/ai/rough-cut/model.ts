@@ -28,6 +28,22 @@ export const briefSchema = z
   })
   .strict();
 export type EditBrief = z.infer<typeof briefSchema>;
+const curvePoints = z.array(z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)])).min(2).max(8);
+/** One source moment a reference shot can play. */
+export const takeSchema = z
+  .object({
+    sourceId: z.string().min(1).max(128),
+    inMs: z.number().finite().nonnegative().max(2_000_000_000),
+    outMs: z.number().finite().nonnegative().max(2_000_000_000),
+    speed: z.number().finite().min(0.05).max(4),
+    score: z.number().finite().min(-10).max(10),
+    lostOn: z.string().max(400),
+    curves: z.object({ red: curvePoints, green: curvePoints, blue: curvePoints }).strict().optional(),
+    /** The take has no measured tone: choosing it removes the fitted curve (a neutral look). */
+    neutral: z.boolean().optional(),
+  })
+  .strict()
+  .refine((t) => t.outMs >= t.inMs, "A take ends after it starts");
 export const aiEditMetadataSchema = z
   .object({
     plannerVersion: z.enum(["rough-cut-1", "reference-edit-1"]),
@@ -100,6 +116,21 @@ export const aiEditMetadataSchema = z
     /** Which audio the plan used and why. */
     audioMode: z.enum(["music", "reference", "recreate"]).optional(),
     audioNotes: z.array(z.string().max(400)).max(64).optional(),
+    /** Reference recreation: each shot's clip, the moment first chosen for it and its alternative
+     * takes (source, interval, speed, and the tone curve fitted to that footage, or `neutral` when
+     * it has none), so a reopened recreation can still swap a take and warn about reuse. */
+    takes: z
+      .array(
+        z
+          .object({
+            clipId: z.string().min(1).max(128),
+            original: takeSchema,
+            alternatives: z.array(takeSchema).max(4),
+          })
+          .strict(),
+      )
+      .max(500)
+      .optional(),
   })
   .strict();
 export type AIEditMetadata = z.infer<typeof aiEditMetadataSchema>;

@@ -24,7 +24,8 @@ const track = [...new Set(c.layers.filter((l) => l.kind === "media" && p.assets.
 const shots = c.layers.filter((l) => l.trackId === track && l.kind === "media").sort((a, b) => a.start - b.start);
 const explained = logFile
   ? JSON.parse(fs.readFileSync(logFile, "utf8").split("\n").find((line) => line.includes("Explained each choice")).replace(/^.*?Explained each choice /, "")).rows.map((t) => {
-      const [, a, b, file, inS, outS] = t.match(/^\d+ ([\d.]+)–([\d.]+) s .*? (\S+\.mp4) @ ([\d.]+)–([\d.]+) s/);
+      // Any media file name (.mp4, .webm, .mov …) followed by its source range.
+      const [, a, b, file, inS, outS] = t.match(/^\d+ ([\d.]+)–([\d.]+) s .*? (\S+\.(?:mp4|webm|mov|mkv|m4v|avi)) @ ([\d.]+)–([\d.]+) s/);
       // Builds before the panel showed retimed source ranges reported in + timeline length.
       const slowed = t.match(/slowed to (\d+)%/);
       const span = +outS - +inS;

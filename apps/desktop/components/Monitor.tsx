@@ -16,7 +16,7 @@ import { useEditor, editorProject } from "../../../packages/editor-state";
 import { fps, duration, timecode } from "../../../packages/project-schema";
 import { Compositor } from "../../../packages/engine/compositor";
 import { clock, useClock } from "../../../packages/engine/clock";
-import { sourceUrl } from "../../../packages/platform";
+import { lifecycleMark, sourceUrl } from "../../../packages/platform";
 import {
   animated,
   setTransform,
@@ -119,6 +119,8 @@ export function Monitor({
           )
             dropped += Math.max(0, s.frame - lastFrame - 1);
           lastFrame = s.playing ? s.frame : null;
+          if (rendered === 0)
+            lifecycleMark("renderer first frame", `${renderer.backend}${error ? `: ${error}` : ""}`);
           rendered++;
           if (
             !disposed &&

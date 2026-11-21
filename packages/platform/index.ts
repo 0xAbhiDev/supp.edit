@@ -364,9 +364,25 @@ export async function saveImage(blob: Blob, name: string) {
   if (desktop) await invoke("save_png", await blob.arrayBuffer());
   else download(blob, name);
 }
+/** One line in the desktop lifecycle log (launch → open → hydrate → render → save → exit), so an
+ * unexpected exit leaves the last stage reached on disk. Never throws; no-op in the browser. */
+export function lifecycleMark(stage: string, detail = "") {
+  if (desktop) void invoke("lifecycle_mark", { stage, detail }).catch(() => undefined);
+}
 export async function openNative() {
   const result = await invoke<Recovery | null>("open_project");
-  if (result) result.project = parseProject(result.project);
+  if (result) {
+    try {
+      result.project = parseProject(result.project);
+    } catch (e) {
+      lifecycleMark("project parse failed", e instanceof Error ? e.message : String(e));
+      throw e;
+    }
+    lifecycleMark(
+      "project parsed",
+      `${result.project.assets.length} assets, ${result.project.compositions.length} compositions, ${result.missing.length} offline`,
+    );
+  }
   return result;
 }
 let recoveryWrites: Promise<unknown> = Promise.resolve();

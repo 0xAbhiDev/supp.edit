@@ -9,7 +9,10 @@ import { visualFrameSchema } from "./visual";
 export async function referenceVisual(asset: Asset, job: JobContext) {
   // Keyed by file identity (path, size, modified time), not by project asset.
   // v6: local motion per frame (centroid, area, per-cell flow).
-  const key = "reference-visual-v6:" + asset.fingerprint;
+  // v7: sub-pixel camera flow (fineX/fineY/fineZoom) and an 8×8 edge layout twice a second.
+  // v8: the sub-pixel step is Lucas–Kanade on box-smoothed frames (v7 values carried a bias on
+  // still frames).
+  const key = "reference-visual-v8:" + asset.fingerprint;
   // Whole clips: 30 frames a second up to 20 minutes, 15 beyond (native dense_rate).
   const schema = z.array(visualFrameSchema).max(120001);
   const cached = schema.safeParse(await readDerived(key));

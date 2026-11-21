@@ -1,3 +1,6 @@
+import { classifySourceText, unrelatedTextPenalty, type ReferenceText } from "./source-text";
+import { IDENTITY_MIN_MOTION, IDENTITY_MIN_SCORE, type IdentityMatch } from "./identity";
+import { reuseOf } from "./take-reuse";
 /** Long-footage selection. All supplied raw clips are one searchable pool, indexed once from the
  * cached analysis (dense 33 ms frame measurements, quality every 500 ms, scenes, vision
  * embeddings, person contours), so the reference can be rematched without decoding again.
@@ -72,13 +75,16 @@ const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.l
 
 /** Version of the per-clip index (segments, frame cuts, candidates). Part of its cache key with
  * the file identity, the vision model and whether person contours were measured. */
-export const INDEX_VERSION = "cut-safe-segments-4";
+// 6: rebuilt from reference-visual-v8 (the index does not otherwise see the visual version).
+/** Pose agreement when one side shows a person and the other was measured with nobody. */
+export const PRESENCE_MISMATCH = 0.2;
+export const INDEX_VERSION = "cut-safe-segments-6";
 export interface SourceIndex extends FootageIndex {
   version: string;
 }
 export function sourceIndexKey(source: SourceEvidence) {
   const model = source.analysis.vision?.modelVersion ?? "no-vision";
-  return `footage-index-${INDEX_VERSION}:${model}:${source.people?.length ? "people" : "no-people"}:${source.visual?.length ? "dense" : "sparse"}:${source.asset.fingerprint}`;
+  return `footage-index-${INDEX_VERSION}:${model}:${(source.outlines ?? source.people)?.length ? "people" : "no-people"}:${source.visual?.length ? "dense" : "sparse"}:${source.asset.fingerprint}`;
 }
 /** The persistent part of the index for one clip; reusable in any project holding the same file. */
 export function indexSource(source: SourceEvidence): SourceIndex {
@@ -141,7 +147,9 @@ function indexClips(sources: SourceEvidence[]): FootageIndex {
     let segments: { startMs: number; endMs: number; cutBefore: boolean; cutAfter: boolean }[];
     if (dense) {
       // Frame-accurate second stage: cuts between similar material the scene pass missed.
-      const cuts = frameCuts(visual, source.people ?? []);
+      // Cut evidence reads the segmentation's own outlines: a jump of any outlined region is a
+      // picture change, person or not.
+      const cuts = frameCuts(visual, source.outlines ?? source.people ?? []);
       for (const c of cuts) allCuts.push({ sourceId: id, timeMs: c.timeMs, evidence: c.evidence });
       // Two frames clear of every cut at the dense rate actually measured (30 fps, or 15 past 20 min).
       const step = median(visual.slice(1, 200).map((f, k) => f.timeMs - visual[k].timeMs));
@@ -284,6 +292,10 @@ export interface ShotRequirement {
   peakFraction: number;
   peakSource: "audio event" | "reference motion" | "none";
   role?: ShotRole;
+  /** Reference titles on screen during the shot (reference frame fractions). */
+  texts?: ReferenceText[];
+  /** The shot's own frames found in a raw clip (same footage): that moment plays it. */
+  identity?: IdentityMatch;
 }
 
 /** What a reference shot does in the edit, from its measured look and movement. */
@@ -337,11 +349,20 @@ export interface ShotChoice {
   /** Plain reasons: what made it win, feasibility, peak alignment. */
   why: string[];
   confidence: "high" | "medium" | "low";
-  /** Calibrated 0–1 confidence: margin to the best distinct alternative, semantic agreement,
-   * quality and duration fit — not the absolute score. */
+  /** "close match": the evidence says this moment plays the shot; "best available": nothing in
+   * the footage clearly does, and this is the strongest candidate. */
+  label: "close match" | "best available";
+  /** The shot's own frames were found in this clip (same footage). */
+  identity?: IdentityMatch;
+  /** Calibrated 0–1 confidence: measured agreement on what the shot does (movement geometry and
+   * pose), quality and duration fit — not the absolute score or the margin. */
   certainty: number;
   /** Score lead over the best alternative from another stretch. */
   margin: number;
+  /** Score lead over the best non-overlapping moment anywhere, the same stretch included. */
+  rival: number;
+  /** Agreement on what the shot does (movement geometry and pose), null where unmeasured. */
+  semantic: number | null;
   /** How well the source footage covers this shot. */
   coverage: Coverage;
   /** Movement phases the window holds when it was cut on phase boundaries. */
@@ -355,6 +376,8 @@ export interface ShotChoice {
 /** Close Match follows the stated priority: action (pose and movement geometry), framing,
  * movement level, peak alignment, composition, tone, quality; look (a frame embedding) counts
  * less, since similar rooms look alike whatever happens in them. Remix leans on movement. */
+/** Movement level under which a shot is a still picture (shotRole calls it a rest/hold). */
+export const STILL_LEVEL = 0.0003;
 const weights: Record<RecreationMode, Record<string, number>> = {
   "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 },
   "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6, scene: 1 },
@@ -446,7 +469,13 @@ export function scoreCandidate(
   // Movement level on the same scale on both sides: dense per-frame change when both measured it.
   const refLevel = req.shot.action?.level,
     dense = refLevel !== undefined && (source.visual?.length ?? 0) >= 8;
-  const motionFit = dense
+  // A still reference shot: below the still level on both sides, how still is noise (a resting
+  // hand's drift against a plate that never moves), not evidence of which still it is; what the
+  // picture shows decides (cooking case, shot 4).
+  const bothStill = dense && refLevel! < STILL_LEVEL && c.motion < STILL_LEVEL;
+  const motionFit = bothStill
+    ? 1
+    : dense
     ? Math.exp(-Math.abs(Math.log((0.0015 + c.motion) / (0.0015 + refLevel!))))
     : req.shot.motion !== null
       ? Math.exp(-Math.abs(Math.log((0.008 + c.motion) / (0.008 + req.shot.motion))))
@@ -475,7 +504,16 @@ export function scoreCandidate(
     // Pose trajectory: the outline's sequence across the shot, aligned by time warping.
     const path = req.shot.subjectPath && source.people?.length ? pathFit(req.shot.subjectPath.map((p) => p ?? undefined), shapePath(source.people, inMs, outMs, aspect)) : undefined;
     pose = still !== null && path !== undefined ? (still + path) / 2 : (still ?? path ?? null);
+    // Whether anyone is there is evidence too: a shot of a person played by footage measured with
+    // nobody in it, or a shot measured with nobody played by a person, does not do what the shot
+    // does. With nobody on either side there is no pose to compare (left unscored).
+    if (pose === null) {
+      // Segmented here (raw samples in the window) with no confirmed outline: nobody there.
+      const sampled = (source.outlines ?? source.people ?? []).filter((s) => s.timeMs >= inMs && s.timeMs < outMs).length >= 2;
+      if ((req.shot.subjectShape && sampled && !shape) || (req.shot.subjectAbsent && shape)) pose = PRESENCE_MISMATCH;
+    }
   }
+
   // Low detail is a defect only where the reference has detail: a smooth sky, wall or plate is
   // the content when the reference shot is itself far smoother than the rest of its video, or
   // about as detailed as this window.
@@ -530,6 +568,14 @@ export function scoreCandidate(
   if (c.frozen) score *= moving ? 0.3 : (req.shot.camera?.freeze ?? 0) >= 0.5 ? 1 : 0.6;
   if (quality < 0.35) score *= 0.3;
   score *= 1 - 0.6 * (1 - speed);
+  // Clean imagery is preferred over persistent unrelated text burned into the footage; text that
+  // shows the reference's own words is wanted, and unmeasured windows are not judged.
+  const sourceText = classifySourceText(source.text, inMs, outMs, req.texts ?? []);
+  if (sourceText.unrelated.length) {
+    const penalty = unrelatedTextPenalty(sourceText.unrelated, req.texts ?? []);
+    score = Math.max(0, score - penalty);
+    match.sourceText = Number((1 - penalty / 0.08).toFixed(2));
+  }
   for (const k of Object.keys(match)) match[k] = Number(match[k].toFixed(2));
   // Display-only detail (no weight): the parts of the movement match and the duration fit.
   if (action) {
@@ -638,12 +684,71 @@ export function selectShots(
     profile.stageB = Math.round(performance.now() - t);
     profile.rerankedPerShot = Math.round(mean(shortlist.map((s) => s.length)));
   }
+  // Same footage: a shot whose own frames were found in a clip is cut from that exact moment. Its
+  // option is locked for the sequence plan (other shots plan around it); the ranked list stays
+  // for the alternatives a reviewer can choose.
+  const locked = withRoles.map((req) => {
+    const id = req.identity;
+    const source = id && byId.get(id.sourceId);
+    if (!id || !source) return undefined;
+    const want = { inMs: id.inMs, outMs: id.inMs + req.durationMs };
+    // The cut-safe stretch holding the moment: the one the window lies in, else the one holding the
+    // middle probe's match, with the window moved inside it. Footage that looks and moves like the
+    // reference's (another repetition of the same take) passes the identity test too, so a match
+    // decides which stretch and where — a detected cut is crossed only when the reference itself
+    // shows continuous footage through it: probes on both sides match frames that move the way the
+    // reference moves (a real edit into a held or different picture fails that).
+    const whole = (h: { overlap: number } | undefined) => !!h && h.overlap >= req.durationMs - 1;
+    const proven = (t: number) =>
+      id.points.some((p) => p.sourceMs < t && p.score >= 0.9 && (p.motion ?? 0) >= IDENTITY_MIN_MOTION) &&
+      id.points.some((p) => p.sourceMs > t && p.score >= 0.9 && (p.motion ?? 0) >= IDENTITY_MIN_MOTION);
+    const cutsIn = (w: { inMs: number; outMs: number }) => index.cuts.filter((c) => c.sourceId === id.sourceId && c.timeMs > w.inMs && c.timeMs < w.outMs);
+    // A cut beyond the outermost probes, near a window edge, cannot be vouched for: the window moves
+    // off it (by at most 15% of the shot) rather than across it.
+    const first = Math.min(...id.points.map((p) => p.sourceMs)),
+      last = Math.max(...id.points.map((p) => p.sourceMs));
+    for (const c of cutsIn(want)) {
+      if (c.timeMs < first && c.timeMs - want.inMs <= 0.15 * req.durationMs) Object.assign(want, { inMs: c.timeMs + 70, outMs: c.timeMs + 70 + req.durationMs });
+      else if (c.timeMs > last && want.outMs - c.timeMs <= 0.15 * req.durationMs) Object.assign(want, { inMs: c.timeMs - 70 - req.durationMs, outMs: c.timeMs - 70 });
+    }
+    const holder = index.candidates
+      .filter((c) => c.sourceId === id.sourceId)
+      .map((c) => ({ c, overlap: Math.min(c.sceneEndMs, want.outMs) - Math.max(c.sceneStartMs, want.inMs) }))
+      .sort((a, b) => b.overlap - a.overlap)[0];
+    const inside = cutsIn(want);
+    const continuous = !whole(holder) && inside.every((c) => proven(c.timeMs));
+    const home = index.candidates
+      .filter((c) => c.sourceId === id.sourceId && c.sceneStartMs <= id.anchorMs && id.anchorMs <= c.sceneEndMs && c.sceneEndMs - c.sceneStartMs >= 0.85 * req.durationMs)
+      .sort((a, b) => Math.abs(a.peakMs - id.anchorMs) - Math.abs(b.peakMs - id.anchorMs))[0];
+    const base: FootageCandidate | undefined = whole(holder)
+      ? holder!.c
+      : continuous
+        ? { ...(holder?.c ?? home ?? { kind: "action" as const, motion: 0, quality: 0.8, qualityIssues: [], luma: null, frozen: false, peakMs: (want.inMs + want.outMs) / 2 }), sourceId: id.sourceId, startMs: want.inMs, endMs: want.outMs, sceneStartMs: want.inMs, sceneEndMs: want.outMs }
+        : home;
+    if (!base) return undefined;
+    const lo = base.sceneStartMs,
+      hi = base.sceneEndMs;
+    const inMs = Math.max(lo, Math.min(hi - Math.min(req.durationMs, hi - lo), want.inMs));
+    const w = { inMs, outMs: Math.min(hi, inMs + req.durationMs) };
+    const c = { ...base, peakMs: Math.min(w.outMs, Math.max(w.inMs, base.peakMs)) };
+    const s = scoreCandidate(req, c, source, mode, true, w);
+    return s ? ({ c, ...s, identity: id } as Option) : undefined;
+  });
+  locked.forEach((o, i) => {
+    if (!o) return;
+    reranked[i] = [o, ...reranked[i].filter((x) => !(x.c.sourceId === o.c.sourceId && Math.abs(x.inMs - o.inMs) < 120))];
+    // The reference itself shows the same footage twice: the plan may too.
+    for (let j = 0; j < i; j++) {
+      const q = locked[j];
+      if (q && q.c.sourceId === o.c.sourceId && q.inMs < o.outMs && o.inMs < q.outMs) repeats[i] = j;
+    }
+  });
   reranked.forEach((list, i) => inspect?.(i, list));
   t = performance.now();
   const resources = sourceResources(reranked, withRoles);
   const groups = repeatGroups(withRoles, reranked);
   const scarce = new Set(resources.filter((r) => r.scarcity >= 0.6).flatMap((r) => r.usableIntervals.map((u) => `${u.sourceId}:${u.startMs}`)));
-  const plan = planSequence(withRoles, reranked, groups, repeats, beamWidth, perShot, scarce);
+  const plan = planSequence(withRoles, reranked.map((list, i) => (locked[i] ? [locked[i]!] : list)), groups, repeats, beamWidth, perShot, scarce);
   if (profile) profile.beam = Math.round(performance.now() - t);
   const picks = plan.picks;
   const strong = strongStretches(reranked);
@@ -663,6 +768,8 @@ export function selectShots(
     let p = first;
     const req = withRoles[i];
     let cal = calibrate(p, reranked[i]);
+    // The shot's own frames found in this clip: direct evidence, not a likeness.
+    if (p.identity) cal = { ...cal, certainty: Number(Math.min(0.99, 0.75 + 1.5 * Math.max(0, p.identity.score - IDENTITY_MIN_SCORE)).toFixed(2)), coverage: "excellent" };
     let adapted: string | null = null;
     // No equivalent moment in the footage: Close Match keeps it (timing kept, mismatch flagged);
     // Smart Adaptation picks the footage that best plays the shot's visual role; Creative Remix
@@ -679,9 +786,14 @@ export function selectShots(
         adapted = mode === "Smart Adaptation" ? "adapted to the source moment that best plays the shot's visual role" : "reinterpreted with source footage that moves like it";
       }
     }
-    // Distinct alternatives: another clip first, then another stretch, never a near-duplicate.
+    // Distinct alternatives: another clip first, then another stretch, never a near-duplicate. A
+    // moment another shot already plays ranks 0.03 lower, so a comparably good unused moment is
+    // offered first (deliberate reuse stays available, and is named in the editor).
+    const others = picks.flatMap((q, j) => (j !== i && q ? [{ clipId: String(j), sourceId: q.c.sourceId, inMs: q.inMs, outMs: q.outMs }] : []));
+    const reused = (x: Option) => reuseOf({ sourceId: x.c.sourceId, inMs: x.inMs, outMs: x.outMs }, others).length > 0;
+    const pool = [...reranked[i]].sort((a, b) => b.score - (reused(b) ? 0.03 : 0) - (a.score - (reused(a) ? 0.03 : 0)));
     const alternatives: Option[] = [];
-    for (const x of reranked[i]) {
+    for (const x of pool) {
       if (alternatives.length >= 3) break;
       const near = (y: Option) => y.c.sourceId === x.c.sourceId && (y.c.sceneStartMs === x.c.sceneStartMs || Math.abs(y.inMs - x.inMs) < 2500);
       if (near(p) || alternatives.some(near)) continue;
@@ -700,6 +812,12 @@ export function selectShots(
       return (parts.length ? "trails on " + parts.join(", ") : "close second overall") + (gap < 0.02 ? ` · differs by only ${gap.toFixed(3)}` : "");
     };
     const why: string[] = [];
+    if (p.identity)
+      why.push(
+        `the same footage as the reference: its frames match here at ${p.identity.score.toFixed(2)} (other clips ${(p.identity.score - p.identity.margin).toFixed(2)})` +
+          (p.identity.timingMargin < 0.01 ? "; the picture barely changes or repeats here, so the exact moment within the clip is approximate" : "") +
+          (p.identity.speed !== null && Math.abs(p.identity.speed - 1) >= 0.05 ? `; the reference plays it at ${Math.round(p.identity.speed * 100)}% speed` : ""),
+      );
     const strongest = Object.keys(w)
       .filter((k) => (p.match[k] ?? 0) >= 0.7)
       .sort((a, b) => (w[b] ?? 0) * (p.match[b] ?? 0) - (w[a] ?? 0) * (p.match[a] ?? 0))
@@ -716,12 +834,17 @@ export function selectShots(
     if (adapted) why.push(adapted);
     const reuse = plan.reuse[i];
     const confidence: ShotChoice["confidence"] = cal.certainty >= 0.7 ? "high" : cal.certainty >= 0.45 ? "medium" : "low";
+    // A close match is a moment the evidence says plays this shot; otherwise the pick is the best
+    // available candidate and says so, so a reviewer knows where to look.
+    const label: ShotChoice["label"] = cal.coverage !== "missing" && cal.coverage !== "weak" && confidence !== "low" ? "close match" : "best available";
     let shortfall: string | null = null;
     if (cal.coverage === "missing")
       shortfall =
         "No close source match found." +
         (mode === "Close Match" ? " Reference timing is kept and the mismatch is flagged; review the alternatives." : ` ${adapted ? adapted[0].toUpperCase() + adapted.slice(1) : "Best available adaptation used"}.`);
-    else if (confidence === "low") shortfall = `Low confidence (${Math.round(cal.certainty * 100)}%): ${cal.margin < 0 ? "a better-scoring stretch went to another shot" : cal.margin < 0.02 ? `the next stretch differs by only ${cal.margin.toFixed(3)}` : "weak agreement on what the shot does"}; review the alternatives.`;
+    else if (label === "best available" && confidence !== "low")
+      shortfall = `No close source match found: best available candidate (weak source coverage, ${Math.round(cal.certainty * 100)}% confidence); review the alternatives.`;
+    else if (confidence === "low") shortfall = `No close source match found: best available candidate. Low confidence (${Math.round(cal.certainty * 100)}%): ${cal.margin < 0 ? "a better-scoring stretch went to another shot" : cal.margin < 0.02 ? `the next stretch differs by only ${cal.margin.toFixed(3)}` : "weak agreement on what the shot does"}; review the alternatives.`;
     return {
       sourceId: p.c.sourceId,
       inMs: p.inMs,
@@ -733,8 +856,12 @@ export function selectShots(
       role: roles[i],
       why,
       confidence,
+      label,
+      ...(p.identity ? { identity: p.identity } : {}),
       certainty: cal.certainty,
       margin: cal.margin,
+      rival: cal.rival,
+      semantic: cal.semantic,
       coverage: cal.coverage,
       ...(p.phase ? { phase: p.phase } : {}),
       alternatives: alternatives.map((x) => ({ sourceId: x.c.sourceId, inMs: x.inMs, outMs: x.outMs, speed: x.speed, score: x.score, match: x.match, lostOn: lostOn(x) })),

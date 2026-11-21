@@ -12,6 +12,7 @@ import {inkTitles,COLOR_STRIDE,type InkFrame as InkSampleFrame} from "./ink-titl
 import {frameTone,medianTone,type Tone} from "./tone";
 import {annotateSubjects} from "./subject-shape";
 import {restrictReference,type ReferenceInterval} from "./interval";
+import {pieceOf} from "./title-read";
 
 export { restrictReference, type ReferenceInterval } from "./interval";
 
@@ -121,7 +122,12 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
     const ink=(hex?:string)=>hex&&/^#[0-9a-f]{6}$/i.test(hex)?(0.2126*parseInt(hex.slice(1,3),16)+0.7152*parseInt(hex.slice(3,5),16)+0.0722*parseInt(hex.slice(5,7),16))/255:undefined;
     const a=ink(m.foreground),b=ink(under[0].foreground);
     const inverted=a!==undefined&&b!==undefined&&Math.abs(a-b)>0.35;
-    if(ratio<=2&&ratio>=0.5&&!inverted)return true;
+    // Uncertain OCR pieces of the very word the trace read do not contradict its ink: the trace
+    // was assembled from them, and a piece read off a blurred frame measures ink poorly. A
+    // confident reading, or any size disagreement, still sets the trace aside.
+    const agreeing=!!m.content&&under.every(s=>s.evidence?.status==="uncertain"&&s.content!.split(/\s+/).every(piece=>pieceOf(piece,m.content!)));
+    console.debug("dense title check",m.startMs,m.content,ratio.toFixed(2),a?.toFixed(2),b?.toFixed(2),agreeing,JSON.stringify(under.map(s=>[s.content,s.evidence?.status??null,s.foreground??null])));
+    if(ratio<=2&&ratio>=0.5&&(!inverted||agreeing))return true;
     disagreements.push(`Dense title analysis at ${(m.startMs/1000).toFixed(2)} s disagreed with the text reading (${ratio>2||ratio<0.5?`${ratio.toFixed(1)}× its size`:"inverted ink"}); the reading "${under.map(s=>s.content).join(" ")}" was kept.`);
     return false;
   });

@@ -1,5 +1,104 @@
 # Reference-to-Edit
 
+## 4.3: the planner keeps its picks; reference movement without the edit's effects
+
+- **Plan picks placed as planned** (`planner.ts`):
+  - **`plannedRange`:** a global pick plays from the free pool range it fits. The plan's stretches (cut-safe segments, millisecond-rounded) and the pool's ranges (scene starts `ceil`, ends `floor`, in frames) disagree by a frame at either end: a scene starting at 36 ms, a clip ending at 15.555 s. So a pick within two frames of a range shifts just inside it, instead of falling to the local matcher. Three frames or more is another moment, and the local matcher decides.
+  - **`sourceFramesPlayed`:** consumption marks only the source frames a placed shot plays. After the speed curve is normalised, a shot slowed to fill its length plays exactly `duration × retimeSpeed` frames. It used to mark `duration`, which blocked the moment right after a slowed shot.
+  - **Debug:** a pick that is still not placed writes "planned pick not placed" with its frames and the clip's free ranges to the app console.
+- **Reference movement without edit effects** (`action-signature.ts` `effectSpans`; `dna.ts`, `service.ts`):
+  - A reference shot's action signature leaves out colour pulses and person flashes, plus the frame returning from each. A pulse changes the whole frame at once, about 50× a lift's per-frame change.
+  - Transition spans stay in: removing them from short shots left too little to measure, and calm footage then scored as a close match (two false close matches offline).
+- **The person check on first runs** (`service.ts`):
+  - **Problem:** title tracing (`focus.ts`) annotates the reference's subjects from the segmentation's unchecked contours. The checked annotation added its own fields but never cleared those, so on a first run (titles traced fresh) phantom subject shapes survived.
+  - **Consequence:** with cached titles they did not survive. The same reference was then scored and labelled differently on its first and later runs.
+  - **Fix:** the subject fields are cleared before the checked annotation. The title cache was bumped to `reference-titles-5`, so verification re-traced titles fresh.
+  - **4.2 evidence affected:** the 4.2 final matrix traced titles fresh, so its labels still carried phantom shapes where the reference had none confirmed.
+- **Tried and reverted:** scoring candidates as they would look after an automatic zoom to the reference's subject size. It favoured the clip with the smallest subject (a distant beach clip) over the right action (`test-results/final43b/README.md`).
+
+## Universal reference-to-edit 4.2: effect placement, take reuse, person evidence, title fragments
+
+As in 4.1, nothing in production code branches on a fixture, file name, domain, shot ID, expected word or known answer. Evaluation labels and expected timestamps stay in `test-results/`.
+
+- **Generated effects: placement and level** (`audio-structure.ts`; used by `planner.ts`):
+  - **Landing:** the detector reports a rising sound's landing (its peak) as the event's end. `placeSound` puts the generated sound's own envelope peak on that landing frame, at the sound's real speed, so a warped reference clock cannot stretch a lead-in past the asset's length.
+  - **Shape:** `synthShape(kind)` measures the generated sound as it is rendered: synthesized at 44.1 kHz, then `analysisBand` (a 63-tap windowed-sinc low-pass and decimation into the 22.05 kHz analysis domain), then a 100 ms RMS on a 10 ms hop. It returns length, peak time, peak level and envelope.
+  - **Lead-in and fall:** the lead-in follows the reference's measured rise; the fall follows its measured fall. A rising sound gets no fade before its peak; a measured shortfall in rise depth becomes a gain ramp into the landing (`startGainDb`). Hits keep an attack and release.
+  - **Windows:** `effectWindows` gives one set of windows for reference, replacement and export. Rising sounds: peak [landing − 250, landing + 50] ms, bed [onset − 2000, onset − 100] ms. Hits: peak [landing − 100, landing + 400] ms, bed [landing − 2000, landing − 300] ms.
+  - **Level:** `effectLevel` reproduces the effect's own level over the bed. `ownRelation` removes the bed's share from the reference mix peak: 10·log10(10^(d/10) − 1), floored at −12 dB. A note names the case where the replacement music is louder than the effect where it lands.
+- **Alternative takes that repeat another shot** (`take-reuse.ts`, `ReferenceEditor.tsx`, `rough-cut/model.ts`, native `creative.rs`):
+  - **Played intervals:** `playedIntervals` derives each shot's played source interval from the current timeline (composition view and `sourceFrameAt`, so trims, speed and time remaps count).
+  - **Overlap test:** `reuseOf` flags a take that shares at least 250 ms, or 30% of the shorter interval, of the same asset with another shot. The shot being replaced is excluded.
+  - **What the user sees:** the take button reads "Repeats shot N (x s of the same moment)" before Apply. Alternatives that overlap other picks rank 0.03 lower. Deliberate reuse stays selectable.
+  - **Persistence:** every matched shot's original and up to four alternatives are saved in `ai.takes` (validated in TypeScript and Rust). After a reopen, a panel lists them, with "Restore the first choice", as an undoable edit.
+- **Person evidence** (`person-evidence.ts`, `subject-shape.ts`, `footage-index.ts`, `service.ts`):
+  - **Problem:** the person-segmentation model outlines something on every frame, people or not. A pan on a counter was outlined on 920 of 920 frames.
+  - **Check:** `confirmedPeople` keeps an outline as a person only where an object-detector sample of the same scene, within 5 s, reports a person (confidence ≥ 0.3, the detector's own floor). Contradicted samples become "measured, nobody there". Outlines no detector sample covers are kept unchanged.
+  - **Scope:** this applies to the reference (shot subject shapes and outline paths) and to every raw clip. Subject-layering masks and frame-cut evidence keep the raw outlines (`SourceEvidence.outlines`).
+  - **Absence is evidence:** a reference shot segmented with nobody confirmed is marked `subjectAbsent`. A person shot played by a window segmented with nobody, or the reverse, scores pose 0.2 (`PRESENCE_MISMATCH`). With nobody on either side, pose stays unscored.
+  - **Cost:** when no reference shot keeps a person, raw clips are not segmented at all.
+- **Fallback placement label** (`planner.ts`): a shot the global plan could not place is chosen by the local matcher. It is labelled "best available", confidence low, and says it was not checked like the others. Caption-led edits, which always use the local matcher, are unchanged.
+- **Title fragments** (`title-read.ts`, `ink-titles.ts`, `focus.ts`):
+  - **Merging:** `fragmentMerges` lets a short OCR piece that fits a longer reading in exactly one place, with at most one letter in three different, correct it ("HON" + "HOFORABLE" → "HONORABLE"). The result only competes: it must draw the measured strokes better than each source reading.
+  - **Ink exception:** the dense-trace safeguard no longer sets a trace aside on ink alone when every reading under it is an uncertain OCR piece of the same word (`pieceOf`). Confident readings, and every size disagreement, still set it aside.
+- **Matcher changes made before the blind A/B** (in the frozen build):
+  - **Still shots** (`footage-index.ts`): when the reference shot and the candidate are both below `STILL_LEVEL` (0.0003), motion fit is 1. **Known side effect:** it reorders the street holdout's plan (4.1's 5/6 → 3/6 right action in the app; reverting it alone restores 4.1's picks offline). It needs narrowing (`test-results/final42b/street-attribution.md`).
+  - **Near-tie review** (`sequence-planner.ts` `deepTemporal`): compares outline regions only when the source has person outlines, otherwise the whole frame.
+  - **Identity lock:** a same-footage window never crosses a detected cut unless continuity is proven, and shifts off an edge cut.
+  - **Alternatives:** those overlapping other picks rank 0.03 lower.
+- **Known limit of the planner:** a plan pick is placed only if it fits a free pool range exactly. A pick one frame before a range start (a 36 ms scene start rounds to frame 2) or adjacent to a consumed interval falls to the local matcher. It is now labelled, but still not the planned moment (gym shot 3, street shot 6).
+- **Caches:** `reference-titles-4` (titles re-read once). The footage index key is unchanged (cut evidence still reads the raw outlines).
+
+## Universal reference-to-edit 4.1: source text, camera paths, levels, whips, banding, lifecycle, calibration
+
+4.1 fixes eight generic failure modes. Nothing in production code branches on a fixture, file name, domain, shot ID or expected word. Unmeasured evidence stays distinct from a measured zero.
+
+- **Same-footage identity** (`native/.../analysis/identity.rs`, `packages/ai/reference/identity.ts`). When the reference was cut from the raw footage it comes with, each reference shot's own frames are found in the raw clips, whatever regrade, crop/zoom (down to 1/1.6) or ±speed the reference applied.
+  - **Probes:** five frames per shot (8/25/50/75/92%), clear of the shot ends and of measured transitions. Each probe gives a luma fingerprint of its picture inside any letterbox, plus its change over the next 200 ms.
+  - **Search:** every raw frame (15 fps, 96 px) at every position and zoom of the probe's aspect. The correlation is zero-mean and normalised over box-averaged cells (summed-area table): a 12-cell pass on every second frame, then a 24-cell pass around the 8 best peaks (finer zoom and position steps, neighbouring frames). Clips ≤ 10 min are searched end to end; longer ones around the first plan's candidates, then re-planned. Results are cached (`identity-v3`).
+  - **Movement test:** appearance cannot tell the very frames from the same scene a moment later (another repetition, a held copy of a frame both score 0.9+). Each match therefore also correlates the source's 200 ms change in the matched region with the reference's. The same footage scores near 1, a frozen copy 0, another repetition low.
+  - **Decision per shot:** the probes' peaks are aligned on one timing (source times rise at 0.7–1.4× speed). The match needs mean correlation ≥ 0.85, a lead of ≥ 0.05 over every other clip, and movement agreement ≥ 0.5 where the reference moves. On the user's real gym reel, where the raw clips are not its source, the best scores were 0.42–0.57.
+  - **Use:** the matched window is locked for the sequence plan; other shots plan around it, and alternatives stay available. A detected cut inside the window is crossed only when probes on both sides match moving footage, i.e. the reference shows continuous footage there, so the detection was false. Cuts the probes cannot vouch for move the window instead. A still (identical frames) stays inside its cut-safe stretch.
+  - **Framing:** the matched region gives the reference's exact crop and zoom, applied as the shot's scale and position, when the reference frame has no bars.
+  - **Confidence:** 0.75–0.99 from the correlation, labelled close match; the explanation states the match ("the same footage as the reference: its frames match here at 0.99 (other clips 0.86)").
+
+- **Burned-in source text** (`native/.../analysis/source_text.rs`, `packages/ai/reference/source-text.ts`):
+  - **Representation:** `RawTextRegion` per candidate window: interval, text, box, frames seen out of frames sampled, drift, confidence and `likelyBurnedIn` (seen in ≥2 frames and at least half of the samples, drift ≤ 0.03, confidence ≥ 0.5).
+  - **Reading:** Windows OCR on plain and inverted frames at 20%, 50% and 80% of the window. Results are cached per window under `source-text-v1` (100 ms grid).
+  - **Comparison with the reference's titles:** each window is classified *equivalent* (text similarity ≥ 0.75 and vertical centre within 0.25), *unrelated*, *absent*, *uncertain* or *unmeasured*.
+  - **Duplicate titles:** an equivalent burned-in word suppresses the reconstructed title over it, with a warning naming both.
+  - **Unrelated text:** costs the candidate at most 0.08 of score, so a small watermark never disqualifies footage. The shot reports "Source contains baked-in text."
+  - **Re-reading:** the service reads the chosen windows (and, first round, the top 3 alternatives), re-plans, and repeats for up to 3 plans, so a re-planned pick never lands on unread text.
+- **Camera path** (`camera-signature.ts`; native `reference.rs`, `visual.rs`):
+  - **Sub-pixel flow:** each dense frame carries `fineX`, `fineY`, `fineZoom`: a Lucas–Kanade step on 5×5 box-smoothed frames around the whole-pixel block match. A slow pan reads below one pixel a frame and a still frame reads ≈0.
+  - **`CameraSignature`, shared by reference and source:** 16-point translation X/Y, scale, velocity and acceleration curves; net movement; speed; smoothness; kind (static / pan / tilt / push-in / pull-out / handheld / uncertain); confidence.
+  - **Camera-only shots:** with no subject and a confident non-static path, the action score weights the camera term at 0.5.
+- **Still compositions** (`scene-signature.ts`): an 8×8 Sobel edge layout, twice a second, gives a static-composition representation that survives palette changes (structure 0.2, edges 0.25, rows 0.1, horizon 0.1, placement 0.1, size 0.1, objects 0.05, role 0.1).
+- **One level domain for effects** (`audio-structure.ts`, `effectLevel`):
+  - **Domain:** reference and recreation levels are both 100 ms RMS dBFS. The effect's gain is solved by power subtraction against the replacement music at the event, so effect plus bed lands at the reference's relative level.
+  - **Floor:** the effect is never more than 12 dB under target, so a quiet bed never makes it inaudible.
+  - **Verification:** the result is measured from the export with `scripts/measure-sfx-levels.mjs`.
+- **Whips** (`cuts.ts`, `whipAt`; `dna.ts`, `withWhips`):
+  - **Detection:** a run of ≥3 samples (≥100 ms, ≤600 ms) of strong same-direction global motion crossing the boundary. It must cover ≥0.375 of the frame width, have no single jump above half the travel, and be steady on both sides.
+  - **Measured:** direction, span, peak, strength and confidence.
+  - **Override:** a whip replaces a cut, motion or unresolved boundary.
+  - **Reconstruction:** confidence ≥ 0.65 → an editable motion transition (position keys and blur) saved in the project.
+- **Tone precision** (`curves.ts`, `engine/gpu.ts`):
+  - **Slope cap:** matched tone curves rise no faster than 4 output levels per input level (`MAX_CURVE_SLOPE`). The banding came from near-vertical segments between clustered measured levels.
+  - **Precision:** compositor ping-pong targets are RGBA16F where `EXT_color_buffer_float` exists. The backdrop stays RGBA8 (`copyTexSubImage2D` source).
+- **Lifecycle log** (`src-tauri/src/lifecycle.rs`):
+  - **Where and when:** `%APPDATA%/studio.supp.edit/lifecycle.log`, one flushed line per stage. Rotated past 1 MB.
+  - **Host stages:** launch, open reading/read/failed, save writing/written/failed, window close requested, window destroyed, exit, panic.
+  - **Page stages** (`lifecycle_mark`): page loaded, project parsed, timeline hydrated, renderer first frame, audio ready, page errors and unhandled rejections.
+  - **Stress test:** `scripts/stress-reopen.mjs` runs Save → Close → Launch → Open → Verify → Close on the real app and checks every stage.
+- **Confidence calibration** (`sequence-planner.ts`, `calibrate`):
+  - **Formula:** confidence = 0.7 × measured agreement on what the shot does (movement geometry and pose) + 0.15 quality + 0.15 duration fit.
+  - **Margin:** the score margin is no longer part of it. It ranked right picks above wrong ones less often than chance (AUC 0.42) because small margins mostly meant equally right repetitions. It stays in the explanation.
+  - **Rival:** `rival` is the lead over the best non-overlapping moment anywhere, the same clip included.
+  - **Labels:** each shot is a **close match** or the **best available candidate** ("No close source match found…").
+  - **Picks:** unchanged. Only coverage "missing" changes picks, and it is computed as before.
+- **Caches bumped:** `reference-visual-v8` (Lucas–Kanade fine flow), `cut-safe-segments-6` (the footage index is rebuilt from v8), `source-text-v1` (new). Saved projects need no migration; per-shot labels are optional fields.
+
 ## Universal reference-to-edit engine: direction, caches, very long footage
 
 This phase targets what 2.1 could not tell apart or could not afford: which way small things move, footage beyond 20 minutes, the cost of person masks, and reconstructions that re-read the reference's titles every time.

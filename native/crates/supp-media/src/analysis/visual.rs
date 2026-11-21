@@ -27,6 +27,10 @@ pub struct VisualFrame {
     /// Local motion between this frame and the previous one, where the picture changes.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub local: Option<LocalMotion>,
+    /// Where the picture's structure is: Sobel edge energy over an 8×8 grid, normalised to sum
+    /// 1 (independent of palette, grade and polarity). Measured twice a second.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub edges: Option<Vec<f64>>,
 }
 
 /// Where and which way the picture moves locally: the centroid of changing pixels (frame
@@ -120,6 +124,10 @@ pub struct VisualFlow {
     pan_y: f64,
     expansion: f64,
     confidence: f64,
+    /// Sub-pixel camera translation (pixels of the 96×54 analysis frame) and scale per frame.
+    fine_x: f64,
+    fine_y: f64,
+    fine_zoom: f64,
 }
 
 fn measure(rgb: &[u8], previous: Option<&[u8]>, time_ms: u32) -> VisualFrame {
@@ -201,6 +209,9 @@ fn measure(rgb: &[u8], previous: Option<&[u8]>, time_ms: u32) -> VisualFrame {
                 pan_y: flow.pan_y,
                 expansion: flow.expansion,
                 confidence: flow.confidence,
+                fine_x: (flow.fine_x * 1000.).round() / 1000.,
+                fine_y: (flow.fine_y * 1000.).round() / 1000.,
+                fine_zoom: (flow.fine_expansion * 10000.).round() / 10000.,
             }
         }),
         luma,
@@ -226,8 +237,24 @@ fn measure(rgb: &[u8], previous: Option<&[u8]>, time_ms: u32) -> VisualFrame {
                 .collect();
             local_motion(&gray, &prior_gray)
         }),
+        edges: (time_ms % 500 < 34).then(|| edge_layout(&gray)),
         layout,
     }
+}
+
+/// Sobel edge energy per cell of an 8×8 grid, normalised to sum 1 (a flat picture is uniform).
+fn edge_layout(gray: &[f64]) -> Vec<f64> {
+    let mut cells = [0f64; 64];
+    for y in 1..HEIGHT - 1 {
+        for x in 1..WIDTH - 1 {
+            let at = |dx: isize, dy: isize| gray[(y as isize + dy) as usize * WIDTH + (x as isize + dx) as usize];
+            let gx = at(1, -1) + 2. * at(1, 0) + at(1, 1) - at(-1, -1) - 2. * at(-1, 0) - at(-1, 1);
+            let gy = at(-1, 1) + 2. * at(0, 1) + at(1, 1) - at(-1, -1) - 2. * at(0, -1) - at(1, -1);
+            cells[(y * 8 / HEIGHT) * 8 + x * 8 / WIDTH] += (gx * gx + gy * gy).sqrt();
+        }
+    }
+    let total: f64 = cells.iter().sum();
+    cells.iter().map(|v| if total > 1e-9 { (v / total * 10000.).round() / 10000. } else { 1. / 64. }).collect()
 }
 
 /// Dense frames per second for a clip of this length.
@@ -341,6 +368,27 @@ mod tests {
             })
             .collect();
         assert!(measure(&textured, None, 66).sharpness > base.sharpness + 0.5);
+    }
+    #[test]
+    fn edge_layout_keeps_structure_under_inversion() {
+        // A bright square in the centre-left on a flat field, and the same picture inverted.
+        let picture = |invert: bool| -> Vec<f64> {
+            (0..PIXELS)
+                .map(|i| {
+                    let (x, y) = (i % WIDTH, i / WIDTH);
+                    let v = if (24..48).contains(&x) && (14..40).contains(&y) { 0.9 } else { 0.2 };
+                    if invert { 1. - v } else { v }
+                })
+                .collect()
+        };
+        let (a, b) = (edge_layout(&picture(false)), edge_layout(&picture(true)));
+        assert!((a.iter().sum::<f64>() - 1.).abs() < 1e-3);
+        for (x, y) in a.iter().zip(&b) {
+            assert!((x - y).abs() < 1e-3);
+        }
+        // The structure sits where the square's edges are, not in the empty right half.
+        let right: f64 = (0..64).filter(|k| k % 8 >= 5).map(|k| a[k]).sum();
+        assert!(right < 0.02);
     }
     #[test]
     fn local_motion_follows_a_small_moving_thing() {

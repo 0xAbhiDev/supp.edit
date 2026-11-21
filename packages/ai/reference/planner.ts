@@ -1,10 +1,11 @@
+import { classifySourceText, type SourceTextWindow } from "./source-text";
 import { measuredColor, type VisualFrame } from "./visual";
 import type { Aperture } from "./aperture";
 import { medianTone, spanTone, type ToneSample } from "./tone";
 import { matchingCurve } from "../../effects/curves";
 import type { AudioTimeline } from "../audio/timeline";
 import type { SoundKind } from "../audio/synth";
-import { beatMapOf, plannedSounds, retimeDna, retimer } from "./audio-structure";
+import { beatMapOf, placeSound, plannedSounds, retimeDna, retimer } from "./audio-structure";
 import { alignStructure, type StructuralAlignment } from "./structural-alignment";
 import { buildFootageIndex, infeasibleShots, motionPeak, selectShots, shotRole, type PlanReport, type SelectionProfile, type ShotChoice, type ShotRequirement } from "./footage-index";
 import { editablePersonMask, type PersonSample } from "./subject-mask";
@@ -21,17 +22,26 @@ import { availableRanges, matchRange, consumeRange } from "./matcher";
 import { sourceFrameAt } from "../../time-remap/model";
 import { projectInk, visiblePicture } from "./text-layout";
 import { type StyleDNA, type RecreationMode } from "./dna";
+import { matchIdentity } from "./identity";
 export interface SourceEvidence {
   asset: Asset;
   analysis: MediaAnalysis;
   color?: ColorStats;
   speech?: MediaAnalysis;
   visual?: VisualFrame[];
+  /** Person outlines confirmed by the object detector (person-evidence.ts): the matcher's subject
+   * evidence. */
   people?: PersonSample[];
+  /** The segmentation's own outlines, unconfirmed: subject layering masks and frame-cut evidence. */
+  outlines?: PersonSample[];
   aperture?: Aperture;
   tone?: ToneSample[];
   /** This clip's cached long-footage index (keyed by file identity and analysis versions). */
   index?: import("./footage-index").SourceIndex;
+  /** Text read in candidate windows of this clip (burned-in labels and captions). */
+  text?: SourceTextWindow[];
+  /** Where the reference's probe frames were found in this clip (same-footage identity). */
+  identity?: import("./identity").SourceIdentity;
 }
 export interface Controls {
   mode: RecreationMode;
@@ -109,6 +119,25 @@ export function takeCurves(tone: readonly ToneSample[] | undefined, inMs: number
     blue: matchingCurve(from.map((q) => q[2]), target.map((q) => q[2])),
   };
 }
+/** The free range a global pick plays from, and where it starts. The plan's stretches and the
+ * pool's ranges round differently at both ends (a scene starting at 36 ms is frame 1 to one and
+ * frame 2 to the other; a clip ending at 15.555 s ends at frame 466 in the pool while a pick
+ * reaching its end rounds to 467), so a pick within two frames of a range keeps its moment,
+ * shifted just inside the range, rather than falling to the local matcher. */
+export function plannedRange<R extends { source: { asset: { id: string } }; first: number; end: number }>(pool: readonly R[], sourceId: string, first: number, frames: number) {
+  let best: { range: R; first: number } | undefined;
+  for (const r of pool) {
+    if (r.source.asset.id !== sourceId || r.end - r.first < frames) continue;
+    const start = Math.min(Math.max(first, r.first), r.end - frames);
+    if (Math.abs(start - first) > 2) continue;
+    if (!best || Math.abs(start - first) < Math.abs(best.first - first)) best = { range: r, first: start };
+  }
+  return best;
+}
+/** Source frames a placed shot plays: a shot slowed to fill its length (retimeSpeed < 1) plays
+ * fewer source frames than timeline frames, and only those are used (after the speed curve is
+ * normalised it plays exactly duration × retimeSpeed). */
+export const sourceFramesPlayed = (duration: number, retimeSpeed: number) => Math.max(2, Math.ceil(duration * Math.min(1, retimeSpeed)));
 const clamp = (n: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, n)) || 0;
 // Use a bounded gain. The floor limits amplification of compression noise
@@ -166,6 +195,8 @@ export function buildRecreation(
       role?: ShotChoice["role"];
       reasons?: string[];
       confidence?: ShotChoice["confidence"];
+      label?: ShotChoice["label"];
+      identity?: ShotChoice["identity"];
       certainty?: number;
       coverage?: ShotChoice["coverage"];
       shortfall?: string | null;
@@ -343,7 +374,12 @@ export function buildRecreation(
   };
   const requirements: ShotRequirement[] = referenceShots.map((shot, index) => {
     const peak = peakOf(index);
-    return { shot, durationMs: (requestedFor(index) * 1000) / rate, ...peak, role: shotRole(shot, index, referenceShots.length, peak.peakSource, referenceShots[index + 1]) };
+    // The reference titles on screen during this shot (for source-text equivalence and penalties).
+    const texts = (dna.text ?? []).filter((t) => t.content && t.role !== "persistent-overlay" && t.startMs < shot.endMs && t.endMs > shot.startMs).map((t) => ({ content: t.content!, x: t.x, y: t.y, width: t.width, height: t.height }));
+    // The same footage as the reference, found frame by frame in a raw clip (grade, crop and zoom
+    // aside): that exact moment plays the shot.
+    const identity = matchIdentity(index, shot.startMs, shot.endMs, sources.map((s) => ({ id: s.asset.id, durationMs: s.asset.duration * 1000, identity: s.identity })));
+    return { shot, durationMs: (requestedFor(index) * 1000) / rate, ...peak, role: shotRole(shot, index, referenceShots.length, peak.peakSource, referenceShots[index + 1]), ...(texts.length ? { texts } : {}), ...(identity ? { identity } : {}) };
   });
   // Caption-led edits keep each source's chronology; the local matcher handles that order.
   clock = performance.now();
@@ -392,10 +428,15 @@ export function buildRecreation(
         used = Math.round(((pick.outMs - pick.inMs) * rate) / 1000),
         // A mildly retimed pick fills the whole requested length from a shorter stretch.
         length = pick.speed < 1 ? requested : Math.min(requested, used);
-      const fits = (r: (typeof pool)[number]) => r.source.asset.id === pick.sourceId && r.first <= first && first + Math.min(used, length) <= r.end;
       // Intentional reuse plays frames another shot already used: look them up before consumption.
-      const range = pool.find(fits) ?? (pick.reuse ? cutSafePool.find(fits) : undefined);
-      return range && length >= 2 ? { range, first, length, score: pick.score, timingCoverage: 0, motion: range.shot.motion, terms: pick.match } : undefined;
+      const placed = plannedRange(pool, pick.sourceId, first, Math.min(used, length)) ?? (pick.reuse ? plannedRange(cutSafePool, pick.sourceId, first, Math.min(used, length)) : undefined);
+      if (!placed)
+        console.debug(
+          "planned pick not placed",
+          index + 1,
+          JSON.stringify({ source: sources.find((x) => x.asset.id === pick.sourceId)?.asset.name, first, frames: Math.min(used, length), speed: pick.speed, reuse: !!pick.reuse, free: pool.filter((r) => r.source.asset.id === pick.sourceId).map((r) => [r.first, r.end]) }),
+        );
+      return placed && length >= 2 ? { range: placed.range, first: placed.first, length, score: pick.score, timingCoverage: 0, motion: placed.range.shot.motion, terms: pick.match } : undefined;
     })();
     const candidate = fromChoice ?? matchRange(
       pool,
@@ -600,7 +641,26 @@ export function buildRecreation(
     if (box) protection.push({ clipId, bounds: box });
     let baseScale = 1;
     let safeScale = 10;
+    // Same footage: the region of the source frame the reference's picture shows was measured, so
+    // the shot is framed exactly as the reference framed it (its crop and zoom), not inferred.
+    const seen = fromChoice && pick?.identity && controls.format !== "vertical" && !barred(camera) ? pick.identity.rect : null;
+    if (seen) {
+      const fit = Math.min(width / asset.width, height / asset.height),
+        sw = asset.width * fit,
+        sh = asset.height * fit;
+      const [rx, ry, rw, rh] = seen;
+      baseScale = clamp(Math.max(width / (Math.max(0.05, rw) * sw), height / (Math.max(0.05, rh) * sh)), 1, 10);
+      const x = clamp((0.5 - (rx + rw / 2)) * sw * baseScale, Math.min(0, width / 2 - 0.5 * sw * baseScale), Math.max(0, -width / 2 + 0.5 * sw * baseScale));
+      const y = clamp((0.5 - (ry + rh / 2)) * sh * baseScale, Math.min(0, height / 2 - 0.5 * sh * baseScale), Math.max(0, -height / 2 + 0.5 * sh * baseScale));
+      for (const [property, value] of [
+        ["scale", baseScale],
+        ["x", x],
+        ["y", y],
+      ] as const)
+        if (property === "scale" || Math.abs(value) >= 0.5) command.push({ tool: "sequence.keyframe", sequenceId: id, clipId, property, frame: cursor, value, easing: "linear" });
+    }
     if (
+      !seen &&
       !box &&
       controls.format !== "vertical" &&
       !barred(camera)
@@ -629,7 +689,7 @@ export function buildRecreation(
       if (Math.abs(x) >= 0.5) command.push({ tool: "sequence.keyframe", sequenceId: id, clipId, property: "x", frame: cursor, value: x, easing: "linear" });
       if (Math.abs(y) >= 0.5) command.push({ tool: "sequence.keyframe", sequenceId: id, clipId, property: "y", frame: cursor, value: y, easing: "linear" });
     }
-    if (box) {
+    if (box && !seen) {
       const fit = Math.min(width / asset.width, height / asset.height),
         sw = asset.width * fit,
         sh = asset.height * fit;
@@ -814,7 +874,9 @@ export function buildRecreation(
     )
       backgroundClips.push(clipId);
     if (camera && camera.confidence > 0.3 && duration >= 8) {
-      if (Math.abs(camera.expansion) > 0.025) {
+      // A same-footage shot already shows the reference's measured framing; the footage carries
+      // its own zoom, so none is added on top.
+      if (!seen && Math.abs(camera.expansion) > 0.025) {
         const zoom = 1 + Math.min(0.14, Math.abs(camera.expansion));
         for (const [local, value] of [
           [0, camera.expansion > 0 ? 1 : zoom],
@@ -904,13 +966,31 @@ export function buildRecreation(
         const seg = footage.segments.find((g) => g.sourceId === asset.id && g.startMs <= at && at < g.endMs);
         return seg ? Math.floor(((at - seg.startMs) * rate) / 1000) : 0;
       })())),
-      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives?.map((a) => ({ ...a, curves: curves ? takeCurves(sources.find((x) => x.asset.id === a.sourceId)?.tone, a.inMs, a.outMs, curves) : undefined })), reuse: pick.reuse, role: pick.role, reasons: pick.why, confidence: pick.confidence, certainty: pick.certainty, coverage: pick.coverage, shortfall: pick.shortfall, speed: pick.speed } : {}),
+      // A shot the global plan could not place (its moment was no longer free) is chosen by the
+      // local matcher, which has none of the plan's checks: say so instead of showing no verdict.
+      ...(!fromChoice && !captions
+        ? {
+            confidence: "low" as const,
+            label: "best available" as const,
+            shortfall: "Chosen by the fallback matcher: the planned moment was no longer free, so this moment was not checked like the others. Treat it as the best available candidate and review the alternatives.",
+          }
+        : {}),
+      ...(fromChoice && pick ? { match: pick.match, alternatives: pick.alternatives?.map((a) => ({ ...a, curves: curves ? takeCurves(sources.find((x) => x.asset.id === a.sourceId)?.tone, a.inMs, a.outMs, curves) : undefined })), reuse: pick.reuse, role: pick.role, reasons: pick.why, confidence: pick.confidence, label: pick.label, ...(pick.identity ? { identity: pick.identity } : {}), certainty: pick.certainty, coverage: pick.coverage, shortfall: pick.shortfall, speed: pick.speed } : {}),
       peak: { fraction: Number(requirements[index].peakFraction.toFixed(3)), source: requirements[index].peakSource },
     });
     cursor += duration;
-    if (pool.includes(s)) consumeRange(pool, s, sourceIn, duration);
+    if (pool.includes(s)) consumeRange(pool, s, sourceIn, sourceFramesPlayed(duration, retimeSpeed));
   }
   if (!cursor) throw Error("The selected footage has no usable video ranges");
+  // Text that is part of a chosen source's pixels is said plainly: it is not an editable title.
+  matches.forEach((m, i) => {
+    const src = sources.find((s) => s.asset.id === m.source);
+    const fromMs = (m.sourceIn * 1000) / rate,
+      toMs = ((m.sourceIn + m.duration) * 1000) / rate;
+    const verdict = classifySourceText(src?.text, fromMs, toMs, requirements[i]?.texts ?? []);
+    if (verdict.unrelated.length)
+      warnings.push(`Shot ${i + 1}: Source contains baked-in text (${verdict.unrelated.map((r) => `"${r.text}"`).join(", ")}); it is part of the footage, not an editable title${(requirements[i]?.texts ?? []).length ? ", and a reconstructed title may sit near it" : ""}.`);
+  });
   const transitionTrack = uid();
   for (let i = 1; i < matches.length; i++) {
     const left = matches[i - 1],
@@ -1058,34 +1138,16 @@ export function buildRecreation(
         continue;
       }
       if (!assetAdds.some((c) => c.tool === "asset.add" && c.asset.id === asset.id)) assetAdds.push({ tool: "asset.add", asset });
-      const rising = sound.kind === "whoosh" || sound.kind === "riser",
-        assetFrames = Math.floor(asset.duration * rate),
-        startAt = toFrame(retime(sound.startMs)),
-        endAt = toFrame(retime(sound.startMs + sound.durationMs)),
-        planned = Math.max(1, endAt - startAt);
-      let duration = Math.min(planned, assetFrames),
-        at = rising ? endAt - duration : startAt;
-      if (at < 0) {
-        duration += at;
-        at = 0;
-      }
-      duration = Math.min(duration, cursor - at);
-      if (duration < 1) continue;
+      const placed = placeSound(sound, asset.duration * 1000, rate, (ms) => toFrame(retime(ms)), cursor);
+      if (!placed) continue;
       // The track exists only once something is placed on it.
       if (!made++) command.push({ tool: "sequence.audioTrack", sequenceId: id, trackId, name: "Recreated SFX" });
       const sfxId = uid();
-      command.push({ tool: "sequence.insert", sequenceId: id, clipId: sfxId, trackId, assetId: asset.id, fingerprint: asset.fingerprint, startFrame: at, sourceIn: rising ? Math.max(0, assetFrames - duration) : 0, duration, gain: sound.gainDb });
-      // Measured attack and release as ordinary gain keys (a rising sound already starts quietly).
-      const attack = rising ? 0 : Math.max(1, Math.min(Math.floor(duration / 3), Math.round((sound.attackMs * rate) / 1000))),
-        release = Math.max(1, Math.min(Math.floor(duration / 2), Math.round((sound.releaseMs * rate) / 1000)));
-      const keys: [number, number][] = [
-        ...(attack ? ([[at, -40], [at + attack, sound.gainDb]] as [number, number][]) : []),
-        [Math.max(at + attack, at + duration - release), sound.gainDb],
-        [at + duration - 1, -40],
-      ];
-      for (const [frame, value] of keys.filter((k, i, all) => i === 0 || k[0] > all[i - 1][0]))
+      command.push({ tool: "sequence.insert", sequenceId: id, clipId: sfxId, trackId, assetId: asset.id, fingerprint: asset.fingerprint, startFrame: placed.at, sourceIn: placed.sourceIn, duration: placed.duration, gain: sound.gainDb });
+      for (const [frame, value] of placed.keys)
         command.push({ tool: "sequence.keyframe", sequenceId: id, clipId: sfxId, property: "gain", frame, value, easing: "linear" });
-      audioNotes.push(`Generated ${sound.kind} at ${(at / rate).toFixed(3)} s, ${sound.gainDb} dB (reference ${sound.relativeGainDb >= 0 ? "+" : ""}${sound.relativeGainDb} dB over its music; attack ${sound.attackMs} ms, release ${sound.releaseMs} ms): ${sound.reason}.`.slice(0, 400));
+      const lands = sound.landingMs !== undefined ? ` (lands ${(toFrame(retime(sound.landingMs)) / rate).toFixed(3)} s)` : "";
+      audioNotes.push(`Generated ${sound.kind} at ${(placed.at / rate).toFixed(3)} s${lands}, ${sound.gainDb} dB (reference ${sound.relativeGainDb >= 0 ? "+" : ""}${sound.relativeGainDb} dB over its music; attack ${sound.attackMs} ms, release ${sound.releaseMs} ms): ${sound.reason}.`.slice(0, 400));
     }
   }
   for (const asset of [music, voice]) {
@@ -1264,6 +1326,19 @@ export function buildRecreation(
     const sourceClip = layout.clips.find((c) => c.id === match.clipId)!;
     const sourceTime =
       (sourceFrameAt(sourceClip, start - match.start) * 1000) / rate;
+    // The source already shows these words, burned into its pixels where the reference shows
+    // them: keep the source's text and add no duplicate title.
+    if (appearance.content) {
+      const shown = classifySourceText(source.text, sourceTime - 250, sourceTime + 250, [{ content: appearance.content, x: appearance.x, y: appearance.y, width: appearance.width, height: appearance.height }]);
+      if (shown.equivalent.length) {
+        warnings.push(`The source already shows "${shown.equivalent[0].region.text}" (burned into the footage) at ${(sourceTime / 1000).toFixed(2)} s; the reconstructed title "${appearance.content}" was not added over it.`);
+        continue;
+      }
+      // Unrelated text burned in where this title goes: the title is kept (the reference has it),
+      // and the overlap is said, never placed silently.
+      const over = shown.unrelated.find((r) => Math.min(r.x + r.width, appearance.x + appearance.width) > Math.max(r.x, appearance.x) && Math.min(r.y + r.height, appearance.y + appearance.height) > Math.max(r.y, appearance.y));
+      if (over) warnings.push(`The reconstructed title "${appearance.content}" overlaps text burned into the source ("${over.text}") at ${(sourceTime / 1000).toFixed(2)} s; Source contains baked-in text.`);
+    }
     const sample = source.analysis.vision?.frames
       .filter((f) => sourceTime >= f.sceneStartMs && sourceTime < f.sceneEndMs)
       .sort(
@@ -1547,9 +1622,11 @@ export function buildRecreation(
         continue;
       const source = sources.find((s) => s.asset.id === match.source)!;
       const clip = layout.clips.find((c) => c.id === match.clipId)!;
-      const mask = source.people?.length
+      // Layering keeps the segmentation's own outlines (unchanged by the matcher's person check).
+      const outlines = source.outlines ?? source.people;
+      const mask = outlines?.length
         ? editablePersonMask(
-            source.people,
+            outlines,
             clip,
             source.asset,
             width,
@@ -1579,7 +1656,7 @@ export function buildRecreation(
       if(!spans.length)continue;
       const source=sources.find(s=>s.asset.id===match.source)!;
       const clip=layout.clips.find(c=>c.id===match.clipId)!;
-      const mask=editablePersonMask(source.people??[],clip,source.asset,width,height,rate);
+      const mask=editablePersonMask(source.outlines??source.people??[],clip,source.asset,width,height,rate);
       if(!mask){warnings.push("Subject flash withheld because the raw shot has no measured person contour.");continue;}
       // A flat flash has a hard edge in the reference; keep only enough feather to hide stair-stepping.
       mask.feather=0.5;
@@ -1646,8 +1723,33 @@ export function buildRecreation(
     // No empty default audio track: keep it only when a clip lands on it.
     if (!command.some((c) => c.tool === "sequence.insert" && c.trackId === audio)) create.audioTrack = false;
   }
+  // Each shot's first choice and its alternative takes, saved with the recreation so a reopened
+  // project can still swap a take (and name any shot a take would repeat).
+  const takeOf = (sourceId: string, inMs: number, outMs: number, speed: number, score: number, lostOn: string, curves: unknown) => ({
+    sourceId,
+    inMs: Math.max(0, Math.round(inMs)),
+    outMs: Math.max(Math.round(inMs), Math.round(outMs)),
+    speed: Math.min(4, Math.max(0.05, speed)),
+    score: Math.max(-10, Math.min(10, Number(score.toFixed(4)))),
+    lostOn: lostOn.slice(0, 400),
+    ...(curves === null ? { neutral: true } : curves ? { curves: curves as { red: [number, number][]; green: [number, number][]; blue: [number, number][] } } : {}),
+  });
+  // Every shot is listed (alternatives possibly empty): a reopened recreation checks a take
+  // against all the shots it could repeat, and numbers shots as the live panel does.
+  const takes = matches
+    .filter((m) => m.clipId)
+    .slice(0, 500)
+    .map((m) => {
+      const fitted = command.find((c) => c.tool === "sequence.effect" && c.clipId === m.clipId && c.type === "curves");
+      const speed = m.speed ?? 1;
+      return {
+        clipId: m.clipId,
+        original: takeOf(m.source, (m.sourceIn * 1000) / rate, ((m.sourceIn + m.duration * speed) * 1000) / rate, speed, m.certainty ?? 0, "the first choice", fitted && fitted.tool === "sequence.effect" ? fitted.parameters : null),
+        alternatives: (m.alternatives ?? []).slice(0, 4).map((a) => takeOf(a.sourceId, a.inMs, a.outMs, a.speed ?? 1, a.score, a.lostOn, a.curves)),
+      };
+    });
   if (create && create.tool === "sequence.create")
-    create.ai = { ...create.ai, ...(audioMapping.length ? { audioMapping } : {}), ...(audioEventFrames.length ? { audioEventFrames } : {}), audioMode, ...(audioNotes.length ? { audioNotes: audioNotes.slice(0, 64) } : {}), ...(referenceEvents.length ? { referenceEvents } : {}) };
+    create.ai = { ...create.ai, ...(audioMapping.length ? { audioMapping } : {}), ...(audioEventFrames.length ? { audioEventFrames } : {}), audioMode, ...(audioNotes.length ? { audioNotes: audioNotes.slice(0, 64) } : {}), ...(referenceEvents.length ? { referenceEvents } : {}), ...(takes.length ? { takes } : {}) };
   warnings.push(...audioNotes.filter((n) => /^(No generated|The reference has no|Recreating the audio)/.test(n)));
   command.push(...frontTitles);
   if (command.length !== preview.plan.commands.length || warnings.length)

@@ -344,6 +344,46 @@ pub async fn reference_text(
 }
 
 #[tauri::command]
+pub async fn source_text(
+    app: AppHandle,
+    id: String,
+    path: String,
+    intervals: Vec<supp_media::analysis::source_text::Interval>,
+) -> Result<Vec<supp_media::analysis::source_text::RawTextRegion>, String> {
+    let source = app
+        .state::<Session>()
+        .require(std::path::Path::new(&path))?;
+    let cancel = start(&app, &id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || supp_media::analysis::source_text::run(&source, &intervals, &cancel))
+        .await
+        .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+
+/// Where reference frames (probe milliseconds) come from in one raw clip: same-footage identity
+/// within the given source windows.
+#[tauri::command]
+pub async fn source_identity(
+    app: AppHandle,
+    id: String,
+    reference: String,
+    probes: Vec<u32>,
+    path: String,
+    windows: Vec<supp_media::analysis::source_text::Interval>,
+) -> Result<Vec<supp_media::analysis::identity::IdentityHit>, String> {
+    let session = app.state::<Session>();
+    let reference = session.require(std::path::Path::new(&reference))?;
+    let source = session.require(std::path::Path::new(&path))?;
+    let cancel = start(&app, &id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || supp_media::analysis::identity::run(&reference, &probes, &source, &windows, &cancel))
+        .await
+        .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+
+#[tauri::command]
 pub async fn person_mask(
     app: AppHandle,
     id: String,

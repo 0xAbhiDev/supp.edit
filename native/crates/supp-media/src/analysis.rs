@@ -224,6 +224,8 @@ pub fn execute(
 }
 pub mod reference;
 pub mod reference_text;
+pub mod source_text;
+pub mod identity;
 
 #[cfg(test)]
 mod tests {

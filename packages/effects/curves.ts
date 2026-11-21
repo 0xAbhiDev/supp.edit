@@ -8,6 +8,8 @@ export interface CurveSet {
 }
 export const CURVE_CHANNELS = ["red", "green", "blue"] as const;
 export const MAX_CURVE_POINTS = 8;
+/** Steepest rise a matched tone curve may have (output levels per input level). */
+export const MAX_CURVE_SLOPE = 4;
 export const identityCurves = (): CurveSet => ({
   red: [
     [0, 0],
@@ -115,6 +117,11 @@ export function matchingCurve(source: readonly number[], target: readonly number
     if (last && x - last[0] < 2 / 255) last[1] = Math.max(last[1], y);
     else pairs.push([x, Math.max(y, last?.[1] ?? 0)]);
   });
+  // Two measured levels close together in the source but far apart in the target make a nearly
+  // vertical segment: one 8-bit input step would become many output codes (visible banding, and
+  // colour fringes where the channels step at different levels). That gap describes how the two
+  // pictures' levels cluster, not a grade, so no segment rises faster than MAX_CURVE_SLOPE.
+  for (let i = 1; i < pairs.length; i++) pairs[i][1] = Math.min(pairs[i][1], pairs[i - 1][1] + MAX_CURVE_SLOPE * (pairs[i][0] - pairs[i - 1][0]));
   if (pairs.length < 2) return [
     [0, 0],
     [1, 1],

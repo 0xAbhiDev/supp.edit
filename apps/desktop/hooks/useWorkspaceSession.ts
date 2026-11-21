@@ -158,6 +158,9 @@ export function useWorkspaceSession() {
           .then((result) => {
             if (result) {
               useEditor.getState().load(result.project, result.path);
+              const loaded = useEditor.getState().project,
+                clips = loaded.clips.length + loaded.compositions.reduce((n, c) => n + c.layers.length, 0);
+              platform.lifecycleMark("timeline hydrated", `${loaded.assets.length} assets, ${clips} clips`);
               clock.seek(0);
               if (result.missing.length)
                 useEditor

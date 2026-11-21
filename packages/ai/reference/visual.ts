@@ -35,10 +35,16 @@ export const visualFrameSchema = measuredColorSchema
         panY: z.number().finite().min(-3).max(3),
         expansion: z.number().finite(),
         confidence: unit,
+        /** Sub-pixel camera translation (pixels at 96×54) and scale per frame. */
+        fineX: z.number().finite().min(-3.5).max(3.5).optional(),
+        fineY: z.number().finite().min(-3.5).max(3.5).optional(),
+        fineZoom: z.number().finite().optional(),
       })
       .strict()
       .nullable()
       .optional(),
+    /** Picture structure: Sobel edge energy on an 8×8 grid summing to 1 (twice a second). */
+    edges: z.array(z.number().min(0).max(1)).length(64).optional(),
     /** Local motion: centroid and share of changing pixels, and a flow vector per 4×4 cell. */
     local: z
       .object({

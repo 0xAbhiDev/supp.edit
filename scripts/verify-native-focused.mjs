@@ -28,7 +28,8 @@ fs.mkdirSync(out, { recursive: true });
 const review = reviewFile ? fs.readFileSync(reviewFile, "utf8").trim() : "";
 const read = (p) => JSON.parse(fs.readFileSync(p, "utf8").replace(/^﻿/, ""));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
-const exe = path.resolve("bin/supp-edit.exe");
+// SUPP_EXE runs another build (an A/B against a preserved binary); bin/ by default.
+const exe = path.resolve(process.env.SUPP_EXE || "bin/supp-edit.exe");
 const running = () => {
   try {
     return execFileSync("tasklist", ["/FI", "IMAGENAME eq supp-edit.exe", "/NH"], { encoding: "utf8" }).includes("supp-edit.exe");
@@ -144,7 +145,7 @@ for (;;) {
   if (status && Math.round((Date.now() - began) / 1000) % 30 < 2) log("  ", status.replace("Cancel", "").trim());
   await page.waitForTimeout(2000);
 }
-const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music|Analysis time|Raw footage|No source interval|Low confidence|Analysis:|Tone sampling|Cache:|Reference coverage|Reference analysis|Reference cache|Reference grammar|repeat one action|near tie|No close source match/.test(t));
+const summary = (await panel.locator("p").allTextContents()).filter((t) => /measured shots|editable text|excluded|withheld|isolated|cropped|Lettering|beats|grammar|soundtrack|Generated|Replacement music|Analysis time|Raw footage|No source interval|Low confidence|Analysis:|Tone sampling|Cache:|Reference coverage|Reference analysis|Reference cache|Reference grammar|repeat one action|near tie|No close source match|Same footage|Source text|baked-in|burned into|Chosen automatically|Camera|dissolve|Dense title|person outlines|Person outlines|fallback matcher/.test(t));
 // The audio evidence the preview shows, opened as a user would.
 const audioEvidence = panel.getByText(/^Audio events/);
 if (await audioEvidence.count()) {
@@ -199,32 +200,42 @@ step("Apply, Undo and Redo", { applied, undone, redone });
   assert(chosen, "No alternative take can be chosen after Apply");
   const label = (await chosen.textContent()).trim();
   const [, takeName, takeSeconds] = label.match(/^Choose another take: (.+) @ ([\d.]+) s$/);
-  const savedHas = async () => {
+  // The saved sequence's media shots (start, clip, source in). The whole list is compared: another
+  // shot may legitimately use the same moment as the chosen take, so "some layer has it" is not
+  // evidence that the edited shot does.
+  const savedShots = async () => {
+    const before = fs.existsSync(project) ? fs.statSync(project).mtimeMs : 0;
     await page.getByRole("button", { name: "Save project", exact: true }).click();
     let file;
     for (let i = 0; i < 60; i++) {
       await page.waitForTimeout(500);
       try {
+        if (fs.statSync(project).mtimeMs === before) continue;
         file = read(project);
         if (file.compositions.length === applied.length - 1) break;
       } catch {}
     }
-    const asset = file.assets.find((a) => a.name === takeName);
     const comp = file.compositions.at(-1);
     const rate = (comp.settings?.fps ?? file.settings.fps).num / (comp.settings?.fps ?? file.settings.fps).den;
-    return comp.layers.some((l) => l.assetId === asset?.id && Math.abs(l.sourceIn / rate - Number(takeSeconds)) < 0.05);
+    return comp.layers
+      .filter((l) => l.kind === "media")
+      .map((l) => ({ start: l.start, asset: file.assets.find((a) => a.id === l.assetId)?.name, inS: Number((l.sourceIn / rate).toFixed(2)) }))
+      .sort((a, b) => a.start - b.start || String(a.asset).localeCompare(String(b.asset)));
   };
+  const original = await savedShots();
   await chosen.scrollIntoViewIfNeeded();
   await chosen.click();
   await page.waitForTimeout(800);
   await shot(page, "3b-alternative-take.png");
-  assert(await savedHas(), "The chosen alternative take is not in the saved sequence");
+  const swapped = await savedShots();
+  const changed = swapped.filter((x) => !original.some((o) => o.start === x.start && o.asset === x.asset && Math.abs(o.inS - x.inS) < 0.02));
+  assert(changed.some((x) => x.asset === takeName && Math.abs(x.inS - Number(takeSeconds)) < 0.05), "The chosen alternative take is not in the saved sequence");
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await page.waitForTimeout(500);
-  assert(!(await savedHas()), "Undo did not restore the original take");
+  assert.deepEqual(await savedShots(), original, "Undo did not restore the original take");
   await page.getByRole("button", { name: "Redo", exact: true }).click();
   await page.waitForTimeout(500);
-  assert(await savedHas(), "Redo did not restore the alternative take");
+  assert.deepEqual(await savedShots(), swapped, "Redo did not restore the alternative take");
   step("Edited an alternative take, Undo and Redo", { take: label });
 }
 await page.getByRole("button", { name: "Save project", exact: true }).click();

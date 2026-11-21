@@ -7,7 +7,7 @@ import {
 } from "react";
 import { useEditor } from "../../../packages/editor-state";
 import { AudioEvidence } from "./AudioEvidence";
-import { type Asset, fps } from "../../../packages/project-schema";
+import { type Asset, type Project, fps } from "../../../packages/project-schema";
 import {
   desktop,
   sourceUrl,
@@ -33,6 +33,7 @@ import {
 } from "../../../packages/ai/reference/dna";
 import { recreate } from "../../../packages/ai/reference/service";
 import { termLabels } from "../../../packages/ai/reference/footage-index";
+import { playedIntervals, reuseOf } from "../../../packages/ai/reference/take-reuse";
 import { measureTitleInk } from "../../../packages/ai/reference/font-match";
 import { SequencePreview } from "./SequencePreview";
 import "./reference-editor.css";
@@ -63,9 +64,27 @@ function SourceThumb({ asset }: { asset: Asset }) {
     <video aria-label={asset.name} muted preload="metadata" src={url} />
   ) : null;
 }
+type SavedTake = NonNullable<NonNullable<Project["compositions"][number]["ai"]>["takes"]>[number]["original"];
+
+/** Shot numbers of the listed clips, in timeline order. */
+function shotNumbers(p: Project, compositionId: string, clipIds: readonly string[]) {
+  const layers = compositionView(p, compositionId).clips.filter((l) => clipIds.includes(l.id)).sort((a, b) => a.start - b.start);
+  return new Map(layers.map((l, k) => [l.id, k + 1]));
+}
+/** Which shots a take would repeat, measured on the timeline as it is now (the replaced shot
+ * excluded); null when it repeats none. */
+function reuseNote(p: Project, compositionId: string, clipIds: readonly string[], clipId: string, take: { sourceId: string; inMs: number; outMs: number }) {
+  const played = playedIntervals(p, compositionId, new Set(clipIds)).filter((x) => x.clipId !== clipId);
+  const repeats = reuseOf(take, played);
+  if (!repeats.length) return null;
+  const numbers = shotNumbers(p, compositionId, clipIds);
+  return `Repeats shot ${repeats.map((r) => numbers.get(r.clipId) ?? "?").join(", ")} (${(repeats[0].overlapMs / 1000).toFixed(1)} s of the same moment)`;
+}
+
 export function ReferenceEditor() {
   const project = useEditor((s) => s.project),
     revision = useEditor((s) => s.revision),
+    activeComposition = useEditor((s) => s.activeComposition),
     state = useEditor.getState;
   const [reference, setReference] = useState(""),
     [raw, setRaw] = useState<string[]>([]),
@@ -94,6 +113,11 @@ export function ReferenceEditor() {
       result && isEditPreviewCurrent(result.preview, project, revision),
     // After Apply, a take is swapped in the recreated sequence itself, as an undoable edit.
     appliedTakes = !canApply && !!result?.preview.plan.resultCompositionId && project.compositions.some((c) => c.id === result.preview.plan.resultCompositionId);
+  // Takes are checked against the timeline they would change: the preview before Apply, the
+  // recreated sequence itself after.
+  const takeTimeline = result?.preview.plan.resultCompositionId ? { project: canApply ? result.preview.project : project, id: result.preview.plan.resultCompositionId, clips: result.matches.map((m) => m.clipId) } : null;
+  // A recreation reopened from disk (or no longer the live result): its saved takes.
+  const reopened = project.compositions.find((c) => c.id === activeComposition && c.ai?.plannerVersion === "reference-edit-1" && c.ai.takes?.length && c.id !== result?.preview.plan.resultCompositionId);
   const filePicker = useRef<HTMLInputElement>(null),
     target = useRef<"reference" | "raw">("raw"),
     mounted = useRef(true);
@@ -164,6 +188,39 @@ export function ReferenceEditor() {
       const preview = previewEditPlan({ ...plan, commands }, project, revision);
       setResult({ ...result, preview });
       setTitleChanges({});
+      setError("");
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+  /** A reopened recreation: swap one shot to a saved take, as one undoable edit of that clip
+   * (source moment, its own tone curve or none, speed curve rescaled). */
+  function chooseSavedTake(compositionId: string, clipId: string, take: SavedTake) {
+    try {
+      const asset = project.assets.find((a) => a.id === take.sourceId);
+      if (!asset) throw Error("That footage is no longer in the project.");
+      const comp = project.compositions.find((c) => c.id === compositionId);
+      const rate = (comp?.settings ?? project.settings).fps.num / (comp?.settings ?? project.settings).fps.den;
+      const s = state();
+      s.setComposition(compositionId);
+      s.executeScoped("Choose another take", (p) => {
+        const clip = p.clips.find((c) => c.id === clipId);
+        if (!clip) throw Error("That shot is no longer in the recreated sequence.");
+        const was = clip.timeRemap?.keys.length && clip.timeRemap.keys.every((k) => Math.abs(k.speed - clip.timeRemap!.keys[0].speed) < 1e-6) ? clip.timeRemap.keys[0].speed : 1;
+        clip.assetId = asset.id;
+        clip.sourceIn = Math.round((take.inMs * rate) / 1000);
+        const at = clip.effectStack?.findIndex((e) => e.type === "curves") ?? -1;
+        if (clip.effectStack && at >= 0) {
+          if (take.neutral) clip.effectStack.splice(at, 1);
+          else if (take.curves) clip.effectStack[at] = { ...clip.effectStack[at], parameters: take.curves };
+        }
+        if (Math.abs(take.speed - was) > 1e-6) {
+          if (clip.timeRemap) {
+            for (const k of clip.timeRemap.keys) k.speed = (k.speed * take.speed) / was;
+            if (clip.timeRemap.keys.every((k) => Math.abs(k.speed - 1) < 1e-6)) clip.timeRemap = undefined;
+          } else if (take.speed < 1) clip.timeRemap = { sourceOffset: 0, keys: [{ frame: 0, speed: take.speed, easing: "smooth" }, { frame: clip.duration, speed: take.speed, easing: "smooth" }] };
+        }
+      });
       setError("");
     } catch (e) {
       setError(String(e));
@@ -668,6 +725,45 @@ export function ReferenceEditor() {
           {error}
         </p>
       )}
+      {reopened && (
+        <details open className="re-saved-takes">
+          <summary>Alternative takes for {reopened.name}</summary>
+          <p className="re-muted">Saved with this recreation. A take that repeats another shot's moment says which shot.</p>
+          <table>
+            <tbody>
+              {reopened.ai!.takes!.map((t) => {
+                const clips = reopened.ai!.takes!.map((x) => x.clipId),
+                  layer = reopened.layers.find((l) => l.id === t.clipId);
+                if (!layer) return null;
+                const rate = reopened.settings.fps.num / reopened.settings.fps.den,
+                  nowMs = (layer.sourceIn * 1000) / rate,
+                  number = shotNumbers(project, reopened.id, clips).get(t.clipId);
+                const options = [t.original, ...t.alternatives].filter((o) => !(o.sourceId === layer.assetId && Math.abs(o.inMs - nowMs) < 50));
+                if (!options.length) return null;
+                return (
+                  <tr key={t.clipId}>
+                    <td>Shot {number}</td>
+                    <td>
+                      {options.map((o, k) => {
+                        const repeats = reuseNote(project, reopened.id, clips, t.clipId, o);
+                        return (
+                          <div key={k} className="re-alt">
+                            <button disabled={busy} onClick={() => chooseSavedTake(reopened.id, t.clipId, o)}>
+                              {o === t.original ? "Restore the first choice" : "Choose another take"}: {project.assets.find((a) => a.id === o.sourceId)?.name ?? o.sourceId} @ {(o.inMs / 1000).toFixed(2)} s
+                            </button>
+                            <span className="re-muted">{o.lostOn}</span>
+                            {repeats && <span className="re-tag warn" role="note">{repeats}</span>}
+                          </div>
+                        );
+                      })}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </details>
+      )}
       {result && view && (
         <div className="re-results">
           <h3>Style DNA</h3>
@@ -789,6 +885,14 @@ export function ReferenceEditor() {
                             </span>
                           </>
                         )}
+                        {m.label && (
+                          <>
+                            <br />
+                            <span className={m.label === "best available" ? "re-tag warn" : "re-tag"}>
+                              {m.label === "best available" ? "best available candidate" : "close match"}
+                            </span>
+                          </>
+                        )}
                         {m.coverage && (
                           <>
                             <br />
@@ -854,14 +958,18 @@ export function ReferenceEditor() {
                         {m.selection === "local" && <span className="re-tag">local match</span>}
                       </td>
                       <td>
-                        {(m.alternatives ?? []).map((alt, k) => (
-                          <div key={k} className="re-alt">
-                            <button disabled={(!canApply && !appliedTakes) || busy} title={Object.entries(alt.match).map(([x, v]) => `${termLabels[x] ?? x} ${Math.round(v * 100)}%`).join(" · ")} onClick={() => chooseTake(i, alt)}>
-                              Choose another take: {name(alt.sourceId)} @ {(alt.inMs / 1000).toFixed(2)} s
-                            </button>
-                            <span className="re-muted">{alt.lostOn}</span>
-                          </div>
-                        ))}
+                        {(m.alternatives ?? []).map((alt, k) => {
+                          const repeats = takeTimeline ? reuseNote(takeTimeline.project, takeTimeline.id, takeTimeline.clips, m.clipId, alt) : null;
+                          return (
+                            <div key={k} className="re-alt">
+                              <button disabled={(!canApply && !appliedTakes) || busy} title={Object.entries(alt.match).map(([x, v]) => `${termLabels[x] ?? x} ${Math.round(v * 100)}%`).join(" · ")} onClick={() => chooseTake(i, alt)}>
+                                Choose another take: {name(alt.sourceId)} @ {(alt.inMs / 1000).toFixed(2)} s
+                              </button>
+                              <span className="re-muted">{alt.lostOn}</span>
+                              {repeats && <span className="re-tag warn" role="note">{repeats}</span>}
+                            </div>
+                          );
+                        })}
                       </td>
                     </tr>
                   );

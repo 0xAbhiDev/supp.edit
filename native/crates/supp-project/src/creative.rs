@@ -69,6 +69,28 @@ mod tests {
         p.compositions[0].markers[0].id = p.tracks[0].id.clone();
         assert!(p.validate().is_err());
     }
+    #[test]
+    fn alternative_takes_survive_save_and_reopen_and_bad_ones_are_refused() {
+        let mut p: Project =
+            serde_json::from_str(include_str!("../../../../tests/fixtures/project.supp")).unwrap();
+        p.schema_version = 10;
+        let mut track = serde_json::to_value(&p.tracks[0]).unwrap();
+        track["id"] = "ai-track".into();
+        let take = |source: &str, a: f64, b: f64| serde_json::json!({"sourceId":source,"inMs":a,"outMs":b,"speed":1,"score":0.71,"lostOn":"trails on pose (0.40 vs 0.52)","curves":{"red":[[0,0],[1,1]],"green":[[0,0.02],[1,0.97]],"blue":[[0,0],[1,1]]}});
+        let c = serde_json::json!({"id":"ai-sequence","name":"Recreation","settings":p.settings,"duration":90,"background":"#000000","tracks":[track],"layers":[],"markers":[],"ai":{"plannerVersion":"reference-edit-1","createdAt":"2026-11-21T00:00:00.000Z","brief":{"prompt":"Recreate the reference.","profile":"gym","durationSeconds":30,"aspect":"9:16","pacing":"balanced","beatSync":"balanced","captions":false,"speedRamps":"off","prioritize":[]},"evidence":[],"warnings":[],
+            "takes":[{"clipId":"shot-1","original":take("clip-a",1000.,2500.),"alternatives":[take("clip-a",9000.,10500.),{"sourceId":"clip-b","inMs":0,"outMs":1500,"speed":0.9,"score":0.6,"lostOn":"close second overall","neutral":true}]}]}});
+        p.compositions.push(serde_json::from_value(c).unwrap());
+        p.validate().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("takes.supp");
+        save(&path, &p).unwrap();
+        let loaded = read(&path).unwrap();
+        assert_eq!(serde_json::to_value(&loaded).unwrap(), serde_json::to_value(&p).unwrap());
+        // A take that ends before it starts is refused.
+        let takes = p.compositions.last_mut().unwrap().ai.as_mut().unwrap().takes.as_mut().unwrap();
+        takes[0].alternatives[0].out_ms = 100.;
+        assert!(p.validate().is_err());
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -140,6 +162,49 @@ pub struct AiEditMetadata {
     pub audio_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_notes: Option<Vec<String>>,
+    /// Reference recreation: per shot, its clip, the moment first chosen and its alternative takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub takes: Option<Vec<ShotTakes>>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CurveSet {
+    pub red: Vec<[f64; 2]>,
+    pub green: Vec<[f64; 2]>,
+    pub blue: Vec<[f64; 2]>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Take {
+    pub source_id: String,
+    pub in_ms: f64,
+    pub out_ms: f64,
+    pub speed: f64,
+    pub score: f64,
+    pub lost_on: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curves: Option<CurveSet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub neutral: Option<bool>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShotTakes {
+    pub clip_id: String,
+    pub original: Take,
+    pub alternatives: Vec<Take>,
+}
+fn valid_take(t: &Take) -> bool {
+    let curve = |c: &Vec<[f64; 2]>| (2..=8).contains(&c.len()) && c.iter().all(|p| p.iter().all(|v| (0. ..=1.).contains(v)));
+    crate::valid_id(&t.source_id)
+        && t.in_ms.is_finite()
+        && t.out_ms.is_finite()
+        && (0. ..=2e9).contains(&t.in_ms)
+        && (t.in_ms..=2e9).contains(&t.out_ms)
+        && (0.05..=4.).contains(&t.speed)
+        && (-10. ..=10.).contains(&t.score)
+        && t.lost_on.chars().count() <= 400
+        && t.curves.as_ref().is_none_or(|c| curve(&c.red) && curve(&c.green) && curve(&c.blue))
 }
 impl AiEditMetadata {
     pub fn validate(&self) -> Result<(), Error> {
@@ -188,6 +253,12 @@ impl AiEditMetadata {
         if let Some(values) = &self.generated {
             crate::generated::validate(values)?;
         }
+        ensure(
+            self.takes.as_ref().is_none_or(|t| {
+                t.len() <= 500 && t.iter().all(|s| crate::valid_id(&s.clip_id) && valid_take(&s.original) && s.alternatives.len() <= 4 && s.alternatives.iter().all(valid_take))
+            }),
+            "Invalid alternative takes",
+        )?;
         ensure(
             matches!(
                 self.planner_version.as_str(),

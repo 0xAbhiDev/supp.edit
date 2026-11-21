@@ -42,7 +42,8 @@ for (let k = 1; k <= count; k++) {
   await page.getByRole("button", { name: "Export MP4" }).click();
   const answered = dialog(movie);
   await page.waitForTimeout(1500);
-  await page.screenshot({ path: path.join(out, `attempt-${k}.png`) });
+  // Evidence only: a busy renderer can delay screenshots, which must not fail the export.
+  await page.screenshot({ path: path.join(out, `attempt-${k}.png`), timeout: 5000 }).catch(() => {});
   await page.getByRole("button", { name: /Rendering/ }).waitFor({ timeout: 30000 }).catch(() => {});
   await page.getByRole("button", { name: "Export MP4" }).waitFor({ timeout: 30 * 60000 });
   const alerts = await page.locator("[role=alert], [role=status]").allTextContents();

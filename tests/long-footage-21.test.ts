@@ -134,11 +134,25 @@ describe("calibration and coverage", () => {
       pose: null,
       c: { sourceId: "a", sceneStartMs: stretch * 10000, sceneEndMs: stretch * 10000 + 3000, quality: 1 },
     }) as unknown as Option;
-  it("reports lower confidence for a near tie than for a clear lead, whatever the absolute score", () => {
-    const tie = calibrate(option(0.9, 0.8, 0), [option(0.9, 0.8, 0), option(0.894, 0.8, 1)]);
-    const lead = calibrate(option(0.7, 0.8, 0), [option(0.7, 0.8, 0), option(0.55, 0.8, 1)]);
+  // 4.1 recalibration: across the graded cases a small margin mostly meant several equally right
+  // repetitions (margin AUC 0.42), so confidence follows measured agreement on what the shot does;
+  // the near tie is still reported (margin) for the explanation.
+  it("bases confidence on measured agreement, not on the score margin or the absolute score", () => {
+    const tie = calibrate(option(0.9, 0.85, 0), [option(0.9, 0.85, 0), option(0.894, 0.85, 1)]);
+    const weakLead = calibrate(option(0.7, 0.55, 0), [option(0.7, 0.55, 0), option(0.55, 0.55, 1)]);
     expect(tie.margin).toBeLessThan(0.01);
-    expect(lead.certainty).toBeGreaterThan(tie.certainty);
+    expect(weakLead.margin).toBeGreaterThan(0.1);
+    expect(tie.certainty).toBeGreaterThan(weakLead.certainty);
+    // Same agreement, different margins: the same confidence.
+    const lead = calibrate(option(0.7, 0.85, 0), [option(0.7, 0.85, 0), option(0.55, 0.85, 1)]);
+    expect(lead.certainty).toBe(tie.certainty);
+  });
+  it("measures the best different moment anywhere, the same stretch included", () => {
+    const pick = option(0.8, 0.8, 0);
+    const sameStretchLater = { ...option(0.79, 0.8, 0), inMs: 2000, outMs: 3000 } as Option;
+    const cal = calibrate(pick, [pick, sameStretchLater, option(0.6, 0.8, 1)]);
+    expect(cal.margin).toBeCloseTo(0.2, 5);
+    expect(cal.rival).toBeCloseTo(0.01, 5);
   });
   it("calls a shot missing when nothing performs it", () => {
     expect(calibrate(option(0.6, 0.35, 0), [option(0.6, 0.35, 0)]).coverage).toBe("missing");
