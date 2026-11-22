@@ -119,11 +119,14 @@ export const visionAnalysisSchema = z
     // Dense sampling: a frame every 2.5 s of long scenes, up to the native budget (vision_budget).
     frames: z.array(visionFrameSchema).min(1).max(2200),
     totalScenes: z.number().int().min(1).max(2000),
-    analyzedScenes: z.number().int().min(1).max(32),
+    // The native scene cap (vision_budget): 160 scenes up to ~16 minutes, 600 beyond. The old
+    // limit of 32 rejected any clip with more scenes (a film, a long vlog) and failed the edit.
+    analyzedScenes: z.number().int().min(1).max(600),
     method: z.string().max(2000),
     limitations: z.array(z.string().max(1000)).max(32),
   })
-  .strict();
+  .strict()
+  .refine((v) => v.analyzedScenes <= v.totalScenes, "More scenes analysed than the clip has.");
 export const analysisResultSchema = z
   .object({
     assetId: identitySchema,
