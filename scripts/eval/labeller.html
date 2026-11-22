@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test set labelling</title>
+<style>
+:root {
+  --bg: #f6f6f3; --panel: #ffffff; --ink: #1c1c1a; --muted: #6a6a64; --line: #e1e0da; --soft: #efeee9;
+  --accent: #2f66d0; --accent-ink: #ffffff; --done: #2c7a4f; --warn: #a65a07; --bad: #b9381a;
+  --shot: #d9d7cf; --shot-done: #b8dcc6; --shot-sel: #2f66d0; --range: rgba(47,102,208,.28);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151514; --panel: #1e1e1c; --ink: #ecebe5; --muted: #a2a199; --line: #34342f; --soft: #282825;
+    --accent: #6f9ef0; --accent-ink: #0c1424; --done: #5cc189; --warn: #eda24c; --bad: #f08a66;
+    --shot: #3b3b36; --shot-done: #2d5a40; --shot-sel: #6f9ef0; --range: rgba(111,158,240,.32);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+button, input, select { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled, input:disabled, select:disabled { opacity: .5; cursor: default; }
+input[type=text], select { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 8px; width: 100%; }
+header { display: flex; align-items: baseline; gap: 16px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; }
+header .muted { font-size: 13px; }
+.muted { color: var(--muted); }
+.layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: calc(100vh - 50px); }
+aside { border-right: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+main { padding: 16px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.pair { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 8px 10px; cursor: pointer; text-align: left; width: 100%; display: block; }
+.pair.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.pair .name { font-weight: 600; overflow-wrap: anywhere; }
+.chips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.chip { background: var(--soft); border-radius: 999px; padding: 1px 8px; font-size: 12px; color: var(--muted); }
+.chip.ok { color: var(--done); } .chip.warn { color: var(--warn); }
+.prepare { display: grid; gap: 6px; margin-top: 8px; cursor: default; }
+.prepare label { font-size: 12px; color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.card h2 { font-size: 15px; margin: 0 0 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.spacer { flex: 1; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+video { width: 100%; max-height: 46vh; background: #000; border-radius: 8px; display: block; }
+.strip { position: relative; height: 34px; background: var(--soft); border-radius: 6px; margin-top: 8px; overflow: hidden; cursor: pointer; }
+.strip .s { position: absolute; top: 0; bottom: 0; background: var(--shot); border-right: 2px solid var(--panel); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); overflow: hidden; }
+.strip .s.done { background: var(--shot-done); color: var(--ink); }
+.strip .s.sel { outline: 2px solid var(--shot-sel); outline-offset: -2px; color: var(--ink); font-weight: 600; }
+.strip .head, .rawbar .head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--bad); pointer-events: none; }
+.rawbar { position: relative; height: 14px; background: var(--soft); border-radius: 4px; margin-top: 6px; overflow: hidden; }
+.rawbar .r { position: absolute; top: 0; bottom: 0; background: var(--range); }
+.rawbar .r.exact { background: color-mix(in srgb, var(--done) 45%, transparent); }
+.rawbar .mark { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--warn) 45%, transparent); }
+.field { display: grid; gap: 4px; }
+.field > span { font-size: 12px; color: var(--muted); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; flex: 1; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button.on { background: var(--accent); color: var(--accent-ink); }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.tabs button.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+table { width: 100%; border-collapse: collapse; }
+td, th { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); font-size: 13px; }
+th { color: var(--muted); font-weight: 500; }
+.time { font-variant-numeric: tabular-nums; }
+.status { font-size: 13px; }
+.status.err { color: var(--bad); } .status.ok { color: var(--done); }
+.needed { color: var(--warn); font-size: 13px; }
+kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; }
+.guide { max-width: 760px; }
+.guide li { margin: 4px 0; }
+.locked-note { color: var(--done); font-weight: 600; }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); }
+  .grid2 { grid-template-columns: 1fr; }
+  main { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>supp.edit test set</h1>
+  <span class="muted" id="counts"></span>
+  <span class="spacer"></span>
+  <button id="refresh" title="Look for new pair folders">Refresh</button>
+</header>
+<div class="layout">
+  <aside id="pairs"></aside>
+  <main id="main"></main>
+</div>
+
+<template id="guide-tpl">
+  <div class="card guide">
+    <h2>Add a pair</h2>
+    <ol>
+      <li>Make a folder for it in <code id="pairs-dir"></code>, for example <code>gym-01</code>.</li>
+      <li>Put the reference reel in it, named <code>reference.mp4</code> (or .mov, .webm).</li>
+      <li>Put the raw footage in the same folder, any names.</li>
+      <li>Press <b>Refresh</b>, choose the category and whether the footage is the reel's own, then <b>Prepare</b>.</li>
+    </ol>
+    <h2>Label it (about 10 minutes)</h2>
+    <ol>
+      <li>Check the shot strip: split, merge or move cuts until each block is one reference shot.</li>
+      <li>For each shot, say what it shows, its role and its energy.</li>
+      <li>Then find every stretch of your footage that could fill it, mark in and out, and say how well it fits. Several stretches are fine. If nothing fits, add none.</li>
+      <li>When every shot is done, <b>Lock labels</b>. Lock before the app ever runs on the pair.</li>
+    </ol>
+    <p class="muted">Keys: <kbd>I</kbd> mark in · <kbd>O</kbd> mark out · <kbd>A</kbd> add range · <kbd>,</kbd> <kbd>.</kbd> step a frame · <kbd>[</kbd> <kbd>]</kbd> previous or next shot · <kbd>P</kbd> play the shot · <kbd>S</kbd> split at the playhead.</p>
+  </div>
+</template>
+
+<template id="pair-tpl">
+  <div class="card">
+    <div class="row">
+      <h2 id="pair-name" style="margin:0"></h2>
+      <div class="chips" id="pair-chips" style="margin:0"></div>
+      <span class="spacer"></span>
+      <span class="status" id="save-status"></span>
+      <button id="lock" class="primary">Lock labels</button>
+    </div>
+    <p class="muted" id="pair-note" style="margin:6px 0 0"></p>
+  </div>
+  <div class="grid2">
+    <div class="card">
+      <h2>Reference</h2>
+      <video id="ref" controls preload="auto"></video>
+      <div class="strip" id="strip" title="Click a shot to select it"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="split" aria-keyshortcuts="S">Split at playhead</button>
+        <button id="merge">Merge with next</button>
+        <button id="move">Move start to playhead</button>
+        <span class="spacer"></span>
+        <button id="prev" aria-keyshortcuts="[">◀ Shot</button>
+        <button id="play-shot" aria-keyshortcuts="P">Play shot</button>
+        <button id="next" aria-keyshortcuts="]">Shot ▶</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2 id="shot-title"></h2>
+      <div style="display:grid; gap:10px">
+        <label class="field"><span>What it shows</span><input type="text" id="shows" placeholder="a man lifting a barbell from the floor"></label>
+        <label class="field"><span>Role in the edit</span><select id="role"></select></label>
+        <div class="field"><span>Energy</span><div class="seg" id="energy"></div></div>
+        <label class="field"><span>Action, if it has one (optional)</span><input type="text" id="action" placeholder="deadlift, pouring, jumping …"></label>
+        <label class="field"><span>Note (optional)</span><input type="text" id="note"></label>
+        <div class="needed" id="needed"></div>
+        <div class="row"><button id="done" class="primary">Shot done, next</button><button id="undone">Not done</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Where can your footage fill this shot?</h2>
+    <div class="tabs" id="clips"></div>
+    <div class="grid2">
+      <div>
+        <video id="raw" controls preload="auto"></video>
+        <div class="rawbar" id="rawbar"></div>
+      </div>
+      <div style="display:grid; gap:10px; align-content:start">
+        <div class="row">
+          <button id="back" aria-keyshortcuts=",">◀ Frame</button>
+          <button id="fwd" aria-keyshortcuts=".">Frame ▶</button>
+          <span class="time" id="raw-time"></span>
+        </div>
+        <div class="row">
+          <button id="mark-in" aria-keyshortcuts="I">Mark in</button>
+          <button id="mark-out" aria-keyshortcuts="O">Mark out</button>
+          <button id="whole">Whole clip</button>
+          <span class="time" id="marks"></span>
+        </div>
+        <label class="field"><span>How well it fits</span><select id="level"></select></label>
+        <div class="row"><button id="add" class="primary" aria-keyshortcuts="A">Add range</button></div>
+        <table>
+          <thead><tr><th>Clip</th><th>From–to</th><th>Fit</th><th></th></tr></thead>
+          <tbody id="ranges"></tbody>
+        </table>
+        <p class="muted" id="no-ranges" style="margin:0"></p>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+const LEVEL_NAMES = { exact: "Exact moment", action: "Same action", role: "Fits the role" };
+const S = { state: null, id: null, pair: null, labels: null, sel: 0, clip: null, markIn: null, markOut: null, level: null, timer: null, stopRefAt: null, stopRawAt: null };
+const $ = (id) => document.getElementById(id);
+const api = async (url, options = {}) => {
+  const res = await fetch(url, { ...options, headers: { "content-type": "application/json" } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Error(data.error || res.statusText);
+  return data;
+};
+const fmt = (ms) => {
+  if (ms === null || ms === undefined) return "–";
+  const s = ms / 1000;
+  return s >= 60 ? `${Math.floor(s / 60)}:${(s % 60).toFixed(2).padStart(5, "0")}` : `${s.toFixed(2)} s`;
+};
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const locked = () => !!S.pair?.lock;
+const shot = () => S.labels?.shots[S.sel];
+const clipInfo = (file) => S.pair.raw.find((r) => r.file === file);
+const mediaUrl = (file) => `/media/${encodeURIComponent(S.id)}/${encodeURIComponent(file)}`;
+const problems = (s) => [!s.shows.trim() && "say what it shows", !s.role && "choose its role", !s.energy && "choose its energy", !s.done && "mark it done"].filter(Boolean);
+
+// ---- Pair list -------------------------------------------------------------------------------
+async function loadState() {
+  S.state = await api("/api/state");
+  const pairs = S.state.pairs, ready = pairs.filter((p) => p.prepared);
+  const by = (k) => ready.filter((p) => p.split === k).length;
+  $("counts").textContent = `${ready.length} pairs (target 30) · ${ready.filter((p) => p.locked).length} locked · open ${by("open")} · blind ${by("blind")} · seen ${by("seen")}`;
+  renderPairs();
+  if (!S.id) renderGuide();
+}
+function renderPairs() {
+  const box = $("pairs");
+  box.innerHTML = "";
+  for (const p of S.state.pairs) {
+    // A prepared pair opens on click (a button); a folder to prepare holds its own form.
+    const el = document.createElement(p.prepared ? "button" : "div");
+    el.className = "pair" + (p.id === S.id ? " sel" : "");
+    if (p.id === S.id) el.setAttribute("aria-current", "true");
+    if (p.prepared) {
+      el.innerHTML = `<div class="name">${esc(p.name)}</div><div class="chips">
+        <span class="chip">${esc(p.category)}</span><span class="chip">${p.footage === "own" ? "own footage" : "different footage"}</span>
+        <span class="chip">${p.split}</span>
+        ${p.locked ? '<span class="chip ok">locked</span>' : `<span class="chip ${p.done === p.shots ? "ok" : "warn"}">${p.done}/${p.shots} shots</span>`}
+        ${p.relabelledAfterRun ? '<span class="chip warn">relabelled after a run</span>' : ""}</div>`;
+      el.onclick = () => openPair(p.id);
+    } else {
+      el.style.cursor = "default";
+      el.innerHTML = `<div class="name">${esc(p.id)}</div><div class="muted" style="font-size:12px">${p.files.length} videos · not prepared</div>`;
+      if (!p.hasReference) el.innerHTML += `<div class="needed">Name the reference video <code>reference.mp4</code>.</div>`;
+      else {
+        const form = document.createElement("div");
+        form.className = "prepare";
+        form.innerHTML = `<label>Category<select data-k="category">${S.state.categories.map((c) => `<option>${c}</option>`).join("")}</select></label>
+          <label>The raw footage is
+            <select data-k="footage"><option value="own">the reel's own footage</option><option value="different">other recordings</option></select></label>
+          <button class="primary">Prepare</button><span class="status"></span>`;
+        const button = form.querySelector("button"), status = form.querySelector(".status");
+        button.onclick = async () => {
+          button.disabled = true;
+          status.className = "status";
+          status.textContent = "Preparing: reading, hashing and finding cuts …";
+          try {
+            await api(`/api/pair/${encodeURIComponent(p.id)}/prepare`, { method: "POST", body: JSON.stringify({ category: form.querySelector('[data-k="category"]').value, footage: form.querySelector('[data-k="footage"]').value }) });
+            await loadState();
+            openPair(p.id);
+          } catch (e) {
+            status.className = "status err";
+            status.textContent = e.message;
+            button.disabled = false;
+          }
+        };
+        el.appendChild(form);
+      }
+    }
+    box.appendChild(el);
+  }
+  if (!S.state.pairs.length) box.innerHTML = `<p class="muted">No pairs yet.</p>`;
+}
+function renderGuide() {
+  const main = $("main");
+  main.innerHTML = "";
+  main.appendChild($("guide-tpl").content.cloneNode(true));
+  $("pairs-dir").textContent = S.state.pairsDir;
+}
+
+// ---- One pair --------------------------------------------------------------------------------
+async function openPair(id) {
+  const { pair, labels } = await api(`/api/pair/${encodeURIComponent(id)}`);
+  Object.assign(S, { id, pair, labels, sel: 0, clip: pair.raw[0].file, markIn: null, markOut: null, level: pair.footage === "own" ? "exact" : "action" });
+  const main = $("main");
+  main.innerHTML = "";
+  main.appendChild($("pair-tpl").content.cloneNode(true));
+  wire();
+  $("ref").src = mediaUrl(pair.reference.file);
+  $("raw").src = mediaUrl(S.clip);
+  renderPairs();
+  render();
+}
+function wire() {
+  const ref = $("ref"), raw = $("raw");
+  ref.addEventListener("timeupdate", () => {
+    if (S.stopRefAt !== null && ref.currentTime * 1000 >= S.stopRefAt) { ref.pause(); S.stopRefAt = null; }
+    renderStripHead();
+  });
+  ref.addEventListener("seeked", renderStripHead);
+  raw.addEventListener("timeupdate", () => {
+    if (S.stopRawAt !== null && raw.currentTime * 1000 >= S.stopRawAt) { raw.pause(); S.stopRawAt = null; }
+    renderRawTime();
+  });
+  raw.addEventListener("seeked", renderRawTime);
+  raw.addEventListener("loadedmetadata", renderRawTime);
+  $("strip").addEventListener("click", (e) => {
+    const box = $("strip").getBoundingClientRect();
+    const t = ((e.clientX - box.left) / box.width) * S.pair.reference.durationMs;
+    const i = S.labels.shots.findIndex((s) => t >= s.startMs && t < s.endMs);
+    if (i >= 0) select(i, true);
+  });
+  $("split").onclick = split;
+  $("merge").onclick = merge;
+  $("move").onclick = moveStart;
+  $("prev").onclick = () => select(Math.max(0, S.sel - 1), true);
+  $("next").onclick = () => select(Math.min(S.labels.shots.length - 1, S.sel + 1), true);
+  $("play-shot").onclick = playShot;
+  $("shows").oninput = (e) => edit((s) => (s.shows = e.target.value), false);
+  $("action").oninput = (e) => edit((s) => (s.action = e.target.value), false);
+  $("note").oninput = (e) => edit((s) => (s.note = e.target.value), false);
+  $("role").innerHTML = `<option value="">Choose …</option>` + Object.entries(S.state.roles).map(([k, d]) => `<option value="${k}">${k}: ${esc(d)}</option>`).join("");
+  $("role").onchange = (e) => edit((s) => (s.role = e.target.value || null));
+  $("energy").innerHTML = S.state.energy.map((k) => `<button data-e="${k}">${k}</button>`).join("");
+  $("energy").onclick = (e) => { const k = e.target.dataset?.e; if (k) edit((s) => (s.energy = k)); };
+  $("done").onclick = () => {
+    edit((s) => (s.done = true));
+    const next = S.labels.shots.findIndex((s, i) => i > S.sel && problems(s).length);
+    const first = S.labels.shots.findIndex((s) => problems(s).length);
+    select(next >= 0 ? next : first >= 0 ? first : S.sel, true);
+  };
+  $("undone").onclick = () => edit((s) => (s.done = false));
+  $("level").innerHTML = Object.entries(S.state.levels).map(([k, d]) => `<option value="${k}" ${k === "exact" && S.pair.footage === "different" ? "disabled" : ""}>${LEVEL_NAMES[k]}: ${esc(d)}</option>`).join("");
+  $("level").onchange = (e) => (S.level = e.target.value);
+  $("back").onclick = () => step(-1);
+  $("fwd").onclick = () => step(1);
+  $("mark-in").onclick = () => mark("in");
+  $("mark-out").onclick = () => mark("out");
+  $("whole").onclick = () => { S.markIn = 0; S.markOut = clipInfo(S.clip).durationMs; renderMarks(); };
+  $("add").onclick = addRange;
+  $("lock").onclick = toggleLock;
+}
+function render() {
+  if (!S.pair) return;
+  const p = S.pair;
+  $("pair-name").textContent = p.name;
+  $("pair-chips").innerHTML = `<span class="chip">${esc(p.category)}</span><span class="chip">${p.footage === "own" ? "own footage" : "different footage"}</span><span class="chip">${p.split}</span>`;
+  const split = { open: "Open: used while developing.", blind: "Blind: scored only at release checks, never used for tuning.", seen: "Seen: already used for tuning; counts as a regression check, not as unseen." }[p.split];
+  $("pair-note").textContent = `${split} ${p.raw.length} raw clip${p.raw.length > 1 ? "s" : ""}. ${p.lock ? "Locked " + new Date(p.lock.lockedAt).toLocaleString() + "." : ""}${p.firstRunAt ? " The app has run on this pair." : ""}`;
+  $("lock").textContent = locked() ? "Unlock" : "Lock labels";
+  $("lock").className = locked() ? "" : "primary";
+  for (const id of ["split", "merge", "move", "shows", "role", "action", "note", "done", "undone", "mark-in", "mark-out", "whole", "level", "add"]) $(id).disabled = locked();
+  $("level").value = S.level;
+  renderStrip();
+  renderShot();
+  renderClips();
+  renderRanges();
+  renderMarks();
+}
+function renderStrip() {
+  const total = S.pair.reference.durationMs;
+  $("strip").innerHTML = S.labels.shots.map((s, i) => `<div class="s ${!problems(s).length ? "done" : ""} ${i === S.sel ? "sel" : ""}" style="left:${(s.startMs / total) * 100}%;width:${((s.endMs - s.startMs) / total) * 100}%">${s.shot}</div>`).join("") + `<div class="head" id="head"></div>`;
+  renderStripHead();
+}
+function renderStripHead() {
+  const head = $("head"), ref = $("ref");
+  if (head && ref) head.style.left = `${((ref.currentTime * 1000) / S.pair.reference.durationMs) * 100}%`;
+}
+function renderShot() {
+  const s = shot();
+  $("shot-title").textContent = `Shot ${s.shot} of ${S.labels.shots.length} · ${fmt(s.startMs)} – ${fmt(s.endMs)}`;
+  if (document.activeElement !== $("shows")) $("shows").value = s.shows;
+  if (document.activeElement !== $("action")) $("action").value = s.action;
+  if (document.activeElement !== $("note")) $("note").value = s.note;
+  $("role").value = s.role ?? "";
+  for (const b of $("energy").querySelectorAll("button")) { b.classList.toggle("on", b.dataset.e === s.energy); b.disabled = locked(); }
+  const need = locked() ? [] : problems(s);
+  $("needed").textContent = locked() ? "Labels locked." : need.length ? "Still needed: " + need.join(", ") + "." : "This shot is done.";
+  $("needed").style.color = need.length ? "" : "var(--done)";
+}
+function renderClips() {
+  $("clips").innerHTML = S.pair.raw.map((r) => `<button data-f="${esc(r.file)}" class="${r.file === S.clip ? "on" : ""}">${esc(r.file)} · ${fmt(r.durationMs)}</button>`).join("");
+  $("clips").onclick = (e) => { const f = e.target.dataset?.f; if (f) showClip(f); };
+}
+function renderRanges() {
+  const s = shot();
+  $("ranges").innerHTML = s.acceptable.map((a, i) => `<tr><td>${esc(a.clip)}</td><td class="time">${fmt(a.startMs)} – ${fmt(a.endMs)}</td><td>${LEVEL_NAMES[a.level]}</td>
+    <td style="white-space:nowrap"><button data-play="${i}">Play</button> <button data-del="${i}" ${locked() ? "disabled" : ""}>Remove</button></td></tr>`).join("");
+  $("ranges").onclick = (e) => {
+    const play = e.target.dataset?.play, del = e.target.dataset?.del;
+    if (play !== undefined) { const a = s.acceptable[play]; showClip(a.clip, a.startMs); S.stopRawAt = a.endMs; $("raw").play(); }
+    if (del !== undefined) edit((x) => x.acceptable.splice(Number(del), 1));
+  };
+  $("no-ranges").textContent = s.acceptable.length ? "" : "No ranges yet. If nothing in the footage could fill this shot, leave it empty and mark the shot done.";
+  renderRawBar();
+}
+function renderRawBar() {
+  const info = clipInfo(S.clip), total = info.durationMs;
+  const ranges = shot().acceptable.filter((a) => a.clip === S.clip).map((a) => `<div class="r ${a.level}" style="left:${(a.startMs / total) * 100}%;width:${((a.endMs - a.startMs) / total) * 100}%" title="${LEVEL_NAMES[a.level]}"></div>`).join("");
+  const mark = S.markIn !== null ? `<div class="mark" style="left:${(S.markIn / total) * 100}%;width:${(((S.markOut ?? S.markIn) - S.markIn) / total) * 100 || 0.4}%"></div>` : "";
+  $("rawbar").innerHTML = ranges + mark + `<div class="head" id="rawhead"></div>`;
+  renderRawTime();
+}
+function renderRawTime() {
+  const raw = $("raw");
+  if (!raw || !S.pair) return;
+  $("raw-time").textContent = fmt(raw.currentTime * 1000) + " / " + fmt(clipInfo(S.clip).durationMs);
+  const head = $("rawhead");
+  if (head) head.style.left = `${((raw.currentTime * 1000) / clipInfo(S.clip).durationMs) * 100}%`;
+}
+function renderMarks() {
+  $("marks").textContent = `in ${fmt(S.markIn)} · out ${fmt(S.markOut)}`;
+  renderRawBar();
+}
+
+// ---- Actions ---------------------------------------------------------------------------------
+function select(i, seek) {
+  S.sel = i;
+  if (seek) { $("ref").currentTime = shot().startMs / 1000; S.stopRefAt = null; }
+  const first = shot().acceptable[0];
+  if (first && first.clip !== S.clip) showClip(first.clip, first.startMs);
+  render();
+}
+function showClip(file, atMs) {
+  if (file !== S.clip) {
+    S.clip = file;
+    S.markIn = S.markOut = null;
+    const raw = $("raw");
+    raw.src = mediaUrl(file);
+    if (atMs !== undefined) raw.addEventListener("loadedmetadata", () => (raw.currentTime = atMs / 1000), { once: true });
+  } else if (atMs !== undefined) $("raw").currentTime = atMs / 1000;
+  renderClips();
+  renderRawBar();
+  renderMarks();
+}
+function playShot() {
+  const ref = $("ref");
+  ref.currentTime = shot().startMs / 1000;
+  S.stopRefAt = shot().endMs;
+  ref.play();
+}
+function step(frames) {
+  const raw = $("raw"), fps = clipInfo(S.clip).fps || 30;
+  raw.pause();
+  raw.currentTime = Math.max(0, raw.currentTime + frames / fps);
+}
+function mark(which) {
+  if (locked()) return;
+  const t = Math.round($("raw").currentTime * 1000);
+  if (which === "in") { S.markIn = t; if (S.markOut !== null && S.markOut <= t) S.markOut = null; }
+  else { S.markOut = t; if (S.markIn === null || S.markIn >= t) S.markIn = Math.max(0, t - 1000); }
+  renderMarks();
+}
+function addRange() {
+  if (locked()) return;
+  if (S.markIn === null || S.markOut === null || S.markOut <= S.markIn) return flash("Mark an in and an out point on the footage first.", true);
+  const range = { clip: S.clip, startMs: S.markIn, endMs: S.markOut, level: S.level };
+  edit((s) => s.acceptable.push(range));
+  S.markIn = S.markOut = null;
+  renderMarks();
+}
+function renumber() { S.labels.shots.forEach((s, i) => (s.shot = i + 1)); }
+const blank = (startMs, endMs) => ({ shot: 0, startMs, endMs, shows: "", role: null, energy: null, action: "", acceptable: [], note: "", done: false });
+function split() {
+  if (locked()) return;
+  const t = Math.round($("ref").currentTime * 1000);
+  const i = S.labels.shots.findIndex((s) => t > s.startMs + 100 && t < s.endMs - 100);
+  if (i < 0) return flash("Put the playhead inside a shot, at least 0.1 s from its cuts.", true);
+  const s = S.labels.shots[i];
+  S.labels.shots.splice(i + 1, 0, blank(t, s.endMs));
+  s.endMs = t;
+  s.done = false;
+  renumber();
+  S.sel = i;
+  changed();
+}
+function merge() {
+  if (locked()) return;
+  const i = S.sel, s = S.labels.shots[i], n = S.labels.shots[i + 1];
+  if (!n) return flash("This is the last shot.", true);
+  s.endMs = n.endMs;
+  s.acceptable.push(...n.acceptable);
+  s.done = false;
+  S.labels.shots.splice(i + 1, 1);
+  renumber();
+  changed();
+}
+function moveStart() {
+  if (locked()) return;
+  const t = Math.round($("ref").currentTime * 1000), i = S.sel, s = shot(), prev = S.labels.shots[i - 1];
+  if (!prev) return flash("The first shot starts at 0.", true);
+  if (t <= prev.startMs + 100 || t >= s.endMs - 100) return flash("Move the playhead between the previous shot's start and this shot's end.", true);
+  prev.endMs = s.startMs = t;
+  changed();
+}
+function edit(fn, rerender = true) {
+  if (locked()) return;
+  fn(shot());
+  changed(rerender);
+}
+function changed(rerender = true) {
+  if (rerender) render(); else { renderShot(); renderStrip(); }
+  clearTimeout(S.timer);
+  flash("Saving …");
+  S.timer = setTimeout(save, 500);
+}
+async function save() {
+  try {
+    await api(`/api/pair/${encodeURIComponent(S.id)}/labels`, { method: "PUT", body: JSON.stringify(S.labels) });
+    flash("Saved", false, true);
+    const p = S.state.pairs.find((x) => x.id === S.id);
+    if (p) { p.shots = S.labels.shots.length; p.done = S.labels.shots.filter((s) => !problems(s).length).length; renderPairs(); }
+  } catch (e) { flash(e.message, true); }
+}
+async function toggleLock() {
+  try {
+    if (!locked()) {
+      const open = S.labels.shots.filter((s) => problems(s).length);
+      if (open.length) return flash(`Finish every shot first (${open.length} left).`, true);
+      if (!confirm("Lock these labels? Lock before the app runs on this pair. Unlocking later, after a run, marks the pair as relabelled.")) return;
+      clearTimeout(S.timer);
+      await save();
+      await api(`/api/pair/${encodeURIComponent(S.id)}/lock`, { method: "POST" });
+    } else {
+      if (!confirm(S.pair.firstRunAt ? "The app has already run on this pair. Unlocking marks it as relabelled after a run, so it no longer counts as unseen. Unlock?" : "Unlock these labels for editing?")) return;
+      await api(`/api/pair/${encodeURIComponent(S.id)}/unlock`, { method: "POST" });
+    }
+    const sel = S.sel;
+    await loadState();
+    await openPair(S.id);
+    select(Math.min(sel, S.labels.shots.length - 1), false);
+  } catch (e) { flash(e.message, true); }
+}
+function flash(text, error, ok) {
+  const el = $("save-status");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "status" + (error ? " err" : ok ? " ok" : "");
+}
+
+document.addEventListener("keydown", (e) => {
+  if (!S.pair || e.ctrlKey || e.metaKey || e.altKey || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+  const keys = { i: () => mark("in"), o: () => mark("out"), a: addRange, ",": () => step(-1), ".": () => step(1), "[": () => select(Math.max(0, S.sel - 1), true), "]": () => select(Math.min(S.labels.shots.length - 1, S.sel + 1), true), p: playShot, s: split };
+  const fn = keys[e.key.toLowerCase()];
+  if (fn) { e.preventDefault(); fn(); }
+});
+$("refresh").onclick = loadState;
+loadState().catch((e) => ($("main").innerHTML = `<div class="card"><p class="status err">${esc(e.message)}</p></div>`));
+</script>
+</body>
+</html>

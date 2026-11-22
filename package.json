@@ -17,7 +17,10 @@
     "format": "prettier --write apps packages tests scripts docs *.json *.md",
     "tauri": "tauri",
     "setup:media": "node scripts/setup-media.mjs",
-    "launch": "node scripts/launch.mjs"
+    "launch": "node scripts/launch.mjs",
+    "eval:label": "node scripts/eval/label-server.mjs",
+    "eval:run": "node scripts/eval/run.mjs",
+    "eval:score": "node scripts/eval/score.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

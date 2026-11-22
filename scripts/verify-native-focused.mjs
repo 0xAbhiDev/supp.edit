@@ -169,6 +169,13 @@ step("Preview ready", { seconds: Math.round((Date.now() - began) / 1000), summar
 }
 await apply.scrollIntoViewIfNeeded();
 await shot(page, "2-preview.png");
+// --preview-only: the evaluation set grades the first automatic edit only, so stop here, close
+// the app (nothing was applied, so nothing is unsaved) and keep the report.
+if (process.argv.includes("--preview-only")) {
+  fs.writeFileSync(path.join(out, "native-verification.json"), JSON.stringify(report, null, 2));
+  await quit(browser, page);
+  process.exit(0);
+}
 // Scrub the preview to a title frame before applying.
 const scrub = panel.getByLabel("Revision preview frame");
 if (await scrub.count()) {

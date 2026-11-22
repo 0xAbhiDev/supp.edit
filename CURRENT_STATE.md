@@ -1,4 +1,4 @@
-## 4.4 body pose and the rest of what stopped different-footage editing — 22 November 2026 (not committed; awaiting approval)
+## 4.4 body pose and the rest of what stopped different-footage editing — 22 November 2026 (committed as `a237673`)
 
 **Builds:**
 - **Final:** `bin/supp-edit.exe` sha256 `2af2ae1d892d91f5d4aa4232baf72ee7cb6bdc39ac029919cb2f9360cc46230d` (`test-results/final44/build-identity.txt`).

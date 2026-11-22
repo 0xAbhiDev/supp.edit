@@ -1,0 +1,336 @@
+{
+ "about": "Openly licensed pairs from Wikimedia Commons, NASA's media library and Blender's download server (public domain, CC0, CC BY). 'own': the edit was cut from this raw footage. 'different': the raw is other recordings. Files are saved under neutral names (reference, raw-1 …) so no file name carries a hint. Labels are written by the developer from the frames, so these pairs are always 'open', never blind.",
+ "pairs": [
+  {
+   "id": "film-sintel",
+   "name": "Sintel trailer from the film",
+   "category": "other",
+   "footage": "own",
+   "reference": {
+    "title": "Sintel trailer-1080p.ogv",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "Sintel movie - Blender Fondation.ogv",
+     "size": "480p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "film-bbb",
+   "name": "Big Buck Bunny trailer from the film",
+   "category": "other",
+   "footage": "own",
+   "reference": {
+    "url": "https://download.blender.org/peach/trailer/trailer_480p.mov",
+    "page": "https://peach.blender.org",
+    "title": "Big Buck Bunny trailer (480p)",
+    "licence": "CC BY 3.0",
+    "credit": "Blender Foundation, peach.blender.org"
+   },
+   "raw": [
+    {
+     "url": "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_640x360.m4v.zip",
+     "zip": "BigBuckBunny_640x360.m4v",
+     "page": "https://peach.blender.org",
+     "title": "Big Buck Bunny (640x360)",
+     "licence": "CC BY 3.0",
+     "credit": "Blender Foundation, peach.blender.org"
+    }
+   ]
+  },
+  {
+   "id": "cooking-chefs",
+   "name": "Chefs competition from its b-roll",
+   "category": "cooking",
+   "footage": "own",
+   "reference": {
+    "title": "Pacific Update - Yokota Air Base Battle of the Chefs (993482).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "B-Roll - Yokota Air Base Battle of the Chefs (993483).webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "pets-dogpark",
+   "name": "Dog park opening from its b-roll",
+   "category": "pets",
+   "footage": "own",
+   "reference": {
+    "title": "Atago Dog Park Grand Opening, MCAS Iwakuni, Japan, 2026 (1008313).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "Atago Dog Park Grand Opening, MCAS Iwakuni, Japan, 2026 (B-Roll) (1008314).webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "travel-beach",
+   "name": "Beach travel piece from its b-roll",
+   "category": "travel",
+   "footage": "own",
+   "reference": {
+    "title": "Pacific Passport- Carp Beach, Iwakuni, Japan 2026 (1017259).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "Pacific Passport- Carp Beach, Iwakuni, Japan 2026 (B-Roll) (1017273).webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "event-summer",
+   "name": "Summer party from its b-roll",
+   "category": "event",
+   "footage": "own",
+   "reference": {
+    "title": "End of Summer Bash, MCAS Iwakuni, Japan, 2026 (1019139).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "End of Summer Bash, MCAS Iwakuni, Japan, 2026 (B-Roll) (1019141).webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "event-ship",
+   "name": "Tall ship departure from its b-roll",
+   "category": "event",
+   "footage": "own",
+   "reference": {
+    "title": "B-Roll edit - USCGC Eagle and NS Mircea departing New York.webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "B-Roll - USCGC Eagle Departure Sail 250 New York.webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "aviation-x59",
+   "name": "Aircraft first flight from its b-roll",
+   "category": "other",
+   "footage": "own",
+   "reference": {
+    "url": "https://images-assets.nasa.gov/video/AFRC_2025_14545_01_NASA%E2%80%99s%20X-59%20Completes%20Historic%20First%20Flight_Master/AFRC_2025_14545_01_NASA%E2%80%99s%20X-59%20Completes%20Historic%20First%20Flight_Master~medium.mp4",
+    "page": "https://images.nasa.gov/details/AFRC_2025_14545_01_NASA%E2%80%99s%20X-59%20Completes%20Historic%20First%20Flight_Master",
+    "licence": "Public domain (NASA)",
+    "credit": "NASA Armstrong Flight Research Center",
+    "title": "NASA’s X-59 Completes Historic First Flight"
+   },
+   "raw": [
+    {
+     "url": "https://images-assets.nasa.gov/video/AFRC-2025-14544-X-59_First_Flight_4K_MEDIA_BROLL_v4_10-28-25YT/AFRC-2025-14544-X-59_First_Flight_4K_MEDIA_BROLL_v4_10-28-25YT~medium.mp4",
+     "page": "https://images.nasa.gov/details/AFRC-2025-14544-X-59_First_Flight_4K_MEDIA_BROLL_v4_10-28-25YT",
+     "licence": "Public domain (NASA)",
+     "credit": "NASA Armstrong Flight Research Center",
+     "title": "X-59 First Flight B-Roll"
+    }
+   ]
+  },
+  {
+   "id": "aviation-x59-different",
+   "name": "Aircraft first flight with footage of its second flight",
+   "category": "other",
+   "footage": "different",
+   "reference": {
+    "url": "https://images-assets.nasa.gov/video/AFRC_2025_14545_01_NASA%E2%80%99s%20X-59%20Completes%20Historic%20First%20Flight_Master/AFRC_2025_14545_01_NASA%E2%80%99s%20X-59%20Completes%20Historic%20First%20Flight_Master~medium.mp4",
+    "page": "https://images.nasa.gov/details/AFRC_2025_14545_01_NASA%E2%80%99s%20X-59%20Completes%20Historic%20First%20Flight_Master",
+    "licence": "Public domain (NASA)",
+    "credit": "NASA Armstrong Flight Research Center",
+    "title": "NASA’s X-59 Completes Historic First Flight"
+   },
+   "raw": [
+    {
+     "url": "https://images-assets.nasa.gov/video/AFRC-2026-14579-X-59_Flight2_B-Roll_V2_3-20-26/AFRC-2026-14579-X-59_Flight2_B-Roll_V2_3-20-26~medium.mp4",
+     "page": "https://images.nasa.gov/details/AFRC-2026-14579-X-59_Flight2_B-Roll_V2_3-20-26",
+     "licence": "Public domain (NASA)",
+     "credit": "NASA Armstrong Flight Research Center",
+     "title": "X-59 Second Flight B-Roll"
+    }
+   ]
+  },
+  {
+   "id": "launch-crew11",
+   "name": "Crew launch highlights from its isolated camera views",
+   "category": "other",
+   "footage": "own",
+   "reference": {
+    "url": "https://images-assets.nasa.gov/video/KSC-20250801-VP-MWC01-001-CREW-11-HIGHLIGHTS-M14833/KSC-20250801-VP-MWC01-001-CREW-11-HIGHLIGHTS-M14833~medium.mp4",
+    "page": "https://images.nasa.gov/details/KSC-20250801-VP-MWC01-001-CREW-11-HIGHLIGHTS-M14833",
+    "licence": "Public domain (NASA)",
+    "credit": "NASA Kennedy Space Center",
+    "title": "NASA's SpaceX Crew-11 Broadcast Highlights"
+   },
+   "raw": [
+    {
+     "url": "https://images-assets.nasa.gov/video/KSC-20250801-MH-AJN01-0001-SpaceX_Crew_11_Launch_and_Landing_ISO_Broll_String-M14833/KSC-20250801-MH-AJN01-0001-SpaceX_Crew_11_Launch_and_Landing_ISO_Broll_String-M14833~small.mp4",
+     "page": "https://images.nasa.gov/details/KSC-20250801-MH-AJN01-0001-SpaceX_Crew_11_Launch_and_Landing_ISO_Broll_String-M14833",
+     "licence": "Public domain (NASA)",
+     "credit": "NASA Kennedy Space Center",
+     "title": "NASA's SpaceX Crew-11 Isolated Launch and Landing Views"
+    }
+   ]
+  },
+  {
+   "id": "launch-crew11-different",
+   "name": "Crew launch highlights with another launch's camera views",
+   "category": "other",
+   "footage": "different",
+   "reference": {
+    "url": "https://images-assets.nasa.gov/video/KSC-20250801-VP-MWC01-001-CREW-11-HIGHLIGHTS-M14833/KSC-20250801-VP-MWC01-001-CREW-11-HIGHLIGHTS-M14833~medium.mp4",
+    "page": "https://images.nasa.gov/details/KSC-20250801-VP-MWC01-001-CREW-11-HIGHLIGHTS-M14833",
+    "licence": "Public domain (NASA)",
+    "credit": "NASA Kennedy Space Center",
+    "title": "NASA's SpaceX Crew-11 Broadcast Highlights"
+   },
+   "raw": [
+    {
+     "url": "https://images-assets.nasa.gov/video/KSC-20240321-VP-MMS01-0001-SpaceX_CRS_30_ISO_Broll_String-M5179/KSC-20240321-VP-MMS01-0001-SpaceX_CRS_30_ISO_Broll_String-M5179~medium.mp4",
+     "page": "https://images.nasa.gov/details/KSC-20240321-VP-MMS01-0001-SpaceX_CRS_30_ISO_Broll_String-M5179",
+     "licence": "Public domain (NASA)",
+     "credit": "NASA Kennedy Space Center",
+     "title": "NASA's SpaceX CRS-30 Isolated Launch Views"
+    }
+   ]
+  },
+  {
+   "id": "launch-artemis-different",
+   "name": "Moon rocket launch highlights with an earlier rocket reel",
+   "category": "other",
+   "footage": "different",
+   "reference": {
+    "url": "https://images-assets.nasa.gov/video/KSC-20260401-VP-MWC01-001-ARTEMISII-LAUNCH-HIGHLIGHTS-1080/KSC-20260401-VP-MWC01-001-ARTEMISII-LAUNCH-HIGHLIGHTS-1080~medium.mp4",
+    "page": "https://images.nasa.gov/details/KSC-20260401-VP-MWC01-001-ARTEMISII-LAUNCH-HIGHLIGHTS-1080",
+    "licence": "Public domain (NASA)",
+    "credit": "NASA Kennedy Space Center",
+    "title": "Artemis II Test Flight Mission Launch Highlights"
+   },
+   "raw": [
+    {
+     "url": "https://images-assets.nasa.gov/video/SLS-5520%20-%20December%202025%20Resource%20Reel/SLS-5520%20-%20December%202025%20Resource%20Reel~small.mp4",
+     "page": "https://images.nasa.gov/details/SLS-5520%20-%20December%202025%20Resource%20Reel",
+     "licence": "Public domain (NASA)",
+     "credit": "NASA Marshall Space Flight Center",
+     "title": "NASA's SLS (Space Launch System) Resource Reel – December 2025"
+    }
+   ]
+  },
+  {
+   "id": "event-recovery",
+   "name": "Spacecraft recovery at sea from its b-roll",
+   "category": "event",
+   "footage": "own",
+   "reference": {
+    "url": "https://images-assets.nasa.gov/video/KSC-20221211-VP-MWC01-001-ARTEMIS-SPLASHDOWN-RECOVERY-3312491/KSC-20221211-VP-MWC01-001-ARTEMIS-SPLASHDOWN-RECOVERY-3312491~medium.mp4",
+    "page": "https://images.nasa.gov/details/KSC-20221211-VP-MWC01-001-ARTEMIS-SPLASHDOWN-RECOVERY-3312491",
+    "licence": "Public domain (NASA)",
+    "credit": "NASA Kennedy Space Center",
+    "title": "Artemis I Orion Splashdown Recovery"
+   },
+   "raw": [
+    {
+     "url": "https://images-assets.nasa.gov/video/KSC-20221208-MH-GEB02-0001-Artemis_1_Orion_Recovery-3312491/KSC-20221208-MH-GEB02-0001-Artemis_1_Orion_Recovery-3312491~medium.mp4",
+     "page": "https://images.nasa.gov/details/KSC-20221208-MH-GEB02-0001-Artemis_1_Orion_Recovery-3312491",
+     "licence": "Public domain (NASA)",
+     "credit": "NASA Kennedy Space Center",
+     "title": "Orion Splashdown and Recovery Operations Aboard the USS Portland"
+    }
+   ]
+  },
+  {
+   "id": "cooking-different",
+   "name": "Chefs competition with other kitchen footage",
+   "category": "cooking",
+   "footage": "different",
+   "reference": {
+    "title": "Pacific Update - Yokota Air Base Battle of the Chefs (993482).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "Joint Culinary Readiness Strengthened with Combined Field Feeding Exercise, b-roll 1-2 (1017601).webm",
+     "size": "1080p.vp9.webm"
+    },
+    {
+     "title": "Cooking Chicken and Rice.webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "travel-different",
+   "name": "Beach travel piece with footage of other places",
+   "category": "travel",
+   "footage": "different",
+   "reference": {
+    "title": "Pacific Passport- Carp Beach, Iwakuni, Japan 2026 (1017259).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "Hanami at Kikko Park, Iwakuni, Japan 2026 (B-Roll) (1001984).webm",
+     "size": "original"
+    },
+    {
+     "title": "Atago Outdoor Flea Market, Iwakuni, Japan, 2026 (B-Roll) (1006122).webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "event-different",
+   "name": "Summer party with footage of other community events",
+   "category": "event",
+   "footage": "different",
+   "reference": {
+    "title": "End of Summer Bash, MCAS Iwakuni, Japan, 2026 (1019139).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "Sakura Sprint 5K Fun Run, Marine Corps Air Station Iwakuni, Japan 2026 (B-Roll) (1001990).webm",
+     "size": "1080p.vp9.webm"
+    },
+    {
+     "title": "STEM Workshop, MCAS Iwakuni, Japan, 2026 (B-Roll) (1003596).webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "pets-different",
+   "name": "Dog park opening with footage of working dogs",
+   "category": "pets",
+   "footage": "different",
+   "reference": {
+    "title": "Atago Dog Park Grand Opening, MCAS Iwakuni, Japan, 2026 (1008313).webm",
+    "size": "1080p.vp9.webm"
+   },
+   "raw": [
+    {
+     "title": "525th MP CO MWD Certification B-roll (1000994).webm",
+     "size": "480p.vp9.webm"
+    },
+    {
+     "title": "B-Roll- US, Kenya service members conduct K9 medical training at Justified Accord (952496).webm",
+     "size": "1080p.vp9.webm"
+    }
+   ]
+  }
+ ]
+}

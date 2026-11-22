@@ -1,7 +1,30 @@
+## Evaluation set (step 1 of the any-footage plan) — 22 November 2026
+
+**What exists:** `docs/EVALUATION_SET.md` is the guide.
+- **Tools:** a labelling page (`npm run eval:label`, http://127.0.0.1:5199), a runner (`npm run eval:run`) and a score card (`npm run eval:score -- RUN_DIR`), all in `scripts/eval/`.
+- **Data:** `work/eval/` (git-ignored, private).
+- **Seen pairs:**
+  - `ab-gym-beach`: the A/B footage; its 4.2 labels were imported and locked.
+  - `gym-personal-reel`: prepared, waiting for a person's labels.
+- **No unseen pairs yet.** The user supplies them.
+
+**Verified:**
+- An end-to-end run on `ab-gym-beach` with build `2af2ae1d` reproduced the 4.4 matrix's A/B result exactly: 2/4 right action, 3/4 right clip, 3/3 missing shots flagged, 0 wrong "close match". The run is `work/eval/runs/20261122-1215-2af2ae1d/`.
+- A first run analyses from scratch: about 7 minutes for 41 s of footage.
+- Tests: TypeScript 313/313 (7 new in `tests/eval-set.test.ts`); type check clean.
+- The labelling page was checked in the browser on a scratch copy: prepare (with a .mov proxy), shot edits, ranges, autosave, the lock refusal and the locked view.
+
+**Rules:**
+- Develop against open and seen pairs only.
+- Blind pairs run only with `--split=blind --release`, scored in aggregate.
+- Never look at blind pairs' footage, labels or per-shot results while tuning.
+
+**Next:** collect and label about 30 pairs, then run the current build for a baseline score card. Step 2 (describe shots by exact action, role and energy) starts from that baseline.
+
 ## Resume after 4.4 body pose — 22 November 2026
 
 **State:**
-- Commit `aa07a62` (4.1–4.3) plus uncommitted 4.4 work. Nothing pushed; `.claude/` stays uncommitted.
+- Commits `aa07a62` (4.1–4.3) and `a237673` (4.4). Nothing pushed; `.claude/` stays uncommitted.
 - **Final build:** `bin/supp-edit.exe` sha256 `2af2ae1d…` (`test-results/final44/build-identity.txt`).
 - **Pose models:** `work/ai-models/mediapipe-pose-2023mar/` (git-ignored; the app's installer fetches the same pinned files).
 - **Evidence:**
