@@ -134,5 +134,7 @@ export function unrelatedTextPenalty(regions: readonly SourceTextWindow["regions
     const persistence = r.frames / Math.max(1, r.sampled);
     total += r.confidence * persistence * (0.5 * size + 0.25 * centrality + 0.25 * overlap);
   }
-  return Math.min(0.08, 0.08 * total);
+  // A tie-breaker between comparably suitable moments, not a veto: at 0.08 a lower-third label on
+  // the right exercise lost to label-free footage of another one (personal gym reel, shot 3).
+  return Math.min(0.04, 0.04 * total);
 }

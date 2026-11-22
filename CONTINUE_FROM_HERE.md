@@ -1,3 +1,30 @@
+## Resume after 4.4 body pose — 22 November 2026
+
+**State:**
+- Commit `aa07a62` (4.1–4.3) plus uncommitted 4.4 work. Nothing pushed; `.claude/` stays uncommitted.
+- **Final build:** `bin/supp-edit.exe` sha256 `2af2ae1d…` (`test-results/final44/build-identity.txt`).
+- **Pose models:** `work/ai-models/mediapipe-pose-2023mar/` (git-ignored; the app's installer fetches the same pinned files).
+- **Evidence:**
+
+  | Folder | What it holds |
+  | --- | --- |
+  | `test-results/final44/` | final matrix (`summary.md`, `binaries.txt`), plus `README.md`: what was tried, kept and reverted |
+  | `test-results/final44/offline/` | offline comparison against `aa07a62` |
+  | `test-results/final44-smoke/` | app runs before the matrix (gym text penalty, titles) |
+
+**Reproduce:**
+- **Pose per clip:** `node test-results/footage/pose-inventory.mjs INVENTORY` writes `i-pose.json` into the inventory (uses `target/debug/examples/pose.exe`; build it with `cargo build --offline -p supp-media --example pose`).
+- **Matrix:** `bash test-results/footage/run-final44.sh`, then `node test-results/final44/summarize.mjs` and `node test-results/final44/check-binaries.mjs test-results/final44`.
+- **Offline comparison:** `LOGS="$PWD/test-results/final43c" OUT="$PWD/test-results/final44/offline" bash test-results/footage/offline-compare-43.sh BASE_DIR` (absolute paths: the script runs each side from its own folder). `--no-pose` on `check-footage-selection.mjs` measures without body pose.
+
+**Next, in order of impact:**
+1. **A wider real evaluation set:** 20–30 reel-plus-footage pairs, labelled before any run. Every remaining gain is now one or two shots on a handful of cases.
+2. **Scene detection that ignores burned-in label animations** (bench clip), so one recording is not split into stretches too short for its own action.
+3. **Same-footage identity across repetitions and holds:** vertical holdout shot 2, workshop shot 4 and street shot 3 claim 93–100% on the wrong moment.
+4. **Gym shot 1:** the footage holds one deadlift stretch, which goes to the longer lift shot; shot 1 is flagged "no close source match". Better only with more footage or a split of that stretch.
+5. **Still shots:** find a signal that separates a right still pick from a wrong one, or cap their confidence.
+6. **Titles:** MOUTH across style changes; Tiger's script hand.
+
 ## Resume after the 4.3 selection fixes — 22 November 2026
 
 **State:**

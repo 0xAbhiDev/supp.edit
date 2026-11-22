@@ -1,5 +1,23 @@
 # Reference-to-Edit
 
+## 4.4: body pose, length-weighted plans, honest labels
+
+- **Body pose** (native `analysis/pose.rs`, installer `pose_model.rs`; `packages/ai/reference/body-pose.ts`):
+  - **Models:** two MediaPipe models from the OpenCV model zoo (Apache 2.0), pinned by commit, size and SHA-256, 17.6 MB, run locally on CPU. A person detector (224 px, 2,254 SSD anchors) gives the body and its hip-centre and full-body points. The crop is centred on the hips and rotated upright on those points, as the landmark model was trained. It returns 33 joints in frame fractions with visibility, and in metric 3D around the hips.
+  - **Sampling:** 5 samples a second; frames decoded as PPM, so display rotation needs no probing; an unchanged frame reuses its sample. About 2–4 s per short clip and 51 s for 11 minutes; results are cached by file identity.
+  - **Features** (`poseFeatures`): knee, hip, elbow and shoulder angles from the 3D joints, paired without regard to side so a mirrored view compares equal. The torso's lean from the picture, weighted twice, separates standing, hinging and lying. Joints the model does not see clearly are left out.
+  - **`bodySignature` / `bodyFit`:** an 8-step trajectory per shot, compared by time-warped posture distance (65%) and by how much each joint moves (35%).
+  - **Use:** where the reference shot and a window both measured a body, the joint fit replaces the silhouette pose. It counts double in Close Match and Smart Adaptation; Creative Remix keeps its balance, since doubling there lost a shot.
+  - **Body-presence check:** a body on one side and measured nobody on the other (no body at any step) costs a tenth of the score (`BODY_MISMATCH_FACTOR`).
+  - **When it runs:** pose is measured only when the reference shows a confirmed person and the pose model is installed (AI Studio panel, "Download and install body pose").
+- **Length-weighted plan** (`sequence-planner.ts`): the beam weighs each shot by the square root of its share of the average length (0.6–1.6), so a 5 s lift outranks a 1 s grip close-up when they compete for the same footage.
+- **Still shots:** below the still level on both sides, the measured movement difference counts half (it used to be ignored entirely). Cooking stays 6/6 and street returns to 5/6.
+- **Dissolve lead-in** (`dissolveLeadIn`, `ShotRequirement.leadInMs`): a shot entered by a dissolve is trimmed to leave the blend's length of the same stretch before its in-point, when the stretch has room. A window without that room loses 3%.
+- **Close match needs 65% confidence** (`CLOSE_MATCH_CERTAINTY`): across 82 graded picks, wrong close matches sat at 53–63% and right ones at a median of 87%. Same-footage picks start at 75%.
+- **Burned-in text penalty capped at 0.04** (`unrelatedTextPenalty`): a tie-breaker. At 0.08 a lower-third label on the right exercise lost to label-free footage of another one.
+- **Title size check** (`focus.ts`): a reading vetoes a dense trace on size only if it overlaps the trace's columns, so a corner handle at the same height no longer counts.
+- **Caches:** `reference-titles-6`; `pose-mediapipe-2023mar-9d89c599-v1`.
+
 ## 4.3: the planner keeps its picks; reference movement without the edit's effects
 
 - **Plan picks placed as planned** (`planner.ts`):

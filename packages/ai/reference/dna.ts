@@ -56,6 +56,15 @@ export const dnaSchema = z
             subjectPath: z.array(subjectShapeSchema.nullable()).length(8).optional(),
             /** Person segmentation measured this shot and found nobody (after the detector check). */
             subjectAbsent: z.literal(true).optional(),
+            /** The body's joint angles across the shot (body-pose.ts), where a pose was measured. */
+            body: z
+              .object({
+                path: z.array(z.array(z.number().min(0).max(1).nullable()).length(9).nullable()).length(8),
+                motion: z.array(z.number().min(0).max(1).nullable()).length(9),
+                coverage: z.number().min(0).max(1),
+              })
+              .strict()
+              .optional(),
             /** How the shot moves over time (movement geometry, not a label). */
             action: actionSignatureSchema.optional(),
             /** What the shot shows when it barely moves: structure, horizon, role. */

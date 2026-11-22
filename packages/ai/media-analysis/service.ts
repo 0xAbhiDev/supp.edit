@@ -84,6 +84,21 @@ export const personModel: AIModel = {
   download: { state: "not-requested" },
   runtime: "native-inference",
 };
+/** MediaPipe Pose (OpenCV model zoo, Apache 2.0): a person detector and 33 body joints, pinned by
+ * commit, size and hash in native `pose_model.rs`. What a body does, whatever the framing. */
+export const poseModel: AIModel = {
+  id: "mediapipe-pose-2023mar",
+  name: "MediaPipe Pose · body joints",
+  task: "SegmentSubject",
+  providerId: "onnx-local-vision",
+  sizeBytes: 17570112,
+  installedState: "not-installed",
+  executionDevice: "CPU",
+  supportedDevices: ["CPU"],
+  version: "2023mar-9d89c599",
+  download: { state: "not-requested" },
+  runtime: "native-inference",
+};
 /** Native analysis runs at most this many jobs at once (the desktop enforces the same cap, see
  * src-tauri/src/analysis.rs); further jobs wait here for a free slot instead of failing. */
 export const NATIVE_SLOTS = 4;
@@ -164,6 +179,7 @@ export class MediaAnalysisService {
     this.models.register(speechModel);
     this.models.register(visionModel);
     this.models.register(personModel);
+    this.models.register(poseModel);
   }
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -205,14 +221,16 @@ export class MediaAnalysisService {
         model: null,
         visionModel: null,
         personModel: null,
+        poseModel: null,
         audio: false,
         video: false,
       };
-    const [model, media, vision, person] = await Promise.all([
+    const [model, media, vision, person, pose] = await Promise.all([
       invoke<ModelStatus>("speech_model_status"),
       invoke<Capabilities>("probe_capabilities"),
       invoke<ModelStatus>("vision_model_status"),
       invoke<ModelStatus>("person_model_status"),
+      invoke<ModelStatus>("pose_model_status"),
     ]);
     this.models.reportRuntimeState(speechModel.id, {
       installedState: model.installed ? "installed" : "not-installed",
@@ -226,23 +244,30 @@ export class MediaAnalysisService {
       installedState: person.installed ? "installed" : "not-installed",
       download: { state: "not-requested" },
     });
+    this.models.reportRuntimeState(poseModel.id, {
+      installedState: pose.installed ? "installed" : "not-installed",
+      download: { state: "not-requested" },
+    });
     return {
       model,
       personModel: person,
+      poseModel: pose,
       visionModel: vision,
       audio: media.ffmpeg && media.ffprobe,
       video: media.ffmpeg && media.ffprobe,
     };
   }
-  install(projectId: string, kind: "speech" | "vision" | "person" = "speech") {
+  install(projectId: string, kind: "speech" | "vision" | "person" | "pose" = "speech") {
     const selected =
         kind === "speech"
           ? speechModel
           : kind === "person"
             ? personModel
-            : visionModel,
+            : kind === "pose"
+              ? poseModel
+              : visionModel,
       bytes =
-        kind === "speech" ? 86620353 : kind === "person" ? 6175375 : 177170323;
+        kind === "speech" ? 86620353 : kind === "person" ? 6175375 : kind === "pose" ? 17570112 : 177170323;
     return this.jobs.enqueue({
       label: `Install ${selected.name} (${Math.ceil(bytes / 1048576)} MiB download)`,
       scope: projectId,
@@ -261,7 +286,9 @@ export class MediaAnalysisService {
               ? "install_speech_model"
               : kind === "person"
                 ? "install_person_model"
-                : "install_vision_model",
+                : kind === "pose"
+                  ? "install_pose_model"
+                  : "install_vision_model",
             {},
             {
               ...job,
@@ -300,14 +327,16 @@ export class MediaAnalysisService {
       },
     });
   }
-  async remove(kind: "speech" | "vision" | "person") {
+  async remove(kind: "speech" | "vision" | "person" | "pose") {
     if (!desktop) throw new Error("Model management requires the desktop app");
     const model =
       kind === "speech"
         ? speechModel
         : kind === "person"
           ? personModel
-          : visionModel;
+          : kind === "pose"
+            ? poseModel
+            : visionModel;
     await invoke("remove_ai_model", { modelId: model.id });
     this.models.reportRuntimeState(model.id, {
       installedState: "not-installed",

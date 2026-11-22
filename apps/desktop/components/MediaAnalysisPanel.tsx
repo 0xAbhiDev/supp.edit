@@ -284,12 +284,42 @@ export function MediaAnalysisPanel() {
           )}
         </div>
       )}
+      {desktop && cap?.poseModel && (
+        <div className="model-card">
+          <p>
+            MediaPipe Pose · local body joints · 17 MiB · CPU. Requires the local
+            vision runtime. Lets reference recreation match what a body does
+            (standing, hinging, lying, which joints move) across different
+            recordings.
+          </p>
+          {!cap.poseModel.installed && cap.poseModel.installSupported && (
+            <button
+              disabled={busy}
+              onClick={async () => {
+                setError("");
+                try {
+                  const h = mediaAnalysis.install(project.id, "pose");
+                  setJobId(h.id);
+                  const result = await h.finished;
+                  if (result.state === "Failed") setError(result.error);
+                  refresh();
+                } catch (e) {
+                  setError(String(e));
+                }
+              }}
+            >
+              Download and install body pose
+            </button>
+          )}
+        </div>
+      )}
       {desktop &&
         (
           [
             ["speech", cap?.model],
             ["vision", cap?.visionModel],
             ["person", cap?.personModel],
+            ["pose", cap?.poseModel],
           ] as const
         ).map(
           ([kind, model]) =>

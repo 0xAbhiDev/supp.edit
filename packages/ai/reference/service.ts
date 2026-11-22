@@ -36,6 +36,7 @@ import { identityProbes, mergeIdentity, sourceIdentity } from "./identity";
 import { applyTitleCache, titleCacheEntry, titleCacheKey, type TitleCacheEntry } from "./title-cache";
 import { INDEX_VERSION, indexSource, sourceIndexKey, type SourceIndex } from "./footage-index";
 import { confirmedPeople } from "./person-evidence";
+import { bodyPose, bodySignature } from "./body-pose";
 
 /** Time and cache use of one analysis stage of one clip. */
 export interface StageTiming {
@@ -277,6 +278,7 @@ export function recreate(
               delete copy.subjectShape;
               delete copy.subjectPath;
               delete copy.subjectAbsent;
+              delete copy.body;
               return copy;
             }),
           };
@@ -290,6 +292,20 @@ export function recreate(
           const subjects = referenceSubjects.people ?? [];
           // Shots measured with nobody in them are marked too (contradicted outlines arrive emptied).
           annotateSubjects(annotated, referenceSubjects.samples ?? [], aspect);
+          // The body's joint angles across each shot, where a person is confirmed (body-pose.ts).
+          if (caps.poseModel?.installed && subjects.some((p) => p.points.length)) {
+            try {
+              const referencePose = await step("body pose", bodyPose(reference, quiet));
+              for (const shot of annotated.shots) {
+                const [from, to] = shotSpan(shot);
+                const body = bodySignature(referencePose, from, to);
+                if (body) shot.body = body;
+              }
+            } catch (e) {
+              await job.checkpoint();
+              warnings.push("Reference body pose unavailable: " + String(e).slice(0, 160));
+            }
+          }
           // Movement geometry with the subject's outline trajectory, on the reference's dense frames.
           referenceFrames ??= await referenceVisual(reference, quiet);
           for (const shot of annotated.shots) {
@@ -377,6 +393,8 @@ export function recreate(
         (controls.subjectLayering === "reference" &&
           (!!dna.personFlashes?.length ||
             !!dna.text?.some((l) => l.depth?.relation === "behind" && l.evidence?.status !== "uncertain")));
+      // Body pose on the raw footage when the reference's shots carry joint angles to compare.
+      const needPose = !!caps.poseModel?.installed && dna.shots.some((shot) => shot.body);
       const needSpeech = (a: Asset) =>
         a.hasAudio &&
         (/caption|speech|talking.head/i.test(controls.instructions) ||
@@ -435,7 +453,7 @@ export function recreate(
             warnings.push(what + String(e).slice(0, 180));
             return undefined;
           });
-        const [analysis, color, visual, aperture, tone, people, speech] = await Promise.all([
+        const [analysis, color, visual, aperture, tone, people, speech, pose] = await Promise.all([
           // Reused when this project already holds it, or when the native analysis reports its own cache hit.
           timed(vision ? "scenes + vision" : "scenes", () => measured || analysisHit, async () => {
             const result = await run(a, vision ? "vision" : "video");
@@ -454,6 +472,8 @@ export function recreate(
           keepsLook ? timed("tone", hit("source-tone-v4:"), () => soft("Footage tone could not be measured: ", () => sourceTone(a, quiet))) : undefined,
           needPeople ? timed("person masks", hit("person-mask-pphumanseg-552d8a98-v3:"), () => soft("Person segmentation unavailable: ", () => personMasks(a, quiet))) : undefined,
           needSpeech(a) ? timed("speech", () => false, () => run(a, "speech")) : undefined,
+          // Joint angles say what a body does across different recordings (body-pose.ts).
+          needPose ? timed("body pose", hit("pose-mediapipe-2023mar-9d89c599-v1:"), () => soft("Body pose unavailable: ", () => bodyPose(a, quiet))) : undefined,
         ]);
         const evidence: SourceEvidence = { asset: a, analysis, color, visual };
         if (aperture) evidence.aperture = aperture;
@@ -466,6 +486,7 @@ export function recreate(
           if (checked.rejected) personChecks.push({ clip: a.name, outlined: checked.outlined, rejected: checked.rejected, unverified: checked.unverified });
         }
         if (speech) evidence.speech = speech;
+        if (pose?.length) evidence.pose = pose;
         // The clip's long-footage index (cut-safe segments, frame cuts, candidates), persisted by
         // file identity: a second recreation or a new clip beside it never rebuilds it.
         await timed("footage index", hit("footage-index-"), async () => {

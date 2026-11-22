@@ -28,6 +28,7 @@ import type { Shot, RecreationMode } from "./dna";
 import { averageEmbedding, embeddingSimilarity, layoutSimilarity, measuredColor, measuredLayout } from "./visual";
 import { describeShots } from "./dna";
 import { pathFit, shapeFit, shapeOver, shapePath } from "./subject-shape";
+import { bodyFit, bodyPresence, bodySignature } from "./body-pose";
 import type { SourceEvidence } from "./planner";
 import { cutSafeSegments, frameCuts } from "./cuts";
 import { actionSignature, actionSimilarity, smoothedChange, type ActionSignature } from "./action-signature";
@@ -296,6 +297,15 @@ export interface ShotRequirement {
   texts?: ReferenceText[];
   /** The shot's own frames found in a raw clip (same footage): that moment plays it. */
   identity?: IdentityMatch;
+  /** Source time the incoming dissolve needs before the in-point (dissolveLeadIn). */
+  leadInMs?: number;
+}
+
+/** A shot entered by a dissolve plays the incoming footage from before its in-point, for the length
+ * of the blend: the trim must leave that much of the same cut-safe stretch before it. */
+export function dissolveLeadIn(transitions: readonly { kind: string; cutMs: number; startMs: number; endMs: number }[] | undefined, shot: { startMs: number }) {
+  const d = (transitions ?? []).find((t) => t.kind === "dissolve" && Math.abs(t.cutMs - shot.startMs) < 150);
+  return d ? Math.min(4000, Math.max(0, d.endMs - d.startMs)) : 0;
 }
 
 /** What a reference shot does in the edit, from its measured look and movement. */
@@ -378,6 +388,12 @@ export interface ShotChoice {
  * less, since similar rooms look alike whatever happens in them. Remix leans on movement. */
 /** Movement level under which a shot is a still picture (shotRole calls it a rest/hold). */
 export const STILL_LEVEL = 0.0003;
+/** Confidence a "close match" label needs. Across the graded cases (82 picks), labels on wrong picks
+ * sat at 53–63% while right ones had a median of 87%: from 65% three of five false close matches
+ * are flagged, for two right picks shown as best available. Same-footage picks start at 75%. */
+export const CLOSE_MATCH_CERTAINTY = 0.65;
+/** Score kept when the pose model saw a body on one side and nobody on the other. */
+export const BODY_MISMATCH_FACTOR = 0.9;
 const weights: Record<RecreationMode, Record<string, number>> = {
   "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 },
   "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6, scene: 1 },
@@ -443,7 +459,9 @@ export function scoreCandidate(
     speed = usable >= len ? 1 : Number((usable / len).toFixed(3));
     sourceLen = Math.min(usable, len * speed);
     inMs = c.peakMs - req.peakFraction * sourceLen;
-    inMs = Math.max(lo, Math.min(hi - sourceLen, inMs));
+    // Leave the incoming dissolve its frames before the in-point when the stretch has room.
+    const lead = Math.min(req.leadInMs ?? 0, Math.max(0, hi - sourceLen - lo));
+    inMs = Math.max(lo + lead, Math.min(hi - sourceLen, inMs));
   }
   const outMs = inMs + sourceLen;
   const achieved = (c.peakMs - inMs) / Math.max(1, sourceLen);
@@ -469,12 +487,14 @@ export function scoreCandidate(
   // Movement level on the same scale on both sides: dense per-frame change when both measured it.
   const refLevel = req.shot.action?.level,
     dense = refLevel !== undefined && (source.visual?.length ?? 0) >= 8;
-  // A still reference shot: below the still level on both sides, how still is noise (a resting
-  // hand's drift against a plate that never moves), not evidence of which still it is; what the
-  // picture shows decides (cooking case, shot 4).
+  // A still reference shot: below the still level on both sides, how still is mostly noise (a
+  // resting hand's drift against a plate that never moves), so the measured difference counts
+  // half; what the picture shows decides the rest. Counting it not at all reordered a whole plan
+  // through near-ties (street holdout 5/6 → 3/6); counting it fully lost the cooking shot 4.
   const bothStill = dense && refLevel! < STILL_LEVEL && c.motion < STILL_LEVEL;
+  const measuredFit = dense ? Math.exp(-Math.abs(Math.log((0.0015 + c.motion) / (0.0015 + refLevel!)))) : 0;
   const motionFit = bothStill
-    ? 1
+    ? (1 + measuredFit) / 2
     : dense
     ? Math.exp(-Math.abs(Math.log((0.0015 + c.motion) / (0.0015 + refLevel!))))
     : req.shot.motion !== null
@@ -482,6 +502,10 @@ export function scoreCandidate(
       : 0.5;
   let action: ReturnType<typeof actionSimilarity> | undefined;
   let pose: number | null = null;
+  // Pose from joint angles (body-pose.ts) rather than silhouettes.
+  let jointPose = false;
+  // The pose model measured a body on one side and nobody at all on the other.
+  let bodyMismatch = false;
   let scene: number | null = null;
   let measuredHeight: number | null = null;
   let scale: number | null = shotScale === "close" ? 0.9 : shotScale === "medium" ? 0.6 : shotScale === "wide" ? 0.3 : null;
@@ -504,6 +528,25 @@ export function scoreCandidate(
     // Pose trajectory: the outline's sequence across the shot, aligned by time warping.
     const path = req.shot.subjectPath && source.people?.length ? pathFit(req.shot.subjectPath.map((p) => p ?? undefined), shapePath(source.people, inMs, outMs, aspect)) : undefined;
     pose = still !== null && path !== undefined ? (still + path) / 2 : (still ?? path ?? null);
+    // Joint angles over time say what the body does, whatever the framing or the room: where both
+    // the reference shot and this window measured a body, they replace the silhouette.
+    if (req.shot.body && source.pose?.length) {
+      const window = bodySignature(source.pose, inMs, outMs);
+      const fit = bodyFit(req.shot.body, window);
+      if (fit !== undefined) {
+        pose = fit;
+        jointPose = true;
+      }
+      else {
+        // A body on one side and measured nobody on the other.
+        const there = bodyPresence(window),
+          wanted = bodyPresence(req.shot.body);
+        if ((wanted === "present" && there === "absent") || (wanted === "absent" && there === "present")) {
+          bodyMismatch = true;
+          if (pose === null) pose = PRESENCE_MISMATCH;
+        }
+      }
+    }
     // Whether anyone is there is evidence too: a shot of a person played by footage measured with
     // nobody in it, or a shot measured with nobody played by a person, does not do what the shot
     // does. With nobody on either side there is no pose to compare (left unscored).
@@ -548,6 +591,10 @@ export function scoreCandidate(
   // The weaker the reference shot's movement, the more what the picture shows has to decide.
   const stillness = 1 - Math.min(1, (refLevel ?? 0.004) / 0.004);
   emphasis.scene = (emphasis.scene ?? 1) * (0.3 + 0.9 * stillness) * (scene === null ? 0 : 1);
+  // Joint angles say what the body does far more reliably than a silhouette: in the modes that
+  // follow the reference's action, they count double. Creative Remix keeps its own balance of
+  // movement and pose (doubling it there lost a multi-clip shot, 8/9 → 7/9).
+  if (jointPose && mode !== "Creative Remix") emphasis.pose = (emphasis.pose ?? 1) * 2;
   // A peak anchored by an audio event is part of the editing language; the reference's own
   // movement peak is weaker evidence of what must line up.
   const anchor: Record<string, number> = { peak: req.peakSource === "audio event" ? 1 : 0.6 };
@@ -565,6 +612,12 @@ export function scoreCandidate(
       ? Math.min(1, (0.008 + c.motion) / (0.008 + req.shot.motion))
       : 1;
   let score = moving ? total * (0.4 + 0.6 * Math.min(1, under / 0.5)) : total;
+  // A shot of a person is not played by footage with nobody in it (waves outmove a lifter between
+  // repetitions), nor a shot of nobody by a person: whichever terms agree, this costs a tenth (a
+  // fifth reordered a beach plan offline; a tenth kept it and still gave the gym shot a gym clip).
+  if (bodyMismatch) score *= BODY_MISMATCH_FACTOR;
+  // A dissolve needs footage before the in-point; a window without it plays the blend as a cut.
+  if (req.leadInMs && inMs - lo < req.leadInMs * 0.5) score *= 0.97;
   if (c.frozen) score *= moving ? 0.3 : (req.shot.camera?.freeze ?? 0) >= 0.5 ? 1 : 0.6;
   if (quality < 0.35) score *= 0.3;
   score *= 1 - 0.6 * (1 - speed);
@@ -836,14 +889,14 @@ export function selectShots(
     const confidence: ShotChoice["confidence"] = cal.certainty >= 0.7 ? "high" : cal.certainty >= 0.45 ? "medium" : "low";
     // A close match is a moment the evidence says plays this shot; otherwise the pick is the best
     // available candidate and says so, so a reviewer knows where to look.
-    const label: ShotChoice["label"] = cal.coverage !== "missing" && cal.coverage !== "weak" && confidence !== "low" ? "close match" : "best available";
+    const label: ShotChoice["label"] = cal.coverage !== "missing" && cal.coverage !== "weak" && confidence !== "low" && cal.certainty >= CLOSE_MATCH_CERTAINTY ? "close match" : "best available";
     let shortfall: string | null = null;
     if (cal.coverage === "missing")
       shortfall =
         "No close source match found." +
         (mode === "Close Match" ? " Reference timing is kept and the mismatch is flagged; review the alternatives." : ` ${adapted ? adapted[0].toUpperCase() + adapted.slice(1) : "Best available adaptation used"}.`);
     else if (label === "best available" && confidence !== "low")
-      shortfall = `No close source match found: best available candidate (weak source coverage, ${Math.round(cal.certainty * 100)}% confidence); review the alternatives.`;
+      shortfall = `No close source match found: best available candidate (${cal.coverage} source coverage, ${Math.round(cal.certainty * 100)}% confidence); review the alternatives.`;
     else if (confidence === "low") shortfall = `No close source match found: best available candidate. Low confidence (${Math.round(cal.certainty * 100)}%): ${cal.margin < 0 ? "a better-scoring stretch went to another shot" : cal.margin < 0.02 ? `the next stretch differs by only ${cal.margin.toFixed(3)}` : "weak agreement on what the shot does"}; review the alternatives.`;
     return {
       sourceId: p.c.sourceId,

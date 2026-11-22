@@ -337,6 +337,10 @@ export function planSequence(
     if (g >= 0 && g === groupOf[j] && groups[g].decision === "reuse") return 0.06;
     return null;
   };
+  // A longer shot is more of the edit: how well it is played counts in proportion (square root of
+  // its share, so a long shot cannot drown every short one).
+  const meanMs = reqs.reduce((s, r) => s + r.durationMs, 0) / Math.max(1, reqs.length);
+  const lengthWeight = reqs.map((r) => Math.min(1.6, Math.max(0.6, Math.sqrt(r.durationMs / Math.max(1, meanMs)))));
   const admissible = (i: number, o: Option, picks: Option[]) => {
     let cost = 0;
     for (let j = 0; j < picks.length; j++) {
@@ -365,7 +369,7 @@ export function planSequence(
       for (const o of lists[k]) {
         const cost = admissible(k, o, picks);
         if (cost === null) continue;
-        h += o.score - cost - mismatch(k, o);
+        h += lengthWeight[k] * (o.score - cost - mismatch(k, o));
         break;
       }
     }
@@ -379,7 +383,7 @@ export function planSequence(
       for (const o of lists[i]) {
         const cost = admissible(i, o, beam.picks);
         if (cost === null) continue;
-        const total = beam.total + o.score - cost - mismatch(i, o) + neighbour(i, beam.picks.at(-1), o, beam.picks);
+        const total = beam.total + lengthWeight[i] * (o.score - cost - mismatch(i, o)) + neighbour(i, beam.picks.at(-1), o, beam.picks);
         const picks = [...beam.picks, o];
         const reusedOf = beam.picks.findIndex((p) => overlapping(p, o));
         const reuse = [
@@ -396,7 +400,7 @@ export function planSequence(
         const o = lists[i][0];
         if (!o) continue;
         const reusedOf = beam.picks.findIndex((p) => overlapping(p, o));
-        next.push({ total: beam.total + o.score - 0.2, priority: beam.total + o.score - 0.2, picks: [...beam.picks, o], reuse: [...beam.reuse, reusedOf >= 0 ? { permitted: true, reason: `no other usable footage for this shot; reuses shot ${reusedOf + 1}'s interval`, confidence: 0.2, ofShot: reusedOf } : null] });
+        next.push({ total: beam.total + lengthWeight[i] * (o.score - 0.2), priority: beam.total + lengthWeight[i] * (o.score - 0.2), picks: [...beam.picks, o], reuse: [...beam.reuse, reusedOf >= 0 ? { permitted: true, reason: `no other usable footage for this shot; reuses shot ${reusedOf + 1}'s interval`, confidence: 0.2, ofShot: reusedOf } : null] });
       }
     }
     // Diversity in how scarce footage is spent: beams that use a scarce stretch differently are

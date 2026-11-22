@@ -116,7 +116,9 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
   // (a subject or the scene under the title) and is set aside; the reading is kept.
   const disagreements:string[]=[];
   measured=measured.filter(m=>{
-    const under=seeds.filter(s=>s.content && s.role!=="persistent-overlay" && Math.min(m.endMs,s.endMs)-Math.max(m.startMs,s.startMs)>0 && Math.abs(s.y+s.height/2-(m.y+m.height/2))<Math.max(s.height,m.height));
+    // Two measurements of the same lettering share its place: the same line and the same columns.
+    // A reading beside the trace (a corner handle at the line's height) is other lettering.
+    const under=seeds.filter(s=>s.content && s.role!=="persistent-overlay" && Math.min(m.endMs,s.endMs)-Math.max(m.startMs,s.startMs)>0 && Math.abs(s.y+s.height/2-(m.y+m.height/2))<Math.max(s.height,m.height) && Math.min(s.x+s.width,m.x+m.width)-Math.max(s.x,m.x)>0.3*Math.min(s.width,m.width));
     if(!under.length)return true;
     const ratio=m.height/Math.max(1e-3,[...under.map(s=>s.height)].sort((a,b)=>a-b)[under.length>>1]);
     const ink=(hex?:string)=>hex&&/^#[0-9a-f]{6}$/i.test(hex)?(0.2126*parseInt(hex.slice(1,3),16)+0.7152*parseInt(hex.slice(3,5),16)+0.0722*parseInt(hex.slice(5,7),16))/255:undefined;
@@ -126,7 +128,7 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
     // was assembled from them, and a piece read off a blurred frame measures ink poorly. A
     // confident reading, or any size disagreement, still sets the trace aside.
     const agreeing=!!m.content&&under.every(s=>s.evidence?.status==="uncertain"&&s.content!.split(/\s+/).every(piece=>pieceOf(piece,m.content!)));
-    console.debug("dense title check",m.startMs,m.content,ratio.toFixed(2),a?.toFixed(2),b?.toFixed(2),agreeing,JSON.stringify(under.map(s=>[s.content,s.evidence?.status??null,s.foreground??null])));
+    console.debug("dense title check",m.startMs,m.content,ratio.toFixed(2),a?.toFixed(2),b?.toFixed(2),agreeing,JSON.stringify(under.map(s=>[s.content,s.evidence?.status??null,s.foreground??null,+s.x.toFixed(2),+s.width.toFixed(2)])),+m.x.toFixed(2),+m.width.toFixed(2));
     if(ratio<=2&&ratio>=0.5&&(!inverted||agreeing))return true;
     disagreements.push(`Dense title analysis at ${(m.startMs/1000).toFixed(2)} s disagreed with the text reading (${ratio>2||ratio<0.5?`${ratio.toFixed(1)}× its size`:"inverted ink"}); the reading "${under.map(s=>s.content).join(" ")}" was kept.`);
     return false;

@@ -23,7 +23,7 @@ const project = read(path.join(dir, "SOURCE.supp"));
 const host = await createServer({ server: { middlewareMode: true, hmr: false, watch: null }, appType: "custom", logLevel: "error" });
 try {
   const { extractDNA } = await host.ssrLoadModule("/packages/ai/reference/dna.ts");
-  const { buildFootageIndex, selectShots, shotRole, motionPeak } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
+  const { buildFootageIndex, selectShots, shotRole, motionPeak, dissolveLeadIn } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
   const { actionSignature, shotSpan, effectSpans } = await host.ssrLoadModule("/packages/ai/reference/action-signature.ts");
   const { sceneSignature, medianSharpness } = await host.ssrLoadModule("/packages/ai/reference/scene-signature.ts");
   const { annotateSubjects } = await host.ssrLoadModule("/packages/ai/reference/subject-shape.ts");
@@ -55,8 +55,20 @@ try {
       if (scene) shot.scene = shot.scene?.objects ? { ...scene, objects: shot.scene.objects } : scene;
     }
   }
+  // Body pose (i-pose.json from test-results/footage/pose-inventory.mjs), as the app measures it when
+  // the reference shows a person; --no-pose leaves it out (builds before body pose).
+  const { bodySignature } = await host.ssrLoadModule("/packages/ai/reference/body-pose.ts");
+  const noPose = args.includes("--no-pose");
+  const refPose = noPose ? undefined : optional("0-pose.json");
+  const usePose = !!refPose && (refPeople?.length ?? 0) > 0;
+  if (usePose)
+    for (const shot of dna.shots) {
+      const [from, to] = shotSpan(shot);
+      const body = bodySignature(refPose, from, to);
+      if (body) shot.body = body;
+    }
   const sources = project.assets.flatMap((asset, i) =>
-    i && asset.kind === "video" ? [{ asset, analysis: optional(i + "-vision.json"), visual: optional(i + "-visual.json"), people: checked(optional(i + "-person.json"), optional(i + "-vision.json")), outlines: optional(i + "-person.json") }] : [],
+    i && asset.kind === "video" ? [{ asset, analysis: optional(i + "-vision.json"), visual: optional(i + "-visual.json"), people: checked(optional(i + "-person.json"), optional(i + "-vision.json")), outlines: optional(i + "-person.json"), ...(usePose && optional(i + "-pose.json") ? { pose: optional(i + "-pose.json") } : {}) }] : [],
   );
   const t0 = performance.now();
   const index = buildFootageIndex(sources);
@@ -93,7 +105,8 @@ try {
   const reqs = dna.shots.map((shot, i) => {
     const peak = appPeaks[i] ?? motionPeak(shot) ?? { peakFraction: 0.4, peakSource: "none" };
     const identity = matchIdentity?.(i, shot.startMs, shot.endMs, sources.map((s) => ({ id: s.asset.id, durationMs: s.asset.duration * 1000, identity: s.identity })));
-    return { shot, durationMs: shot.endMs - shot.startMs, ...peak, role: shotRole(shot, i, dna.shots.length, peak.peakSource, dna.shots[i + 1]), ...(identity ? { identity } : {}) };
+    const leadInMs = dissolveLeadIn(dna.transitions, shot);
+    return { shot, durationMs: shot.endMs - shot.startMs, ...peak, role: shotRole(shot, i, dna.shots.length, peak.peakSource, dna.shots[i + 1]), ...(identity ? { identity } : {}), ...(leadInMs ? { leadInMs } : {}) };
   });
   const profile = {};
   const fileName = (id) => path.basename(sources.find((s) => s.asset.id === id).asset.path.replace(/^\\\\\?\\/, ""));

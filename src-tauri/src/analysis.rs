@@ -99,6 +99,28 @@ pub async fn install_person_model(
     result?
 }
 #[tauri::command]
+pub async fn pose_model_status(app: AppHandle) -> Result<ModelStatus, String> {
+    Ok(supp_media::pose_model::status(&model_root(&app)?))
+}
+#[tauri::command]
+pub async fn install_pose_model(
+    app: AppHandle,
+    id: String,
+    on_progress: Channel<Progress>,
+) -> Result<ModelStatus, String> {
+    let cancel = start(&app, &id)?;
+    let worker = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::pose_model::install(&model_root(&worker)?, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+#[tauri::command]
 pub async fn install_vision_model(
     app: AppHandle,
     id: String,
@@ -130,6 +152,7 @@ pub fn remove_ai_model(app: AppHandle, model_id: String) -> Result<(), String> {
         supp_media::models::MODEL_ID => supp_media::models::location(&root),
         supp_media::vision_models::MODEL_ID => supp_media::vision_models::location(&root),
         supp_media::person_model::MODEL_ID => supp_media::person_model::location(&root),
+        supp_media::pose_model::MODEL_ID => supp_media::pose_model::location(&root),
         _ => return Err("Unknown installed model".into()),
     };
     if target.exists() {
@@ -397,6 +420,30 @@ pub async fn person_mask(
     let cancel = start(&app, &id)?;
     let result = tauri::async_runtime::spawn_blocking(move || {
         supp_media::analysis::person_mask::run(&root, &source, &cancel, |p| {
+            let _ = on_progress.send(p);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string());
+    finish(&app, &id);
+    result?
+}
+/// Body pose samples (MediaPipe) over the given windows of a video, or the whole clip.
+#[tauri::command]
+pub async fn body_pose(
+    app: AppHandle,
+    id: String,
+    path: String,
+    windows: Vec<(u32, u32)>,
+    on_progress: Channel<Progress>,
+) -> Result<Vec<supp_media::analysis::pose::PoseSample>, String> {
+    let source = app
+        .state::<Session>()
+        .require(std::path::Path::new(&path))?;
+    let root = model_root(&app)?;
+    let cancel = start(&app, &id)?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        supp_media::analysis::pose::run(&root, &source, &windows, &cancel, |p| {
             let _ = on_progress.send(p);
         })
     })

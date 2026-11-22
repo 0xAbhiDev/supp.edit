@@ -7,6 +7,7 @@ pub mod video;
 pub mod vision;
 pub mod visual;
 pub mod person_mask;
+pub mod pose;
 use crate::models::Progress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

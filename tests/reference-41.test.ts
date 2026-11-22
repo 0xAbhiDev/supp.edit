@@ -23,9 +23,10 @@ describe("text burned into the raw footage", () => {
   it("penalises large, central text under a title and spares a small corner watermark", () => {
     const big = unrelatedTextPenalty([region("SALE 50%", 0.3, 0.4, 0.4, 0.15)], [{ content: "NEW", x: 0.35, y: 0.42, width: 0.3, height: 0.1 }]);
     const watermark = unrelatedTextPenalty([region("@brand", 0.88, 0.94, 0.08, 0.03)], []);
-    expect(big).toBeGreaterThan(0.06);
-    expect(watermark).toBeLessThan(0.006);
-    expect(big).toBeLessThanOrEqual(0.08);
+    // A tie-breaker: big central text costs most of 0.04, a corner watermark almost nothing.
+    expect(big).toBeGreaterThan(0.03);
+    expect(watermark).toBeLessThan(0.003);
+    expect(big).toBeLessThanOrEqual(0.04);
   });
 });
 

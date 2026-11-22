@@ -1,5 +1,21 @@
 # Reference-to-Edit capability evidence — 13 November 2026
 
+**22 November, 4.4 body pose.**
+- **Build:** final `2af2ae1d…`. Windows app; one click; every title traced fresh.
+- **Evidence:** `test-results/final44/` (`summary.md`, `binaries.txt` 19/19, `README.md`).
+- **Tests:** TypeScript 306/306, native 54/54.
+
+| Capability | Status | Tested scope | Evidence |
+| --- | --- | --- | --- |
+| Action from body pose (MediaPipe joints, optional 17.6 MB download) | VERIFIED (one case) | Gym shot 3 → deadlift lift (0 of 2 before). No graded case lost. | `final44/gym/`, `final44/README.md` |
+| Different footage: right action when the raw is another recording | PARTIAL | Gym 1 of 2 usable-deadlift shots; A/B assets 2/4 moment, 3/4 clip, 0 false confident | `final44/gym/`, `final44/different42.grade.json` |
+| Confidence calibration | PARTIAL | Close match needs 65%: wrong close labels 7 → 3, all same-footage identity claims | `CURRENT_STATE.md` (4.4) |
+| Still shots | IMPROVED | Street 4/6 → 5/6 right action; cooking 6/6 | `final44/street.grade.json` |
+| Dissolve rebuilt with footage before the cut | VERIFIED | Transition-heavy case: dissolve, flash, whip | `final44/transitions/` |
+| Formerly sealed holdout | IMPROVED | 3/6 → 4/6 exact and right action | `final44/sealed41.grade.json` |
+| Titles: Tiger, MOUTH | FAILED (unchanged) | Tiger glyph fit 0; MOUTH split by style changes | `final44-smoke/` |
+| Everything else in the 4.3 table | unchanged | cooking 6/6, travel 6/6, long 9/9, Remix, Smart, audio, takes, HONORABLE | `final44/summary.md` |
+
 **22 November, 4.3 selection fixes.**
 - **Build:** final `218c7a9b…`. Windows app; one click; every title traced fresh.
 - **Evidence:** `test-results/final43c/` (`summary.md`, `binaries.txt` 19/19); what was tried and reverted is in `test-results/final43b/README.md`.

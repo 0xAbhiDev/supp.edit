@@ -7,7 +7,7 @@ import type { AudioTimeline } from "../audio/timeline";
 import type { SoundKind } from "../audio/synth";
 import { beatMapOf, placeSound, plannedSounds, retimeDna, retimer } from "./audio-structure";
 import { alignStructure, type StructuralAlignment } from "./structural-alignment";
-import { buildFootageIndex, infeasibleShots, motionPeak, selectShots, shotRole, type PlanReport, type SelectionProfile, type ShotChoice, type ShotRequirement } from "./footage-index";
+import { buildFootageIndex, dissolveLeadIn, infeasibleShots, motionPeak, selectShots, shotRole, type PlanReport, type SelectionProfile, type ShotChoice, type ShotRequirement } from "./footage-index";
 import { editablePersonMask, type PersonSample } from "./subject-mask";
 import { type Project, type Asset, fps, uid } from "../../project-schema";
 import { parseEditBrief } from "../rough-cut/model";
@@ -34,6 +34,8 @@ export interface SourceEvidence {
   people?: PersonSample[];
   /** The segmentation's own outlines, unconfirmed: subject layering masks and frame-cut evidence. */
   outlines?: PersonSample[];
+  /** Body pose samples (body-pose.ts), where measured. */
+  pose?: import("./body-pose").PoseSample[];
   aperture?: Aperture;
   tone?: ToneSample[];
   /** This clip's cached long-footage index (keyed by file identity and analysis versions). */
@@ -379,7 +381,8 @@ export function buildRecreation(
     // The same footage as the reference, found frame by frame in a raw clip (grade, crop and zoom
     // aside): that exact moment plays the shot.
     const identity = matchIdentity(index, shot.startMs, shot.endMs, sources.map((s) => ({ id: s.asset.id, durationMs: s.asset.duration * 1000, identity: s.identity })));
-    return { shot, durationMs: (requestedFor(index) * 1000) / rate, ...peak, role: shotRole(shot, index, referenceShots.length, peak.peakSource, referenceShots[index + 1]), ...(texts.length ? { texts } : {}), ...(identity ? { identity } : {}) };
+    const leadInMs = dissolveLeadIn(dna.transitions, shot);
+    return { shot, durationMs: (requestedFor(index) * 1000) / rate, ...peak, role: shotRole(shot, index, referenceShots.length, peak.peakSource, referenceShots[index + 1]), ...(texts.length ? { texts } : {}), ...(identity ? { identity } : {}), ...(leadInMs ? { leadInMs } : {}) };
   });
   // Caption-led edits keep each source's chronology; the local matcher handles that order.
   clock = performance.now();

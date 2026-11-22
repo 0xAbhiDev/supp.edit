@@ -1,3 +1,68 @@
+## 4.4 body pose and the rest of what stopped different-footage editing — 22 November 2026 (not committed; awaiting approval)
+
+**Builds:**
+- **Final:** `bin/supp-edit.exe` sha256 `2af2ae1d892d91f5d4aa4232baf72ee7cb6bdc39ac029919cb2f9360cc46230d` (`test-results/final44/build-identity.txt`).
+- **Baseline:** the committed 4.3 source `aa07a62` (build `218c7a9b`, kept at `final43c/bin/`).
+
+**Tests:** TypeScript 306/306 (44 files), native 54/54, type check clean.
+
+**Model download (approved by the user):** MediaPipe person detector and pose landmarks (OpenCV model zoo, Apache 2.0), 17.6 MB, pinned by revision and sha256 in `native/crates/supp-media/src/pose_model.rs`. In the app: AI models → "Download and install body pose". Without it, matching works as in 4.3.
+
+**What changed, and why** (`test-results/final44/README.md`):
+
+| Change | Status | Evidence |
+| --- | --- | --- |
+| Action from body pose: knee, hip, elbow and shoulder angles (3D joints) and torso lean, time-warped against the reference shot | VERIFIED (gym shot 3) | Gym shot 3 → **deadlift 1.73–6.80 s** (was a beach squat in every earlier build). No graded case lost. |
+| Body pose counted double outside Creative Remix | VERIFIED as neutral in Close Match | Remix excluded: it cost multi-clip Remix one shot offline. |
+| Sequence plan weights each shot by its length | VERIFIED | Lets the long lift shot win the deadlift footage over a short shot. No graded case changed. |
+| Still shots: measured movement counts half instead of being ignored | VERIFIED | Street 4/6 → **5/6** right action; cooking stays 6/6. |
+| Close match needs 65% confidence | VERIFIED | Wrong picks labelled "close match": 7 → 3 across the holdouts and A/B assets (see below). |
+| A body on one side and nobody on the other costs ×0.9 | VERIFIED | A/B assets: false confident 1 → **0**; the bent-over row (not in the footage) gets the deadlift clip, not a beach. |
+| A dissolve asks for footage before the shot's in-point | VERIFIED | Transition-heavy case rebuilds its dissolve again (4.3 kept it as a cut). |
+| Burned-in text on unrelated footage costs at most 0.04 | VERIFIED | At 0.08 the deadlift clip's own "DEADLIFT" label made it lose in the app. Burned-in-text holdout unchanged (5/6). |
+| Title size veto requires the reading to overlap the trace | PARTIAL | Lets "A" through. Tiger is still rejected (no installed font matches its script hand); MOUTH unchanged. |
+
+**Final-build Windows matrix** (`test-results/final44/summary.md`, `binaries.txt`):
+- **How it ran:** every title traced fresh. All 19 runs and the take check launched `2af2ae1d`.
+- **Every check passed:** each run played, reopened identically and exported a valid MP4. 0 fallback placements.
+
+| Case | 4.4 (exact · right action · right clip) | 4.3 final |
+| --- | --- | --- |
+| Cooking / travel | 6/6 · 6/6 · 6/6 each | same |
+| 26 min / multi-clip | 9/9 · 9/9 · 9/9 each | same |
+| Remix multi-clip | 9/9 · 8/9 · 9/9 | same |
+| **Remix 11 min** | 9/9 · **8/9** · 9/9 | 9/9 · 7/9 |
+| Smart 90 s | 6/6 · 6/6 · 6/6 | same |
+| Previous landscape holdout | 5/6 · 5/6 · 6/6 | same |
+| First vertical holdout | 4/6 · 4/6 · 5/6 | same |
+| Workshop | 5/6 · 4/6 · 5/6 | same |
+| **Street** | 5/6 · **5/6** · 6/6 | 5/6 · 4/6 |
+| **Formerly sealed** | **4/6 · 4/6** · 5/6 | 3/6 · 3/6 · 5/6 |
+| A/B assets (seen; regression check) | right moment 2/4 · right clip 3/4 · unavailable flagged 3/3 · **0 false confident** | 2/4 · 3/4 · 3/3 · 1 |
+| Transition-heavy | **dissolve rebuilt** (dissolve, flash, whip) | kept as a cut |
+| Gym reel | **shot 3 = deadlift lift** (best available 50%); shot 1 not the deadlift | 0 of 2 |
+
+**Labels:** wrong picks still labelled "close match":
+- vertical holdout shot 2, 93%: the wrong repetition of the same footage;
+- workshop shot 4 and street shot 3, 100%: a hold in the same footage, at another moment.
+
+All three are same-footage identity claims. The 4.3 calibration failures on shots with nobody in them (vertical holdout shot 3, formerly sealed shots 1 and 5, A/B shot 5) are gone.
+
+**Other checks on the final build:**
+- **Audio:** whoosh −27 / −26 ms, riser −0.3 dB (+10 ms), no clipping.
+- **Takes** (`final44/takes-case5.log`): 66 takes, 0 mismatches after Apply, take, Undo, Redo and Save/Reopen.
+- **Titles:** HONORABLE present (gym and reel55 runs).
+
+**Still failing:**
+- Gym shot 1 (the set-up over the bar): the deadlift footage goes to the lift; the rest is squat or incline.
+- The bench clip's scene detector splits it at each animation of its burned-in label, so the A/B's two press shots compete for one stretch (right moment 2/4).
+- Still shots: no measured signal separates a right still pick from a wrong one.
+- Same-footage identity can claim the wrong repetition or hold (the three labels above).
+- Tiger and MOUTH titles.
+- Body pose from a floor-level camera is noisy (bent elbows read on a straight-armed lift).
+
+The limits listed under 4.2 still apply: references over 90 s, non-Windows builds, banding, the 26-minute reopen incident, and a broad real evaluation set.
+
 ## 4.3 selection fixes — 22 November 2026 (not committed; awaiting approval)
 
 **Builds:**
