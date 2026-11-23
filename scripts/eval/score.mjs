@@ -47,13 +47,19 @@ export function scoreRun(runDir, { showBlind = false } = {}) {
     group("different footage", visible.filter((r) => r.footage === "different")),
     ...[...new Set(visible.map((r) => r.category))].sort().map((c) => group(c, visible.filter((r) => r.category === c))),
   ].filter((g) => g.pairs);
+  // Results by what each labelled shot does in the edit (its role), over open and seen pairs.
+  const shotsVisible = visible.flatMap((r) => r.shots);
+  const byRole = [...new Set(shotsVisible.map((s) => s.role ?? "unlabelled"))]
+    .sort()
+    .map((role) => ({ group: role, pairs: new Set(visible.filter((r) => r.shots.some((s) => (s.role ?? "unlabelled") === role)).map((r) => r.id)).size, ...totals(shotsVisible.filter((s) => (s.role ?? "unlabelled") === role)) }));
   const card = {
     build: run.build,
     startedAt: run.startedAt,
     mode: run.mode,
     pairs: results.length,
     groups,
-    calibration: calibration(visible.flatMap((r) => r.shots)),
+    byRole,
+    calibration: calibration(shotsVisible),
     perPair: visible.map(({ shots, ...rest }) => (rest.split === "blind" && !showBlind ? undefined : { ...rest, shots })).filter(Boolean),
     problems,
   };
@@ -68,6 +74,12 @@ export function scoreRun(runDir, { showBlind = false } = {}) {
     `| Group | Pairs | Shots | Right action | Right moment | Right clip | Fits the role | Missing shots flagged | Wrong among "close match" | Not placed |`,
     `| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |`,
     ...groups.map((g) => `| ${g.group} | ${g.pairs} | ${g.shots} | ${cell(g.rightAction)} | ${cell(g.rightMoment)} | ${cell(g.rightClip)} | ${cell(g.rightRole)} | ${cell(g.unavailableFlagged)} | ${cell(g.falseConfident)} | ${g.notPlaced} |`),
+    ``,
+    `## By what the shot does${showBlind ? "" : " (open and seen)"}`,
+    ``,
+    `| Role | Shots | Right action | Fits the role | Missing shots flagged | Wrong among "close match" |`,
+    `| --- | --- | --- | --- | --- | --- |`,
+    ...card.byRole.map((g) => `| ${g.group} | ${g.shots} | ${cell(g.rightAction)} | ${cell(g.rightRole)} | ${cell(g.unavailableFlagged)} | ${cell(g.falseConfident)} |`),
     ``,
     `## Confidence against results${showBlind ? "" : " (open and seen)"}`,
     ``,

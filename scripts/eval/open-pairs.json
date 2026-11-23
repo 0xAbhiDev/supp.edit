@@ -1,5 +1,5 @@
 {
- "about": "Openly licensed pairs from Wikimedia Commons, NASA's media library and Blender's download server (public domain, CC0, CC BY). 'own': the edit was cut from this raw footage. 'different': the raw is other recordings. Files are saved under neutral names (reference, raw-1 …) so no file name carries a hint. Labels are written by the developer from the frames, so these pairs are always 'open', never blind.",
+ "about": "Openly licensed pairs from Wikimedia Commons, NASA's media library, the National Park Service and Blender's download server (public domain, CC0, CC BY). 'own': the edit was cut from this raw footage. 'different': the raw is other recordings. Files are saved under neutral names (reference, raw-1 …) so no file name carries a hint. Labels are written by the developer from the frames, so these pairs are always 'open', never blind.",
  "pairs": [
   {
    "id": "film-sintel",
@@ -329,6 +329,136 @@
     {
      "title": "B-Roll- US, Kenya service members conduct K9 medical training at Justified Accord (952496).webm",
      "size": "1080p.vp9.webm"
+    }
+   ]
+  },
+  {
+   "id": "travel-redwoods",
+   "name": "Park year-in-review reel with the park's own b-roll",
+   "category": "travel",
+   "footage": "different",
+   "reference": {
+    "url": "https://www.nps.gov/nps-audiovideo/audiovideo/0a23954d-3988-4160-88cd-5beae45a250f720p.mp4",
+    "page": "https://www.nps.gov/media/video/view.htm?id=CDE33D1A-3BFD-4B53-A5FC-5734BE1B998C",
+    "licence": "Public domain (U.S. National Park Service)",
+    "credit": "NPS Video, Redwood National and State Parks",
+    "title": "2024 at Redwoods: A Year in Review"
+   },
+   "raw": [
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/legacy/redw/D7933AF2-D254-B797-FFAB8996B5AE5BFA/redw-BananaSlugB-roll_1280x720.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=0FEB3239-0A11-4636-8750-3CA857F0C414",
+     "licence": "Public domain (U.S. National Park Service)",
+     "credit": "NPS: Liam Carey-Rand, Redwood National and State Parks",
+     "title": "Banana Slug"
+    },
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/legacy/redw/F2E1744E-F295-B2E5-52AF33C2205A8C9E/redw-PraireCreekandRedwood_1280x720.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=98DB43BA-DB5F-42A5-9E4C-35C8814F2E4E",
+     "licence": "Public domain (U.S. National Park Service)",
+     "credit": "NPS: G Litten, Redwood National and State Parks",
+     "title": "Prairie Creek and Redwood"
+    }
+   ]
+  },
+  {
+   "id": "travel-lakeshore-different",
+   "name": "Lakeshore year-in-review reel with other parks' footage",
+   "category": "travel",
+   "footage": "different",
+   "reference": {
+    "url": "https://www.nps.gov/nps-audiovideo/audiovideo/517e0568-c8b7-455d-b4c5-3f60f0474755720p.mp4",
+    "page": "https://www.nps.gov/media/video/view.htm?id=A64CD4AC-0834-45B9-BDAD-E4E632FED23B",
+    "licence": "Public domain (U.S. National Park Service)",
+    "credit": "NPS, Pictured Rocks National Lakeshore",
+    "title": "2024 in review"
+   },
+   "raw": [
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/979338f1-d5d6-4f9f-8f7d-f641eac1de29720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=06DAF9AF-EC8D-4EC5-9037-A5B3984846BA",
+     "licence": "Public domain (U.S. National Park Service)",
+     "credit": "NPS, Rocky Mountain National Park",
+     "title": "B-Roll: Elk in Autumn in Rocky Mountain National Park"
+    },
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/76950fe7-b8b0-46a4-8bac-512fcdef5a56720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=4C25871C-EAC7-4E76-84BE-0F77DAC5384F",
+     "licence": "Public domain (U.S. National Park Service)",
+     "credit": "NPS, Rocky Mountain National Park",
+     "title": "B-Roll: Clouds Over Mountain Peaks at Sunset"
+    },
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/38095ac7-7f22-4421-838f-a9e3d8c2a55d720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=9E04AF2D-D4EF-4D71-8BC6-6F2AC6E41F2C",
+     "licence": "Public domain (U.S. National Park Service)",
+     "credit": "NPS, Rocky Mountain National Park",
+     "title": "B-Roll: Water Flowing in a Mountain Stream in Summer in Rocky Mountain National Park"
+    },
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/904eeb9c-35c9-4dc1-a794-b67c031e741d720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=3FB17416-8992-4BA1-B0DB-AF8E607BC148",
+     "licence": "Public domain (U.S. National Park Service)",
+     "credit": "NPS Video: Blum, Well, and Wang, Grand Canyon National Park",
+     "title": "Kayaker, Closer"
+    },
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/e9043e40-dbf5-4680-9524-0764ce636845720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=1B7A2092-BFA8-4B0F-A6E8-40A29E13A92E",
+     "licence": "Public domain (U.S. National Park Service)",
+     "credit": "NPS Video: Blum, Wells, and Wang, Grand Canyon National Park",
+     "title": "Rafts through Rapids - B-roll Video"
+    }
+   ]
+  },
+  {
+   "id": "cooking-gumbo-different",
+   "name": "A cooking short with another park's cooking tutorial",
+   "category": "cooking",
+   "footage": "different",
+   "reference": {
+    "url": "https://www.nps.gov/nps-audiovideo/audiovideo/bcbce7ff-78d9-4603-a7c9-0a7a028c903c720p.mp4",
+    "page": "https://www.nps.gov/media/video/view.htm?id=48A9679F-5C8D-434E-BC9C-21BEF675C2EC",
+    "licence": "U.S. National Park Service (public domain where NPS-made; credit as listed)",
+    "credit": "NPS, Pullman National Historical Park",
+    "title": "Dining With Pullman: Gumbo"
+   },
+   "raw": [
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/3d0cb681-09e3-42fc-bbcd-492056357f65720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=C7DAB79D-F305-4F34-BE34-8BE7E9A6E805",
+     "licence": "U.S. National Park Service (public domain where NPS-made; credit as listed)",
+     "credit": "NPS, Klondike Gold Rush - Seattle Unit National Historical Park",
+     "title": "Klondike Kitchen - Sourdough Flapjacks"
+    }
+   ]
+  },
+  {
+   "id": "pets-dogs-different",
+   "name": "A dogs-on-leash short with other dog footage",
+   "category": "pets",
+   "footage": "different",
+   "reference": {
+    "url": "https://www.nps.gov/nps-audiovideo/legacy/articles/E5371185-07F7-DA98-9D9B3408111F2C83/nri-Leash-Videov12-16d2_1280x720.mp4",
+    "page": "https://www.nps.gov/media/video/view.htm?id=D342CC73-80A2-4293-8549-A98D2C3DE65D",
+    "licence": "U.S. National Park Service (public domain where NPS-made; credit as listed)",
+    "credit": "NPS Video by Jay Elhard",
+    "title": "Your Leash Makes Dog Visits Possible at Acadia National Park"
+   },
+   "raw": [
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/8339eb22-22db-44d1-a613-a5275100a159720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=83D9D984-15F4-45C8-B6EB-60B65A65F14A",
+     "licence": "U.S. National Park Service (public domain where NPS-made; credit as listed)",
+     "credit": "NPS, Big South Fork National River & Recreation Area",
+     "title": "Hiking Tips with Your Dog"
+    },
+    {
+     "url": "https://www.nps.gov/nps-audiovideo/audiovideo/d1ef484f-5f6b-4997-b60c-e3dea5a7f7ff720p.mp4",
+     "page": "https://www.nps.gov/media/video/view.htm?id=A1FEDF49-47FA-4314-B090-FDCD9C1AE990",
+     "licence": "U.S. National Park Service (public domain where NPS-made; credit as listed)",
+     "credit": "NPS / J. Tomsen, Denali National Park & Preserve",
+     "title": "Mushing Sled Dogs"
     }
    ]
   }

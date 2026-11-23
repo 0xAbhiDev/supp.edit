@@ -1,13 +1,14 @@
 // Labelling aid: where the picture changes in a video (hard cuts, flashes, fades), from the
 // correlation of neighbouring small grey frames. Flat frames (black, white, fades) are reported
 // as spans. Usage: node scripts/eval/cuts.mjs VIDEO [--fps=25] [--below=0.5]
-import { greyFrames, normalise, correlation } from "./frames.mjs";
+import { greyFrames, normalise, correlation, pictureArea } from "./frames.mjs";
 
 const video = process.argv.slice(2).find((a) => !a.startsWith("--"));
 const opt = (n, d) => Number(process.argv.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3) ?? d);
 const fps = opt("fps", 25),
   below = opt("below", 0.5);
-const raw = greyFrames(video, fps, null).frames;
+// Inside the picture area: a vertical reel shown pillarboxed in a landscape frame is mostly bars.
+const raw = greyFrames(video, fps, pictureArea(video)).frames;
 const frames = raw.map(normalise);
 const mean = (f) => f.reduce((a, b) => a + b, 0) / f.length;
 const events = [];

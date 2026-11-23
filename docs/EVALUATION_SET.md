@@ -133,11 +133,50 @@ There are two kinds:
 | `node scripts/eval/compare-frames.mjs PAIR_DIR MATCHES.json OUT` | reference frame, match and runner-up side by side, to check by eye |
 | `node scripts/eval/set-labels.mjs PAIR_DIR LABELS.json --lock --by="…"` | writes and locks labels with the page's checks |
 
+**Known gaps in the matcher (22 November):**
+- It crops the raw footage to the reference's shape, but it does not search zooms or offsets. An edit that punches in, like X-59 shot 18, can be given the wrong exact moment: the matcher scored 0.63 there, while the app's zoom-aware check found 0.99 elsewhere, and that was right.
+- For a static or slowly changing shot (a locked-off control room, a head-up display), every moment of the same raw shot looks the same, so the exact range should cover that whole stretch, not only the best-scoring moment.
+
+Both lower "right moment" only: those picks already count as right action through the same-action ranges. Never accept a match below about 0.8 as exact without a clear check by eye.
+
+## Developing against the set offline
+
+App runs are the measure that counts, but take minutes per pair. For trying changes, use the offline runner. It runs the app's own selection code (`scripts/check-footage-selection.mjs`) over captured analysis in seconds per pair, and grades it with the same rules.
+
+1. Capture each pair's native analysis once:
+
+   ```powershell
+   node scripts/eval/capture.mjs
+   ```
+
+   This writes `pairs/<id>/inventory`: visual, vision, audio, motion, text, person outlines and body pose. It takes minutes for short pairs and much longer for 20-minute footage.
+2. Run the offline grading. `--peaks` uses the action peaks the app placed in that run, so offline and app compare like with like:
+
+   ```powershell
+   node scripts/eval/offline.mjs --peaks=work/eval/runs/RUN --out=work/eval/offline/NAME
+   ```
+
+   It prints the same columns as the score card, plus results by role and the confidence table. `summary.json` keeps each pick's evidence: certainty, margin, rival, same-footage score, coverage.
+3. To compare against earlier code, run the same command from a copy of that commit's source (`git archive`, with `node_modules`, `target` and `work/media-tools` linked) and `SUPP_EVAL_DIR` set to this `work/eval`.
+
+## Your corrections (take choices)
+
+Choosing another take for a recreated shot in the app is recorded on this computer. Each choice is one line in `%APPDATA%\studio.supp.edit\take-corrections.jsonl`, saying which reference shot it was for, the moment rejected and the moment chosen. Nothing is sent anywhere.
+
+`node scripts/eval/corrections.mjs` summarises them:
+- which shot roles get corrected;
+- how often the rejected pick had been called a "close match";
+- which choices were made on test-set pairs.
+
+The verification drivers restore this file after their own test choices, so only real choices remain.
+
 ## Files
 
 | Path | What it is |
 | --- | --- |
 | `scripts/eval/lib.mjs` | formats, labels, grading |
+| `scripts/eval/capture.mjs`, `offline.mjs` | captured analysis and offline grading |
+| `scripts/eval/corrections.mjs` | your take choices as tuning evidence |
 | `scripts/eval/prepare.mjs` | hashing, probing, draft cuts, proxies, project template |
 | `scripts/eval/label-server.mjs`, `labeller.html` | the labelling page (this computer only) |
 | `scripts/eval/run.mjs`, `score.mjs` | running the app and the score card |
