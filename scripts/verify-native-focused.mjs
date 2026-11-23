@@ -30,6 +30,16 @@ const read = (p) => JSON.parse(fs.readFileSync(p, "utf8").replace(/^﻿/, ""));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 // SUPP_EXE runs another build (an A/B against a preserved binary); bin/ by default.
 const exe = path.resolve(process.env.SUPP_EXE || "bin/supp-edit.exe");
+// The take choices this driver makes are tests, not a person's corrections: the corrections log
+// (corrections.rs) is put back as it was when the driver exits.
+const correctionsLog = path.join(process.env.APPDATA ?? "", "studio.supp.edit", "take-corrections.jsonl");
+const correctionsBefore = fs.existsSync(correctionsLog) ? fs.readFileSync(correctionsLog) : null;
+process.on("exit", () => {
+  try {
+    if (correctionsBefore) fs.writeFileSync(correctionsLog, correctionsBefore);
+    else if (fs.existsSync(correctionsLog)) fs.unlinkSync(correctionsLog);
+  } catch {}
+});
 const running = () => {
   try {
     return execFileSync("tasklist", ["/FI", "IMAGENAME eq supp-edit.exe", "/NH"], { encoding: "utf8" }).includes("supp-edit.exe");

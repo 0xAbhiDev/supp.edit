@@ -13,6 +13,16 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { chromium } from "@playwright/test";
 import { mediaEnvironment } from "./runtime.mjs";
+// The take choices this driver makes are tests, not a person's corrections: the corrections log
+// (corrections.rs) is put back as it was when the driver exits.
+const correctionsLog = path.join(process.env.APPDATA ?? "", "studio.supp.edit", "take-corrections.jsonl");
+const correctionsBefore = fs.existsSync(correctionsLog) ? fs.readFileSync(correctionsLog) : null;
+process.on("exit", () => {
+  try {
+    if (correctionsBefore) fs.writeFileSync(correctionsLog, correctionsBefore);
+    else if (fs.existsSync(correctionsLog)) fs.unlinkSync(correctionsLog);
+  } catch {}
+});
 const [projectArg, outArg] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const audioMode = process.argv.find((a) => a.startsWith("--audio="))?.slice(8);
 const project = path.resolve(projectArg),

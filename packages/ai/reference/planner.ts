@@ -96,6 +96,34 @@ export function barredRuns(matches: readonly { referenceMs: number; start: numbe
   }
   return runs;
 }
+/** The frame region covering every detection box, inside the frame. Detections at the frame's edge
+ * reach past it (a person cut off at the right: x 0.6, width 0.5); their union was wider than the
+ * frame and failed the plan's validation, so the whole recreation (a ship's crowded rail). */
+export function unionBox(boxes: readonly { x: number; y: number; width: number; height: number }[]) {
+  const inside = boxes
+    .map((b) => {
+      const x = Math.max(0, Math.min(1, b.x)),
+        y = Math.max(0, Math.min(1, b.y));
+      return { x, y, right: Math.max(x, Math.min(1, b.x + b.width)), bottom: Math.max(y, Math.min(1, b.y + b.height)) };
+    })
+    .filter((b) => b.right > b.x && b.bottom > b.y);
+  if (!inside.length) return undefined;
+  const x = Math.min(...inside.map((b) => b.x)),
+    y = Math.min(...inside.map((b) => b.y));
+  return { x, y, width: Math.max(...inside.map((b) => b.right)) - x, height: Math.max(...inside.map((b) => b.bottom)) - y };
+}
+/** Runs of consecutive matches whose reference shots are cards of one colour (card.ts). */
+export function cardRuns(matches: readonly { referenceMs: number; start: number; duration: number }[], shots: readonly { startMs: number; card?: { color: string } }[]) {
+  const runs: { start: number; duration: number; color: string }[] = [];
+  for (const m of matches) {
+    const color = shots.find((r) => r.startMs === m.referenceMs)?.card?.color;
+    if (!color) continue;
+    const last = runs.at(-1);
+    if (last && last.color === color && last.start + last.duration === m.start) last.duration += m.duration;
+    else runs.push({ start: m.start, duration: m.duration, color });
+  }
+  return runs;
+}
 export function autonomousControls(controls: Controls, reference: { duration: number; hasAudio: boolean }, hasMusic: boolean) {
   const chosen: string[] = [];
   const next = { ...controls };
@@ -629,18 +657,7 @@ export function buildRecreation(
         )
         .map((d) => d.bounds),
     );
-    const box = boxes.length
-      ? {
-          x: Math.min(...boxes.map((b) => b.x)),
-          y: Math.min(...boxes.map((b) => b.y)),
-          width:
-            Math.max(...boxes.map((b) => b.x + b.width)) -
-            Math.min(...boxes.map((b) => b.x)),
-          height:
-            Math.max(...boxes.map((b) => b.y + b.height)) -
-            Math.min(...boxes.map((b) => b.y)),
-        }
-      : undefined;
+    const box = unionBox(boxes);
     if (box) protection.push({ clipId, bounds: box });
     let baseScale = 1;
     let safeScale = 10;
@@ -1106,6 +1123,15 @@ export function buildRecreation(
   // letterbox the whole edit).
   if (barsBox && ap && cursor > 0)
     for (const run of barredRuns(matches, referenceShots)) command.push({ tool: "sequence.letterbox", sequenceId: id, trackId: uid(), id: uid(), start: run.start, duration: run.duration, top: Math.min(0.45, ap.top), bottom: Math.min(0.45, ap.bottom), left: Math.min(0.45, ap.left), right: Math.min(0.45, ap.right) });
+  // Title and end cards on a plain background (card.ts) are plates in the card's colour, not
+  // footage: one editable plate per run of consecutive card shots of one colour, over the footage.
+  if (cursor > 0) {
+    for (const run of cardRuns(matches, referenceShots)) command.push({ tool: "sequence.cardPlate", sequenceId: id, trackId: uid(), id: uid(), start: run.start, duration: run.duration, color: run.color });
+    for (const m of matches) {
+      const card = referenceShots.find((r) => r.startMs === m.referenceMs)?.card;
+      if (card) (m as { reasons?: string[] }).reasons = [`A title card on a plain background: recreated as a ${card.color} plate under the text; the footage chosen here is hidden beneath it (delete the plate to show it).`, ...((m as { reasons?: string[] }).reasons ?? [])];
+    }
+  }
   // Reference-clock milliseconds to a frame of this sequence, through the shot matches (which
   // carry pace and Smart/Remix length changes).
   const toFrame = (ms: number) => {

@@ -1,5 +1,37 @@
 # Reference-to-Edit
 
+## Any-footage plan, steps 2–7 (measured on the evaluation set)
+
+The evaluation set (`docs/EVALUATION_SET.md`) is the measure: real edits and their own or other footage, labelled before any run. The baseline is build `56c50ce0`, and each change below was compared offline against the same code without it (`scripts/eval/offline.mjs`).
+
+- **Casting as a gate** (step 2; `cast.ts`, `dna.ts`, `footage-index.ts`):
+  - **What it measures:** from the vision pass's YOLOX detections (80 COCO classes) and shot scale, each reference shot and each candidate window gets a casting:
+    - how often a person is there, how large the largest is, and how often there is a crowd;
+    - the main subject's kind (person, animal, vehicle, other object, nothing);
+    - the scale.
+  - **Why:** the baseline filled faces and openers by movement alone (role fit 7/20 for faces, 0/5 for openers), so an engineer's face was played by an aircraft.
+  - **How it applies:** as a gate, a window of another kind loses up to `CAST_MISMATCH` (15%) of its score, while windows of the same kind are left to movement and pose. As a weighted term, its coarse size and scale moved the gym's deadlift shot to a squat (2/4 → 0/4), so that version was dropped.
+- **Close match from 80%** (step 4; `CLOSE_MATCH_CERTAINTY`):
+  - **Evidence:**
+    - evaluation baseline: 65–80% was right 4 times in 15, and 80% or more 17 in 20;
+    - matrix: 65–80% was right 4 in 4;
+    - together, 8 in 19.
+  - **Effect:** wrong close-match labels drop by 11, and 8 right picks show as best available. Same-footage picks reach 80% at an identity score of about 0.88.
+  - **Rejected:** requiring a lead over the next stretch (near ties). It removed 5 wrong labels but demoted 16 right ones, mostly repetitions that look alike.
+- **Title and end cards become plates** (step 6; `card.ts`, `planner.ts` `cardRuns`, command `sequence.cardPlate`):
+  - **Detection:** a reference shot that holds still, has a flat picture (13 of 16 layout cells at one level) and shows text is recreated as a plain plate in the card's colour.
+  - **Placement:** the plate sits on its own track just above the footage and below the text; delete it to show the footage underneath. The shot's reasons say so.
+  - **Why:** the baseline filled each card with whatever footage scored best.
+- **Your take choices are kept as corrections** (step 7; `corrections.ts`, `src-tauri/src/corrections.rs`, `scripts/eval/corrections.mjs`):
+  - **What is recorded:** choosing another take appends one line to `take-corrections.jsonl` in the app's data folder: the reference shot, the rejected moment (with its label and certainty) and the chosen one. It stays on this computer.
+  - **Use:** the evaluation scripts read it as tuning evidence. The verification drivers restore the file after their own test choices.
+- **Fix: regions kept clear of titles stay inside the frame** (`planner.ts` `unionBox`):
+  - **The bug:** detections cut off at the frame's edge reach past it, and their union was wider than the frame. That failed the edit plan's validation and so the whole recreation (the recovery pair, a ship's crowded rail).
+- **Fix: footage with many scenes** (`dab2ba4`): the vision result allowed 32 analysed scenes while the native analyser samples up to 160, so a 10-minute film failed every edit.
+- **Known limits:**
+  - **Same-footage search:** clips over 10 minutes are searched only near the first plan's picks. A full search costs about 0.7 s per second of footage, so a 20-minute clip's exact moments are found only if the first plan lands near them.
+  - **Similar-looking cuts:** two nearly identical consecutive shots (sky, white cards) leave no cut the dense measurements can see.
+
 ## 4.4: body pose, length-weighted plans, honest labels
 
 - **Body pose** (native `analysis/pose.rs`, installer `pose_model.rs`; `packages/ai/reference/body-pose.ts`):

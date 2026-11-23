@@ -33,6 +33,7 @@ import type { SourceEvidence } from "./planner";
 import { cutSafeSegments, frameCuts } from "./cuts";
 import { actionSignature, actionSimilarity, smoothedChange, type ActionSignature } from "./action-signature";
 import { sceneSignature, sceneSimilarity } from "./scene-signature";
+import { castSignature, castSimilarity } from "./cast";
 import { breakNearTies, calibrate, phaseWindows, planSequence, repeatGroups, sourceResources, stretchOf, strongStretches, type Coverage, type Option, type RepeatGroup, type SourceResource } from "./sequence-planner";
 
 export interface FootageSegment {
@@ -388,12 +389,24 @@ export interface ShotChoice {
  * less, since similar rooms look alike whatever happens in them. Remix leans on movement. */
 /** Movement level under which a shot is a still picture (shotRole calls it a rest/hold). */
 export const STILL_LEVEL = 0.0003;
-/** Confidence a "close match" label needs. Across the graded cases (82 picks), labels on wrong picks
- * sat at 53–63% while right ones had a median of 87%: from 65% three of five false close matches
- * are flagged, for two right picks shown as best available. Same-footage picks start at 75%. */
-export const CLOSE_MATCH_CERTAINTY = 0.65;
+/** Confidence a "close match" label needs. Set from the evaluation set (real edits and footage,
+ * labelled before any run; docs/EVALUATION_SET.md) with the earlier matrix:
+ *  - evaluation set baseline (7 pairs, 35 close-match labels): 65–80% was right 4 times in 15, 80%
+ *    and up 17 in 20;
+ *  - matrix (planted moments, 74 right picks): 65–80% was right 4 in 4.
+ * Together 65–80% is right 8 times in 19, too often wrong for "close match". From 80%, 11 wrong
+ * close matches become "best available", for 8 right picks shown as best available. Same-footage
+ * picks reach 80% at an identity score of about 0.88. */
+export const CLOSE_MATCH_CERTAINTY = 0.8;
 /** Score kept when the pose model saw a body on one side and nobody on the other. */
 export const BODY_MISMATCH_FACTOR = 0.9;
+/** Casting (cast.ts: who or what the window shows) is evidence of the shot's role that survives
+ * other recordings: the evaluation set's baseline filled faces and openers by movement alone (role
+ * fit 7/20 for faces, 0/5 for openers). It works as a gate, not a weighted term: a window showing
+ * another kind of subject (a vehicle for a face, nobody for a person) loses up to this share of its
+ * score, while windows of the same kind are left to movement and pose (as a weighted term, its coarse
+ * sense of size and scale moved the gym's deadlift shot to a squat). */
+export const CAST_MISMATCH = 0.15;
 const weights: Record<RecreationMode, Record<string, number>> = {
   "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 },
   "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6, scene: 1 },
@@ -427,6 +440,7 @@ export const termLabels: Record<string, string> = {
   subject: "body trajectory",
   duration: "duration fit",
   scene: "scene and role",
+  cast: "who or what it shows",
   direction: "motion direction",
   envelope: "activity timing",
 };
@@ -484,6 +498,9 @@ export function scoreCandidate(
   const look = embedded !== null ? embedded : colorFit !== null ? colorFit * 2 - 1 : null;
   const layout = layoutSimilarity(req.shot.layout, measuredLayout(source.visual ?? [], inMs, outMs));
   const shotScale = (frames.length ? frames : vision.filter((f) => f.timeMs >= lo && f.timeMs < hi))[0]?.shotScale ?? null;
+  // Who or what the window shows, from the vision frames near it (else its stretch's).
+  const castFit = castSimilarity(req.shot.cast, castSignature(frames.length ? frames : vision.filter((f) => f.timeMs >= lo && f.timeMs < hi)));
+  const cast = castFit?.overall ?? null;
   // Movement level on the same scale on both sides: dense per-frame change when both measured it.
   const refLevel = req.shot.action?.level,
     dense = refLevel !== undefined && (source.visual?.length ?? 0) >= 8;
@@ -586,6 +603,7 @@ export function scoreCandidate(
     tone: req.shot.luma !== null && c.luma !== null && !dense ? Math.exp(-Math.abs(req.shot.luma - c.luma) / 0.15) : color && req.shot.color ? Math.exp(-Math.abs(req.shot.color.luma - color.luma) / 0.15) : 0.5,
     quality,
     scene: scene ?? 0.5,
+    cast: cast ?? 0.5,
   };
   const emphasis: Record<string, number> = { ...((req.role && roleEmphasis[req.role]) ?? {}) };
   // The weaker the reference shot's movement, the more what the picture shows has to decide.
@@ -616,6 +634,8 @@ export function scoreCandidate(
   // repetitions), nor a shot of nobody by a person: whichever terms agree, this costs a tenth (a
   // fifth reordered a beach plan offline; a tenth kept it and still gave the gym shot a gym clip).
   if (bodyMismatch) score *= BODY_MISMATCH_FACTOR;
+  // Another kind of subject than the reference shot shows (castSimilarity's kind and presence agreement).
+  if (castFit) score *= 1 - CAST_MISMATCH * (1 - castFit.kind);
   // A dissolve needs footage before the in-point; a window without it plays the blend as a cut.
   if (req.leadInMs && inMs - lo < req.leadInMs * 0.5) score *= 0.97;
   if (c.frozen) score *= moving ? 0.3 : (req.shot.camera?.freeze ?? 0) >= 0.5 ? 1 : 0.6;
@@ -641,6 +661,7 @@ export function scoreCandidate(
   }
   match.duration = speed;
   if (scene === null) delete match.scene;
+  if (cast === null) delete match.cast;
   return { inMs: Math.round(inMs), outMs: Math.round(outMs), peakMs: c.peakMs, speed, score: Number(score.toFixed(4)), match, action, pose, scale };
 }
 

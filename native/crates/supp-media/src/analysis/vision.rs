@@ -507,40 +507,57 @@ pub fn analyze(
         let later = count - done - 1;
         times.truncate(budget.saturating_sub(later).max(1));
         budget = budget.saturating_sub(times.len());
-        for time in times {
+        for planned in times {
             check(cancel)?;
             // Bounded JPEG decode respects FFmpeg autorotation and preserves the actual aspect ratio.
-            let bytes = execute(
-                crate::command("ffmpeg")
-                    .args([
-                        "-v",
-                        "error",
-                        "-nostdin",
-                        "-threads",
-                        "2",
-                        "-protocol_whitelist",
-                        "file,pipe",
-                        "-ss",
-                        &format!("{:.3}", f64::from(time) / 1000.),
-                        "-i",
-                    ])
-                    .arg(source)
-                    .args([
-                        "-map",
-                        "0:v:0",
-                        "-frames:v",
-                        "1",
-                        "-vf",
-                        "scale=960:960:force_original_aspect_ratio=decrease:out_range=full,format=yuvj420p",
-                        "-f",
-                        "image2pipe",
-                        "-c:v",
-                        "mjpeg",
-                        "pipe:1",
-                    ]),
-                cancel,
-                4 * 1024 * 1024,
-            )?;
+            let grab = |at: u32| {
+                execute(
+                    crate::command("ffmpeg")
+                        .args([
+                            "-v",
+                            "error",
+                            "-nostdin",
+                            "-threads",
+                            "2",
+                            "-protocol_whitelist",
+                            "file,pipe",
+                            "-ss",
+                            &format!("{:.3}", f64::from(at) / 1000.),
+                            "-i",
+                        ])
+                        .arg(source)
+                        .args([
+                            "-map",
+                            "0:v:0",
+                            "-frames:v",
+                            "1",
+                            "-vf",
+                            "scale=960:960:force_original_aspect_ratio=decrease:out_range=full,format=yuvj420p",
+                            "-f",
+                            "image2pipe",
+                            "-c:v",
+                            "mjpeg",
+                            "pipe:1",
+                        ]),
+                    cancel,
+                    4 * 1024 * 1024,
+                )
+            };
+            // A container can run past its last picture (audio longer than video, a phone clip): a
+            // time there yields no frame at all. Step back inside the scene; with still no picture,
+            // skip the sample instead of failing the whole analysis.
+            let mut time = planned;
+            let mut bytes = grab(time)?;
+            for _ in 0..4 {
+                if !bytes.is_empty() || time <= scene.start_ms {
+                    break;
+                }
+                time = time.saturating_sub(250).max(scene.start_ms);
+                bytes = grab(time)?;
+            }
+            if bytes.is_empty() {
+                continue;
+            }
             let rgb = image::load_from_memory(&bytes).map_err(err)?.into_rgb8();
             let embedding = image_embedding(&mut vision, &rgb)?;
             check(cancel)?;

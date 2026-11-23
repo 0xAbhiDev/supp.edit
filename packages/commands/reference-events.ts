@@ -61,6 +61,42 @@ export function moveEvent(input: z.infer<typeof moveEventSchema>): Edit {
   };
 }
 
+export const cardPlateSchema = z
+  .object({
+    tool: z.literal("sequence.cardPlate"),
+    sequenceId: z.string().min(1).max(128),
+    trackId: z.string().min(1).max(128),
+    id: z.string().min(1).max(100),
+    start: z.number().int().nonnegative(),
+    duration: z.number().int().positive(),
+    color: z.string().regex(/^#[0-9a-f]{6}$/i),
+  })
+  .strict();
+/** A plain full-frame plate for a reference card (card.ts), on its own track directly above the
+ * footage it covers and below everything else (text, pulses): an editable rectangle that can be
+ * recoloured, trimmed, or deleted to show the footage again. */
+export function addCardPlate(input: z.infer<typeof cardPlateSchema>): Edit {
+  const call = cardPlateSchema.parse(input);
+  return (p) => {
+    if (p.clips.some((c) => c.id === call.id)) throw Error("Card plate already exists.");
+    const overlaps = (c: { start: number; duration: number }) => c.start < call.start + call.duration && c.start + c.duration > call.start;
+    // The footage track this plate covers: the highest video track with media in its time.
+    const footage = p.tracks.findIndex((t) => t.kind === "video" && p.clips.some((c) => c.trackId === t.id && c.kind === "media" && overlaps(c)));
+    let track = p.tracks.find((t) => t.id === call.trackId);
+    if (track && (track.locked || track.kind !== "video" || p.clips.some((c) => c.trackId === track!.id && overlaps(c))))
+      throw Error("Choose an empty unlocked video track for the card plate.");
+    if (!track) {
+      track = { ...newTrack("video", p.tracks.length + 1), id: call.trackId, name: "Card plate" };
+      p.tracks.splice(Math.max(0, footage), 0, track);
+    }
+    const plate = newClip(track.id, call.start, call.duration, "shape");
+    plate.id = call.id;
+    plate.name = "Card plate";
+    plate.shape = { type: "rectangle", color: call.color, width: p.settings.width, height: p.settings.height };
+    p.clips.push(plate);
+  };
+}
+
 const side = z.number().min(0).max(0.45);
 export const letterboxSchema = z
   .object({

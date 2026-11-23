@@ -2,6 +2,8 @@ import { z } from "zod";
 import { dissolves, frameCuts, whipAt } from "./cuts";
 import { actionSignature, actionSignatureSchema, effectSpans, shotSpan } from "./action-signature";
 import { medianSharpness, sceneSignature, sceneSignatureSchema } from "./scene-signature";
+import { castSchema, castSignature } from "./cast";
+import { cardColor } from "./card";
 import { toneSchema } from "./tone";
 import { subjectShapeSchema } from "./subject-shape";
 import { audioTimelineSchema } from "../audio/timeline";
@@ -69,6 +71,10 @@ export const dnaSchema = z
             action: actionSignatureSchema.optional(),
             /** What the shot shows when it barely moves: structure, horizon, role. */
             scene: sceneSignatureSchema.optional(),
+            /** Who or what the shot shows (cast.ts): its role when its action cannot be matched. */
+            cast: castSchema.optional(),
+            /** A title or end card on a plain background (card.ts): recreated as a plate, not footage. */
+            card: z.object({ color: z.string().regex(/^#[0-9a-f]{6}$/i) }).strict().optional(),
             layout: z.array(unit).length(16).nullable().optional(),
             embedding: z
               .array(z.number().finite().min(-1).max(1))
@@ -319,6 +325,10 @@ export function extractDNA(
       if (action) shot.action = action;
       const scene = sceneSignature(visual, from, to, action, vision?.find((f) => f.subject)?.subject?.bounds.height ?? null, (vision ?? []).flatMap((f) => f.detections ?? []), medianSharpness(visual));
       if (scene) shot.scene = scene;
+      const cast = castSignature(vision ?? []);
+      if (cast) shot.cast = cast;
+      const color = cardColor(visual, shot.startMs, shot.endMs, (text ?? []).some((t) => t.startMs < shot.endMs - 100 && t.endMs > shot.startMs + 100));
+      if (color) shot.card = { color };
     }
     const samples = motion.filter(
       (m) => m.timeMs > shot.startMs + 125 && m.timeMs < shot.endMs,

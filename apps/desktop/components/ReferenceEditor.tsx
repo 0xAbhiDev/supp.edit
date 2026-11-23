@@ -32,6 +32,7 @@ import {
   type StyleDNA,
 } from "../../../packages/ai/reference/dna";
 import { recreate } from "../../../packages/ai/reference/service";
+import { recordTakeChoice } from "../../../packages/ai/reference/corrections";
 import { termLabels } from "../../../packages/ai/reference/footage-index";
 import { playedIntervals, reuseOf } from "../../../packages/ai/reference/take-reuse";
 import { measureTitleInk } from "../../../packages/ai/reference/font-match";
@@ -270,6 +271,18 @@ export function ReferenceEditor() {
       const matches = result.matches.map((x, k) =>
         k === index ? { ...x, source: asset.id, sourceIn, speed, match: alt.match, alternatives: [previous, ...(x.alternatives ?? []).filter((a) => a !== alt)] } : x,
       );
+      // The person's choice is a label for this shot, kept on this computer for tuning (corrections.ts).
+      const referenceAsset = project.assets.find((a) => a.id === reference),
+        rejectedAsset = project.assets.find((a) => a.id === m.source);
+      if (referenceAsset && rejectedAsset)
+        void recordTakeChoice({
+          at: new Date().toISOString(),
+          reference: { fingerprint: referenceAsset.fingerprint, durationMs: Math.round(referenceAsset.duration * 1000) },
+          shot: { startMs: m.referenceMs, endMs: m.referenceEndMs, ...(m.role ? { role: m.role } : {}) },
+          rejected: { fingerprint: rejectedAsset.fingerprint, inMs: previous.inMs, outMs: previous.outMs, ...(m.label ? { label: m.label } : {}), ...(m.certainty !== undefined ? { certainty: m.certainty } : {}) },
+          chosen: { fingerprint: asset.fingerprint, inMs: alt.inMs, outMs: alt.outMs, ...(alt.lostOn ? { lostOn: alt.lostOn } : {}) },
+          mode: controls.mode,
+        });
       if (canApply) setResult({ ...result, preview: previewEditPlan({ ...result.preview.plan, commands }, project, revision), matches });
       else {
         const s = state();

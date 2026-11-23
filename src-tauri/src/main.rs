@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod dialogs;
+mod corrections;
 mod lifecycle;
 mod analysis;
 mod media;
@@ -39,6 +40,7 @@ fn main() {
         .setup(|app| {
             std::fs::create_dir_all(app.path().app_data_dir()?)?;
             lifecycle::init(app.path().app_data_dir()?);
+            corrections::init(app.path().app_data_dir()?);
             lifecycle::install_panic_hook();
             lifecycle::mark("launch", env!("CARGO_PKG_VERSION"));
             Ok(())
@@ -50,6 +52,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             lifecycle::lifecycle_mark,
+            corrections::record_take_choice,
             project::open_project,
             project::save_project,
             project::autosave_project,

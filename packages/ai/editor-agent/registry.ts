@@ -5,7 +5,7 @@ import {
   referenceLayer, plateTintSchema, referencePlateTint, tracedTitleSchema, referenceTracedTitle,
 } from "../../commands/reference-layers";
 import { addColorPulse, colorPulseSchema } from "../../commands/color-pulse";
-import { addAsset, addLetterbox, assetAddSchema, letterboxSchema, moveEvent, moveEventSchema } from "../../commands/reference-events";
+import { addAsset, addCardPlate, addLetterbox, assetAddSchema, cardPlateSchema, letterboxSchema, moveEvent, moveEventSchema } from "../../commands/reference-events";
 import {
   referenceTransitionSchema,
   addReferenceTransition,
@@ -67,7 +67,7 @@ const id = z.string().min(1).max(128),
 export const toolCallSchema = z.discriminatedUnion("tool", [
   backgroundFillSchema,
   subjectLayerSchema,
-  colorPulseSchema, plateTintSchema, tracedTitleSchema, assetAddSchema, moveEventSchema, letterboxSchema,
+  colorPulseSchema, plateTintSchema, tracedTitleSchema, assetAddSchema, moveEventSchema, letterboxSchema, cardPlateSchema,
   typographyCommandSchema,
   referenceTransitionSchema,
   typographyCommandSchema
@@ -386,6 +386,7 @@ export function toolEdit(input: unknown): Edit {
   if (call.tool === "asset.add") return addAsset(call);
   if (call.tool === "sequence.moveEvent") return moveEvent(call);
   if (call.tool === "sequence.letterbox") return inComposition(call.sequenceId, addLetterbox(call));
+  if (call.tool === "sequence.cardPlate") return inComposition(call.sequenceId, addCardPlate(call));
   if (call.tool === "sequence.colorPulse")
     return inComposition(call.sequenceId, addColorPulse(call));
   if (
