@@ -409,10 +409,11 @@ export const BODY_MISMATCH_FACTOR = 0.9;
  * sense of size and scale moved the gym's deadlift shot to a squat). */
 export const CAST_MISMATCH = 0.15;
 const weights: Record<RecreationMode, Record<string, number>> = {
-  // Learned from the labelled evaluation pairs (scripts/eval/tune.mjs, 23 November 2026): peak
-  // 0.5 → 0.3, composition 0.3 → 0.18 and quality 0.6 → 0.36 lifted right actions 33 → 37 of 74
-  // offline, own and different footage both, with fewer wrong close matches (10 → 8).
-  "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.3, composition: 0.18, tone: 0.2, quality: 0.36, scene: 1 },
+  // Tuning these on the labelled pairs (scripts/eval/tune.mjs, 23 November 2026) kept peak 0.3,
+  // composition 0.18 and quality 0.36: right actions 33 → 37 of 74 offline. In the app they did
+  // not hold: 43 → 41 of 86 over the 11 open pairs, 14 → 12 of 31 on the 7 never tuned on. The
+  // hand-set values stay until a larger set shows a gain on pairs it was not tuned on.
+  "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 },
   "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6, scene: 1 },
   // Remix reinterprets rhythm (durations), grade and framing, but still performs what each
   // reference shot does: movement geometry and pose lead; look, framing and tone barely count.

@@ -1,3 +1,27 @@
+## Any-footage plan: steps 1–8 done — 24 November 2026
+
+**State:** the code is committed in `fd0e41e` and the write-up commit after it (hand-set weights restored). The final build is `afa469f6` in `bin/` (hand-set Close Match weights). `AI_ARCHITECTURE.md` ("Any-footage plan, steps 3–8") has the measurements.
+
+**Runs:**
+- `work/eval/runs/20261123-1907-afa469f6`: the final build, 12 of 13 pairs; `launch-crew11` was skipped at the user's request.
+- `20261123-1626-50ad6c65`: the tuned weights, all 13 pairs, not adopted.
+- `20261123-0936-d1493419` and `20261123-1526-7a30355c`: the builds before.
+
+**Done this round:**
+- The three pairs that never finished (title reading on long references) now finish.
+- No replayed moments while footage is unused.
+- Take choices feed the next recreation.
+- Keep mode was checked in the app on the user's meme reel (`work/user-edits/2026-11-23/app-keep*`).
+- No stray one-letter titles.
+
+**Tried and dropped:** tuned weights (`scripts/eval/tune.mjs`). Offline they gained 4 right actions; in the app they lost 2 on the pairs they were not tuned on.
+
+**Next:**
+1. **More pairs, especially blind ones** labelled by someone else. With 13 pairs, changes of one shot are noise, and no weight change can be proven.
+2. **Different footage is the weak spot:** 21/55 right action, 29/90 role. The misses are mostly shots the footage does not contain (flagged 100/103); keep mode covers meme and template reels.
+3. **Memory with long footage:** a 10-minute film took the web view to 1.1 GB while matching. Move matching or its per-frame data out of the web view.
+4. The user's own reel is set up as a separate pair at `work/user-edits/2026-11-23/app-eval` (`SUPP_EVAL_DIR`), not part of the set.
+
 ## Evaluation set (step 1 of the any-footage plan) — 22 November 2026
 
 **What exists** (`docs/EVALUATION_SET.md` is the guide):
@@ -444,12 +468,3 @@ Windows UI uses the computer-use skill and @oai/sky. Never press Escape. Alt+F4 
 Tests: 122 TS pass across full run plus isolated timing-test rerun, 16 focused reframe tests, browser reframe/manual/reopen pass, native media tests and workspace Clippy pass. Full-HD CPU render: `work/render-portrait.mjs` disables Vite HMR and resumes existing frames. Manual references: `scripts/reframe-references.mjs`; native export audit: `scripts/verify-native-portrait.mjs`. These scripts use existing captured real files. Native revision evidence: `test-results/revisions/native-verification.json`.
 
 Known limits: ramps apply to media layers (not composition instances), max 5 minutes per ramped clip, no pitch preservation/optical flow; no physical-GPU/4K/cross-platform certification; 10-layer1080 SwiftShader timeout; natural two-person crossings not certified. Installed native binary includes schema v10 and accepted audio. Distribution START_HERE/BUILD_MANIFEST/source ZIP stale: update truthfully later, never run old work/checkpoint-manifest.mjs unchanged.
-
-## Keep the reel's own shots (2026-11-23, code committed, not yet built or tried in the app)
-- `controls.reelShots: "keep"` ("Shots your footage lacks" in the AI Studio panel; `--reel-shots=keep` in
-  `scripts/verify-native-focused.mjs`). `reelShotsToKeep` in `planner.ts` picks the shots; later passes
-  (titles, transitions between two kept shots, colour pulses, bars, card plates, subject layers) skip them.
-  Tests are in `tests/keep-reel.test.ts`.
-- Still to do: wait for the release run (`work/eval/release-run.log`, exe `d1493419`) to finish and compare
-  it with the baseline `work/eval/runs/20261122-1643-56c50ce0`. Only then rebuild and copy to `bin/`
-  (the run uses `bin/supp-edit.exe`). Try keep mode on the 2026-11-23 reel and raw, and write up the results.

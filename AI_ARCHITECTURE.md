@@ -1,5 +1,46 @@
 # Reference-to-Edit
 
+## Any-footage plan, steps 3–8 and the release check (23–24 November 2026)
+
+Measured in the app (`scripts/eval/run.mjs`) against the builds before. Final build `afa469f6`: 12 of the 13 pairs (the crew launch from its own footage was skipped; it ran on the two builds before).
+
+| Open pairs | First build `56c50ce0` (its 5 open pairs) | Final, same 5 | Previous builds (10 open pairs) | Final, same 10 |
+| --- | --- | --- | --- | --- |
+| Right action | 25/55 | 29/55 | 38/81 | 37/81 |
+| Right moment | 12/21 | 13/21 | 13/21 | 13/21 |
+| Fits the role | 29/75 | 33/75 | 49/121 | 47/121 |
+| Missing shots flagged | 50/56 | 54/56 | 110/114 | 110/114 |
+| Wrong among "close match" | 16/36 | 5/21 | 10/25 | 9/25 |
+
+- **Pairs that ran:** the first build finished 7 of 13, the final build every pair it was given.
+- **Replayed moments:** 37 → 14 in 226 picks.
+- **The one lost right action and role:** the crew launch on different footage gave them up to the no-replay rule below; the lakeshore reel lost one role.
+- **The two seen pairs** are unchanged (gym 4/8).
+
+- **Release check: three pairs never finished** (dogs, two park-travel reels; `title-read.ts`, `focus.ts`):
+  - **Cause:** reading titles on long references with much speech. Each title tried every spoken word near it in every installed face; the glyph cache held up to 60,000 rasters; and every sampled frame kept two band masks at the reference's full rate. The web view passed 1 GB and died, or stalled for an hour.
+  - **Fix:**
+    - the cache holds 6,000 rasters (`RASTER_CACHE`);
+    - beyond 36 spoken words, only those nearest the lettering's proportions in two common faces are tried in every face (`shortlist`);
+    - title frames are sampled within a 160 MB mask budget, never below 12 a second (`INK_BUDGET`).
+  - **Result:** all three now finish (dogs 13 min, lakeshore 7 min, redwoods 6 min); the dogs reference's web view peaked at 890 MB instead of dying near 1 GB.
+- **Stray one-letter titles** (`ink-titles.ts` `STRAY_GLYPH_MS`): a lone decoded letter held under 300 ms, offered by no review, OCR or speech, is not a title. It came from a bright arm edge read as "J" over a flex shot. Title cache 7.
+- **Step 3, understanding — measured, unchanged:** the app finds 151 of the 161 labelled cuts. Most of its 32 cuts the labels lack are real jump cuts the labels merged (the crew walking out in three angles), not on-screen text. Blur, exposure, shake, black and frozen windows were already scored (`footage-index.ts` `good`).
+- **Step 4, learning the weights — tried, not adopted** (`scripts/eval/tune.mjs`):
+  - **Method:** scales one Close Match weight at a time over the captured pairs offline, keeping a change only for a gain of 2 or more that costs neither own nor different footage. It kept peak 0.3, composition 0.18 and quality 0.36 (offline right action 33 → 37 of 74).
+  - **In the app it did not hold:** 43 → 41 of 86 over the open pairs, and 14 → 12 of 31 on the seven pairs it was not tuned on. Every pair moved by about one shot, which is noise at this size.
+  - **Decision:** the hand-set weights stay. The tool and its `--weights` override (`offline.mjs`, `check-footage-selection.mjs`) remain for a larger set.
+- **Step 5, editing rules — no replayed moments while footage is unused** (`sequence-planner.ts`):
+  - **The bug:** when every one of a shot's best windows was taken, the planner replayed the shot's top window. A 94 s reel from 64 s of footage played one 7 s stretch nine times while 19 s went unused.
+  - **Fix:** the shot takes its best window in unused footage, wherever it is. Only when every window is taken does it reuse the moment used least (`REUSE_SPREAD`).
+  - **Result:** that pair's replayed moments fell from 29 to 13 (some reuse is unavoidable: the reel is 30 s longer than the footage), at the cost of one right action that sat in the replayed stretch.
+- **Step 6, adapting — keep the reel's own shots** (`planner.ts` `reelShotsToKeep`; "Shots your footage lacks" in the AI Studio panel):
+  - **Which shots:** each reference shot the footage does not play keeps the reel's own frames. The footage plays its close matches and, for each clip, the one shot it fits best by certainty weighted by length. Card shots stay the reel's.
+  - **Passes that skip kept shots:** reconstructed titles, colour pulses, bars, card plates, subject layers and person flashes skip them, as do transitions between two of them. The edit's notes name the kept shots and warn that anything burned into them (another creator's handle) plays too.
+  - **Checked in the app** on a 16 s meme reel with 6 s of the user's own flex: the flex played shot 1 (slowed to 85% to fill it), and the reel kept its 16 meme and end-card shots.
+- **Step 7, take choices are used** (`corrections.ts` `takesFor`/`takeChoiceShift`, Rust `read_take_choices`): the next recreation of the same reel from the same footage reads the take-choice log. For that shot, a moment you chose leads by 0.2 and one you replaced falls back by 0.2, with the latest choice winning.
+- **Known limit, memory with long footage:** with a 10-minute film as the footage, the web view reached 1.1 GB while matching (dense per-frame measurements, person masks and body pose for the whole film). It finished; moving matching out of the web view would remove the limit.
+
 ## Any-footage plan, steps 2–7 (measured on the evaluation set)
 
 The evaluation set (`docs/EVALUATION_SET.md`) is the measure: real edits and their own or other footage, labelled before any run. The baseline is build `56c50ce0`, and each change below was compared offline against the same code without it (`scripts/eval/offline.mjs`).

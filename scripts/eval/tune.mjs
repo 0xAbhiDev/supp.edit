@@ -3,6 +3,8 @@
 // captured open and seen pair (offline.mjs) and is graded against the labels. A variant is kept only
 // if it gains at least MIN_GAIN on the objective without costing right actions on either own or
 // different footage: with a handful of pairs, small gains are noise and would only fit the set.
+// Confirm any result in the app on pairs the tuning did not see (run.mjs): the first result
+// (peak, composition and quality lowered) gained 4 right actions offline and lost 2 in the app.
 // Usage: node scripts/eval/tune.mjs [--mode="Close Match"] [--keys=action,pose] [--rounds=1]
 import fs from "node:fs";
 import path from "node:path";
@@ -43,7 +45,7 @@ for (let round = 0; round < rounds; round++)
     }
 log("result", JSON.stringify(base), JSON.stringify(best));
 function defaultOf(key) {
-  const d = { "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.3, composition: 0.18, tone: 0.2, quality: 0.36, scene: 1 } }[mode];
+  const d = { "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 } }[mode];
   if (!d || d[key] === undefined) throw Error(`no default weight for ${key} in ${mode}`);
   return d[key];
 }
