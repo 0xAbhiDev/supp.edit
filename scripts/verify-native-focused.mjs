@@ -14,9 +14,11 @@ import { chromium } from "@playwright/test";
 import { mediaEnvironment } from "./runtime.mjs";
 const [projectArg, outArg, start, end, reviewFile] = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 // --audio=music|reference|recreate chooses the Audio mode control; --exclude=id,id withholds raw clips;
-// --mode="Smart Adaptation"|"Creative Remix" chooses the Recreation mode (default Close Match).
+// --mode="Smart Adaptation"|"Creative Remix" chooses the Recreation mode (default Close Match);
+// --reel-shots=keep keeps the reel's own shots where the footage has nothing like them.
 const option = (name) => process.argv.find((a) => a.startsWith("--" + name + "="))?.slice(name.length + 3);
 const audioMode = option("audio"),
+  reelShots = option("reel-shots"),
   recreationMode = option("mode") ?? "Close Match",
   untouched = process.argv.includes("--untouched"),
   excluded = new Set((option("exclude") ?? "").split(",").filter(Boolean));
@@ -133,6 +135,7 @@ if (untouched) {
   await panel.getByLabel("Reference text", { exact: true }).selectOption("original");
   await panel.getByLabel("Text layering").selectOption("reference");
   if (audioMode) await panel.getByLabel("Audio mode").selectOption(audioMode);
+  if (reelShots) await panel.getByLabel("Shots your footage lacks").selectOption(reelShots);
   await panel.getByText("Style controls", { exact: true }).click();
   // The focused title interval exists in Close Match only; the other modes use the whole reference.
   if (recreationMode === "Close Match") {

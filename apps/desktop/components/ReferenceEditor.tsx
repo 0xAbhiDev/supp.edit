@@ -633,6 +633,17 @@ export function ReferenceEditor() {
             </select>
           </label>
           <label>
+            Shots your footage lacks
+            <select
+              aria-label="Shots your footage lacks"
+              value={controls.reelShots ?? "footage"}
+              onChange={(e) => update({ reelShots: e.target.value as Controls["reelShots"] })}
+            >
+              <option value="footage">Fill from your footage</option>
+              <option value="keep">Keep the reel's own shots · meme and template reels</option>
+            </select>
+          </label>
+          <label>
             Text layering
             <select
               aria-label="Text layering"
@@ -888,6 +899,12 @@ export function ReferenceEditor() {
                           <>
                             <br />
                             <span className="re-tag">{m.role}</span>
+                          </>
+                        )}
+                        {m.reel && (
+                          <>
+                            <br />
+                            <span className="re-tag">the reel's own shot</span>
                           </>
                         )}
                         {m.confidence && (

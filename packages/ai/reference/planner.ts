@@ -60,6 +60,9 @@ export interface Controls {
    * effects for linked sounds it lacks. */
   audio?: "music" | "reference" | "recreate";
   subjectLayering?: "flat" | "behind-people" | "reference";
+  /** Shots the raw footage has nothing for: fill them from the footage anyway (footage, the default)
+   * or keep the reel's own shot there (keep: a meme-format reel whose other shots are the format). */
+  reelShots?: "footage" | "keep";
 }
 // One click recreates the reference: its own words, its own framing, as closely as the footage allows.
 export const defaults: Controls = {
@@ -111,6 +114,29 @@ export function unionBox(boxes: readonly { x: number; y: number; width: number; 
   const x = Math.min(...inside.map((b) => b.x)),
     y = Math.min(...inside.map((b) => b.y));
   return { x, y, width: Math.max(...inside.map((b) => b.right)) - x, height: Math.max(...inside.map((b) => b.bottom)) - y };
+}
+/** Which reference shots keep the reel's own frames (controls.reelShots "keep"): every shot the
+ * footage does not play. The footage plays its close matches, and each clip plays at least the one
+ * shot it fits best, by certainty weighted by the shot's length (a clip of a flexed arm plays the
+ * reel's flex shot, not the half-second cat on an arm beside it). Cards stay the reel's. */
+export function reelShotsToKeep(
+  choices: readonly ({ sourceId: string; label: string; certainty: number } | undefined)[],
+  shots: readonly { startMs: number; endMs: number; card?: unknown }[],
+) {
+  const own = new Set<number>();
+  choices.forEach((c, i) => {
+    if (c?.label === "close match" && !shots[i]?.card) own.add(i);
+  });
+  const mean = shots.reduce((t, s) => t + (s.endMs - s.startMs), 0) / Math.max(1, shots.length);
+  const best = new Map<string, { i: number; fit: number }>();
+  choices.forEach((c, i) => {
+    if (!c || shots[i]?.card) return;
+    const fit = c.certainty * Math.sqrt((shots[i].endMs - shots[i].startMs) / Math.max(1, mean));
+    const b = best.get(c.sourceId);
+    if (!b || fit > b.fit) best.set(c.sourceId, { i, fit });
+  });
+  for (const b of best.values()) own.add(b.i);
+  return new Set(shots.map((_, i) => i).filter((i) => !own.has(i)));
 }
 /** Runs of consecutive matches whose reference shots are cards of one colour (card.ts). */
 export function cardRuns(matches: readonly { referenceMs: number; start: number; duration: number }[], shots: readonly { startMs: number; card?: { color: string } }[]) {
@@ -232,6 +258,8 @@ export function buildRecreation(
       shortfall?: string | null;
       speed?: number;
       peak?: { fraction: number; source: ShotRequirement["peakSource"] };
+      /** The reel's own shot, kept because the footage has nothing like it (controls.reelShots). */
+      reel?: true;
     }[] = [];
   if (
     !sources.length ||
@@ -418,6 +446,10 @@ export function buildRecreation(
   const cutSafePool = pool.map((r) => ({ ...r }));
   let planReport: PlanReport | undefined;
   const choices = captions ? [] : selectShots(footage, sources, requirements, controls.mode, 40, 16, matchingProfile, undefined, (r) => (planReport = r));
+  // Meme-format reels: the shots the footage has nothing for keep the reel's own frames.
+  const keepReel = controls.reelShots === "keep" && reference.kind === "video" ? reelShotsToKeep(choices, referenceShots) : new Set<number>();
+  if (keepReel.size)
+    warnings.push(`Shot${keepReel.size === 1 ? "" : "s"} ${[...keepReel].map((i) => i + 1).join(", ")} keep${keepReel.size === 1 ? "s" : ""} the reel's own frames (your footage has nothing like ${keepReel.size === 1 ? "it" : "them"}). Anything burned into the reel there, such as another creator's handle, plays too.`);
   if (planReport) {
     const c = planReport.coverage;
     warnings.push(`Reference coverage: excellent ${c.excellent}, good ${c.good}, weak ${c.weak}, missing ${c.missing}.`);
@@ -453,6 +485,29 @@ export function buildRecreation(
       );
     const nextRef = referenceShots[index + 1];
     const pick = choices[index];
+    if (keepReel.has(index)) {
+      // The reel's own shot, as it plays in the reel: its frames, timing, grade and text. Its sound is
+      // left to the soundtrack (the reference audio), so the clip itself is muted.
+      const clipId = uid(),
+        duration = Math.min(requested, Math.floor(300 * rate) - cursor),
+        sourceIn = Math.round((ref.startMs * rate) / 1000);
+      if (duration < 1) break;
+      command.push({ tool: "sequence.insert", sequenceId: id, clipId, assetId: reference.id, fingerprint: reference.fingerprint, trackId: video, startFrame: cursor, sourceIn, duration, gain: -60 });
+      matches.push({
+        source: reference.id,
+        clipId,
+        sourceIn,
+        start: cursor,
+        duration,
+        referenceMs: ref.startMs,
+        referenceEndMs: ref.endMs,
+        preroll: 0,
+        reel: true,
+        reasons: ["The reel's own shot: your footage has nothing like it, so this shot plays as it does in the reel (switch \"Shots your footage lacks\" to fill it from your footage)."],
+      });
+      cursor += duration;
+      continue;
+    }
     const fromChoice = (() => {
       if (!pick) return undefined;
       const first = Math.round((pick.inMs * rate) / 1000),
@@ -1004,6 +1059,7 @@ export function buildRecreation(
   if (!cursor) throw Error("The selected footage has no usable video ranges");
   // Text that is part of a chosen source's pixels is said plainly: it is not an editable title.
   matches.forEach((m, i) => {
+    if (m.reel) return;
     const src = sources.find((s) => s.asset.id === m.source);
     const fromMs = (m.sourceIn * 1000) / rate,
       toMs = ((m.sourceIn + m.duration) * 1000) / rate;
@@ -1019,6 +1075,8 @@ export function buildRecreation(
       (t) => Math.abs(t.cutMs - right.referenceMs) < 1,
     );
     if (!measured || measured.kind === "cut") continue;
+    // Between two of the reel's own shots the reel's frames already play the transition.
+    if (left.reel && right.reel) continue;
     if (
       !["flash", "blur", "zoom", "whip", "motion", "dissolve"].includes(measured.kind) ||
       measured.confidence < 0.65
@@ -1092,7 +1150,8 @@ export function buildRecreation(
     const shot = matches.find(
       (m) => pulse.startMs >= m.referenceMs && pulse.endMs <= m.referenceEndMs,
     );
-    if (!shot) continue;
+    // The reel's own shot already shows its pulse.
+    if (!shot || shot.reel) continue;
     if (!pulse.palette || command.length >= 500) {
       warnings.push(
         "A measured color pulse was omitted because palette evidence or edit capacity was unavailable.",
@@ -1122,13 +1181,13 @@ export function buildRecreation(
   // Bars only over the reference shots that show them (bars baked into one source must not
   // letterbox the whole edit).
   if (barsBox && ap && cursor > 0)
-    for (const run of barredRuns(matches, referenceShots)) command.push({ tool: "sequence.letterbox", sequenceId: id, trackId: uid(), id: uid(), start: run.start, duration: run.duration, top: Math.min(0.45, ap.top), bottom: Math.min(0.45, ap.bottom), left: Math.min(0.45, ap.left), right: Math.min(0.45, ap.right) });
+    for (const run of barredRuns(matches.filter((m) => !m.reel), referenceShots)) command.push({ tool: "sequence.letterbox", sequenceId: id, trackId: uid(), id: uid(), start: run.start, duration: run.duration, top: Math.min(0.45, ap.top), bottom: Math.min(0.45, ap.bottom), left: Math.min(0.45, ap.left), right: Math.min(0.45, ap.right) });
   // Title and end cards on a plain background (card.ts) are plates in the card's colour, not
   // footage: one editable plate per run of consecutive card shots of one colour, over the footage.
   if (cursor > 0) {
-    for (const run of cardRuns(matches, referenceShots)) command.push({ tool: "sequence.cardPlate", sequenceId: id, trackId: uid(), id: uid(), start: run.start, duration: run.duration, color: run.color });
+    for (const run of cardRuns(matches.filter((m) => !m.reel), referenceShots)) command.push({ tool: "sequence.cardPlate", sequenceId: id, trackId: uid(), id: uid(), start: run.start, duration: run.duration, color: run.color });
     for (const m of matches) {
-      const card = referenceShots.find((r) => r.startMs === m.referenceMs)?.card;
+      const card = m.reel ? undefined : referenceShots.find((r) => r.startMs === m.referenceMs)?.card;
       if (card) (m as { reasons?: string[] }).reasons = [`A title card on a plain background: recreated as a ${card.color} plate under the text; the footage chosen here is hidden beneath it (delete the plate to show it).`, ...((m as { reasons?: string[] }).reasons ?? [])];
     }
   }
@@ -1324,7 +1383,8 @@ export function buildRecreation(
         appearance.startMs >= m.referenceMs &&
         appearance.startMs < m.referenceEndMs,
     );
-    if (!match) continue;
+    // The reel's own shot already shows its words in its pixels.
+    if (!match || match.reel) continue;
     const relative = (ms: number) =>
       match.start +
       Math.round(
@@ -1332,12 +1392,15 @@ export function buildRecreation(
           (match.referenceEndMs - match.referenceMs),
       );
     const start = relative(appearance.startMs);
-    const last =
+    const spanned =
       matches.find(
         (m) =>
           appearance.endMs > m.referenceMs &&
           appearance.endMs <= m.referenceEndMs,
       ) ?? matches.at(-1)!;
+    // A title that runs on into the reel's own shot stops where that shot begins (it shows its own).
+    const firstReel = matches.find((m) => m.reel && m.start > match.start);
+    const last = firstReel && spanned.start >= firstReel.start ? (matches[matches.indexOf(firstReel) - 1] ?? match) : spanned;
     const end = Math.min(
       cursor,
       last.start + last.duration,
@@ -1640,6 +1703,7 @@ export function buildRecreation(
   if (controls.subjectLayering !== "flat") {
     const foreground = uid();
     for (const match of matches) {
+      if (match.reel) continue;
       if (
         !command.some(
           (c) =>
@@ -1681,6 +1745,7 @@ export function buildRecreation(
   if (close && controls.subjectLayering === "reference" && dna.personFlashes?.length) {
     const trackId=uid();
     for(const match of matches){
+      if(match.reel)continue;
       const spans=dna.personFlashes.filter(f=>f.startMs<match.referenceEndMs && f.endMs>match.referenceMs);
       if(!spans.length)continue;
       const source=sources.find(s=>s.asset.id===match.source)!;

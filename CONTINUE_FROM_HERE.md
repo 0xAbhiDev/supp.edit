@@ -1,25 +1,31 @@
 ## Evaluation set (step 1 of the any-footage plan) — 22 November 2026
 
-**What exists:** `docs/EVALUATION_SET.md` is the guide.
-- **Tools:** a labelling page (`npm run eval:label`, http://127.0.0.1:5199), a runner (`npm run eval:run`) and a score card (`npm run eval:score -- RUN_DIR`), all in `scripts/eval/`.
-- **Data:** `work/eval/` (git-ignored, private).
-- **Seen pairs:**
-  - `ab-gym-beach`: the A/B footage; its 4.2 labels were imported and locked.
-  - `gym-personal-reel`: prepared, waiting for a person's labels.
-- **No unseen pairs yet.** The user supplies them.
-
-**Verified:**
-- An end-to-end run on `ab-gym-beach` with build `2af2ae1d` reproduced the 4.4 matrix's A/B result exactly: 2/4 right action, 3/4 right clip, 3/3 missing shots flagged, 0 wrong "close match". The run is `work/eval/runs/20261122-1215-2af2ae1d/`.
-- A first run analyses from scratch: about 7 minutes for 41 s of footage.
-- Tests: TypeScript 313/313 (7 new in `tests/eval-set.test.ts`); type check clean.
-- The labelling page was checked in the browser on a scratch copy: prepare (with a .mov proxy), shot edits, ranges, autosave, the lock refusal and the locked view.
+**What exists** (`docs/EVALUATION_SET.md` is the guide):
+- **Tools in `scripts/eval/`:**
+  - the labelling page (`npm run eval:label`, http://127.0.0.1:5199);
+  - the runner (`npm run eval:run`; `--into=RUN_DIR` adds pairs to a run of the same build);
+  - the score card (`npm run eval:score -- RUN_DIR`), which has a by-role table;
+  - command-line labelling aids: `sheet`, `cuts`, `find-exact`, `compare-frames`, `set-labels`;
+  - `fetch-open-pairs.mjs` with `open-pairs.json`.
+- **Data:** `work/eval/` (git-ignored).
+  - **13 locked pairs:** 11 open, labelled by the developer from frames, so never blind; and 2 seen (the A/B gym-and-beach footage and the personal gym reel).
+  - **Kinds:** film (Big Buck Bunny), aviation (X-59 ×2), rocket launches (×3), sea recovery, parks travel (×2), cooking, dogs.
+  - **Sources:** NASA's media library, the National Park Service API (demo key, about 30 requests an hour), Blender's server.
+  - **Blocked sources:**
+    - Wikimedia Commons answers 429 to this client after the first burst, so the US-military pairs in `open-pairs.json` (cooking-chefs, dog park, beach, summer party, ship, Sintel) are not downloaded.
+    - DVIDS requires an account to download.
+- **Found by the set:** the vision result schema allowed only 32 analysed scenes, while the native analyser samples up to 160. Any clip with more scenes (a film) failed the whole edit. Fixed in `dab2ba4`; build `56c50ce0`.
+- **Known limit, not yet tested:** the analysis schema's `ms` caps a raw clip at 30 minutes.
 
 **Rules:**
 - Develop against open and seen pairs only.
 - Blind pairs run only with `--split=blind --release`, scored in aggregate.
 - Never look at blind pairs' footage, labels or per-shot results while tuning.
+- No pair labelled by the developer can be blind; blind pairs must come from someone else.
 
-**Next:** collect and label about 30 pairs, then run the current build for a baseline score card. Step 2 (describe shots by exact action, role and energy) starts from that baseline.
+**Next:**
+1. Score the baseline: `work/eval/runs/*-56c50ce0`.
+2. Step 2: describe each shot by exact action, role and energy, and match at the most specific level the footage supports. Start from the by-role table.
 
 ## Resume after 4.4 body pose — 22 November 2026
 
@@ -438,3 +444,12 @@ Windows UI uses the computer-use skill and @oai/sky. Never press Escape. Alt+F4 
 Tests: 122 TS pass across full run plus isolated timing-test rerun, 16 focused reframe tests, browser reframe/manual/reopen pass, native media tests and workspace Clippy pass. Full-HD CPU render: `work/render-portrait.mjs` disables Vite HMR and resumes existing frames. Manual references: `scripts/reframe-references.mjs`; native export audit: `scripts/verify-native-portrait.mjs`. These scripts use existing captured real files. Native revision evidence: `test-results/revisions/native-verification.json`.
 
 Known limits: ramps apply to media layers (not composition instances), max 5 minutes per ramped clip, no pitch preservation/optical flow; no physical-GPU/4K/cross-platform certification; 10-layer1080 SwiftShader timeout; natural two-person crossings not certified. Installed native binary includes schema v10 and accepted audio. Distribution START_HERE/BUILD_MANIFEST/source ZIP stale: update truthfully later, never run old work/checkpoint-manifest.mjs unchanged.
+
+## Keep the reel's own shots (2026-11-23, code committed, not yet built or tried in the app)
+- `controls.reelShots: "keep"` ("Shots your footage lacks" in the AI Studio panel; `--reel-shots=keep` in
+  `scripts/verify-native-focused.mjs`). `reelShotsToKeep` in `planner.ts` picks the shots; later passes
+  (titles, transitions between two kept shots, colour pulses, bars, card plates, subject layers) skip them.
+  Tests are in `tests/keep-reel.test.ts`.
+- Still to do: wait for the release run (`work/eval/release-run.log`, exe `d1493419`) to finish and compare
+  it with the baseline `work/eval/runs/20261122-1643-56c50ce0`. Only then rebuild and copy to `bin/`
+  (the run uses `bin/supp-edit.exe`). Try keep mode on the 2026-11-23 reel and raw, and write up the results.
