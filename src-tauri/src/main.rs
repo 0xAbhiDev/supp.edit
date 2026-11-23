@@ -53,6 +53,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             lifecycle::lifecycle_mark,
             corrections::record_take_choice,
+            corrections::read_take_choices,
             project::open_project,
             project::save_project,
             project::autosave_project,

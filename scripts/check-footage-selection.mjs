@@ -23,7 +23,10 @@ const project = read(path.join(dir, "SOURCE.supp"));
 const host = await createServer({ server: { middlewareMode: true, hmr: false, watch: null }, appType: "custom", logLevel: "error" });
 try {
   const { extractDNA } = await host.ssrLoadModule("/packages/ai/reference/dna.ts");
-  const { buildFootageIndex, selectShots, shotRole, motionPeak, dissolveLeadIn } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
+  const { buildFootageIndex, selectShots, shotRole, motionPeak, dissolveLeadIn, MATCH_WEIGHTS } = await host.ssrLoadModule("/packages/ai/reference/footage-index.ts");
+  // --weights={"action":1.2} overrides the mode's match weights (offline tuning only).
+  const weightsArg = args.find((a) => a.startsWith("--weights="))?.slice(10);
+  if (weightsArg) Object.assign(MATCH_WEIGHTS[mode], JSON.parse(weightsArg));
   const { actionSignature, shotSpan, effectSpans } = await host.ssrLoadModule("/packages/ai/reference/action-signature.ts");
   const { sceneSignature, medianSharpness } = await host.ssrLoadModule("/packages/ai/reference/scene-signature.ts");
   const { annotateSubjects } = await host.ssrLoadModule("/packages/ai/reference/subject-shape.ts");

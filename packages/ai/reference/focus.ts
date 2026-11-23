@@ -39,7 +39,13 @@ export async function traceTitles(asset:Asset,dna:StyleDNA,range:ReferenceInterv
   for(const o of overlays)for(let y=Math.max(0,o.y);y<Math.min(band.height,o.bottom);y++)label.fill(1,y*band.width+Math.max(0,Math.min(band.width,o.x)),y*band.width+Math.max(0,Math.min(band.width,o.right)));
   // Band pixels inside a person contour, widened slightly: the measured outline is low resolution.
   const coverOf=(p:PersonSample|undefined,timeMs:number)=>!p?.points.length||Math.abs(p.timeMs-timeMs)>100?undefined:personCover(p.points,band,w,h,Math.max(2,Math.round(w*.008)));
-  const rate=Math.min(60,asset.fps||30);
+  // Every sampled frame keeps two band masks (white and colored lettering) for the whole interval.
+  // A 75 s reference at its full 30 fps held about 300 MB of them, the reading added more, and the
+  // web view died near 1 GB. Above INK_BUDGET the sampling rate drops to fit, never below 12 a
+  // second (a title held a third of a second is still seen four times).
+  const INK_BUDGET=160*1024*1024;
+  const fits=INK_BUDGET/Math.max(1,(range.endMs-range.startMs)/1000*2*band.width*band.height);
+  const rate=Math.min(60,asset.fps||30,Math.max(12,Math.floor(fits)));
   try{
     const src=url??await sourceUrl(asset);
     await new Promise<void>((resolve,reject)=>{

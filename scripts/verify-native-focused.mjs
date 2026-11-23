@@ -124,6 +124,9 @@ if (untouched) {
   await panel.getByLabel("Reference video", { exact: true }).selectOption(assets[0].id);
   for (const a of assets.slice(1).filter((a) => a.kind === "video" && !excluded.has(a.id))) await panel.getByLabel("Add raw video").selectOption(a.id);
   step("Chose only the reference and the raw footage", { reference: assets[0].name, raw: assets.slice(1).filter((a) => a.kind === "video" && !excluded.has(a.id)).map((a) => a.name) });
+  // A person may still pick these two on the user path.
+  if (reelShots) await panel.getByLabel("Shots your footage lacks").selectOption(reelShots);
+  if (audioMode) await panel.getByLabel("Audio mode").selectOption(audioMode);
 } else {
   await panel.getByLabel("Output framing").selectOption("reference");
   await panel.getByLabel("Reference video", { exact: true }).selectOption(assets[0].id);
@@ -212,8 +215,11 @@ assert.deepEqual(redone, applied, "Redo did not restore the recreated sequence")
 step("Apply, Undo and Redo", { applied, undone, redone });
 // Edit an alternative take in the applied sequence, then undo and redo that edit, checking the
 // saved project each time.
-{
-  const takes = panel.getByRole("button", { name: /^Choose another take: / });
+// With the reel's own shots kept, the footage may play a single shot with no other take at all.
+const takeButtons = panel.getByRole("button", { name: /^Choose another take: / });
+if (reelShots === "keep" && !(await takeButtons.count())) step("No alternative takes to check", { reason: "the footage plays one shot; the reel keeps the rest" });
+else {
+  const takes = takeButtons;
   const count = await takes.count();
   let chosen;
   for (let i = 0; i < count && !chosen; i++) if (await takes.nth(i).isEnabled()) chosen = takes.nth(i);

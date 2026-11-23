@@ -70,6 +70,7 @@ export function installedFaces(): Face[] {
 }
 
 const rasters = new Map<string, { bits: Uint8Array; ratio: number } | null>();
+const RASTER_CACHE = 6000;
 /** Tight ink of `text`, stretched to a w×h grid. `ratio` keeps the natural proportions. */
 function raster(text: string, face: Face, w: number, h: number) {
   const key = JSON.stringify([text, face.family, face.weight, w, h]);
@@ -94,7 +95,9 @@ function raster(text: string, face: Face, w: number, h: number) {
     for (let i = 0; i < bits.length; i++) bits[i] = data[i * 4 + 3] >= 110 ? 1 : 0;
     entry = { bits, ratio: tw / th };
   }
-  if (rasters.size > 60000) rasters.clear();
+  // Up to 128×96 bytes each: 60,000 of them took the web view past 1 GB on a 75 s reference with
+  // much speech, and the app's window died. 6,000 keep one title's faces and words reusable.
+  if (rasters.size > RASTER_CACHE) rasters.clear();
   rasters.set(key, entry);
   return entry;
 }
@@ -195,6 +198,40 @@ export function connectedScript(shape: TitleShape, letters: number) {
   return pieces < letters;
 }
 
+/** Most words spoken while a title shows: the speech candidates beyond SPEECH_SHORTLIST keep only
+ * those whose natural proportions (width to height in two common faces) come nearest the
+ * lettering's. Every face is then tried on each. A long title over steady speech offered over a
+ * hundred words, each rendered in every installed face, and one reference took over an hour. */
+export const SPEECH_SHORTLIST = 36;
+export function shortlist(candidates: Candidate[], ratio: number): Candidate[] {
+  // The first offer of a wording wins (a review or seed before the same word spoken).
+  const first = new Map<string, Candidate>();
+  for (const c of candidates) if (c.content.trim() && !first.has(c.content.trim())) first.set(c.content.trim(), c);
+  const unique = [...first.values()];
+  const speech = unique.filter((c) => c.origin === "speech");
+  if (speech.length <= SPEECH_SHORTLIST) return unique;
+  const ctx = context();
+  if (!ctx) return unique;
+  const natural = (text: string) =>
+    Math.max(
+      ...["400 64px Arial", "400 64px Impact"].map((font) => {
+        ctx.font = font;
+        const m = ctx.measureText(text),
+          tw = m.actualBoundingBoxLeft + m.actualBoundingBoxRight,
+          th = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
+        return tw > 0 && th > 0 ? proportion(tw / th, ratio, 1) : 0;
+      }),
+    );
+  const kept = new Set(
+    speech
+      .map((c) => ({ c, fit: natural(c.content.trim()) }))
+      .sort((a, b) => b.fit - a.fit)
+      .slice(0, SPEECH_SHORTLIST)
+      .map((x) => x.c),
+  );
+  return unique.filter((c) => c.origin !== "speech" || kept.has(c));
+}
+
 /** Rank each candidate wording by its best installed face. Connected lettering is compared
  * with script faces only; separated lettering with every face. */
 export function rankReadings(
@@ -209,7 +246,7 @@ export function rankReadings(
     ratio = shape.box.width / shape.box.height;
   const seen = new Set<string>(),
     out: Reading[] = [];
-  for (const candidate of candidates) {
+  for (const candidate of shortlist(candidates, ratio)) {
     const content = candidate.content.trim();
     if (!content || seen.has(content)) continue;
     seen.add(content);

@@ -1,3 +1,4 @@
+import { takeChoiceShift } from "./corrections";
 import { classifySourceText, unrelatedTextPenalty, type ReferenceText } from "./source-text";
 import { IDENTITY_MIN_MOTION, IDENTITY_MIN_SCORE, type IdentityMatch } from "./identity";
 import { reuseOf } from "./take-reuse";
@@ -408,12 +409,17 @@ export const BODY_MISMATCH_FACTOR = 0.9;
  * sense of size and scale moved the gym's deadlift shot to a squat). */
 export const CAST_MISMATCH = 0.15;
 const weights: Record<RecreationMode, Record<string, number>> = {
-  "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.5, composition: 0.3, tone: 0.2, quality: 0.6, scene: 1 },
+  // Learned from the labelled evaluation pairs (scripts/eval/tune.mjs, 23 November 2026): peak
+  // 0.5 → 0.3, composition 0.3 → 0.18 and quality 0.6 → 0.36 lifted right actions 33 → 37 of 74
+  // offline, own and different footage both, with fewer wrong close matches (10 → 8).
+  "Close Match": { action: 1.0, pose: 1.2, look: 0.6, framing: 0.5, motion: 0.3, peak: 0.3, composition: 0.18, tone: 0.2, quality: 0.36, scene: 1 },
   "Smart Adaptation": { action: 0.9, pose: 0.8, look: 0.6, framing: 0.5, motion: 0.6, peak: 0.5, composition: 0.35, tone: 0.25, quality: 0.6, scene: 1 },
   // Remix reinterprets rhythm (durations), grade and framing, but still performs what each
   // reference shot does: movement geometry and pose lead; look, framing and tone barely count.
   "Creative Remix": { action: 1.0, pose: 0.7, look: 0.25, framing: 0.15, motion: 0.7, peak: 0.6, composition: 0.1, tone: 0.1, quality: 0.6, scene: 0.5 },
 };
+/** The weights themselves, for the evaluation tools that tune them offline (scripts/eval/tune.mjs). */
+export const MATCH_WEIGHTS = weights;
 /** What each role cares about more. */
 const roleEmphasis: Partial<Record<ShotRole, Record<string, number>>> = {
   "action peak": { action: 1.3, peak: 1.1 },
@@ -648,6 +654,13 @@ export function scoreCandidate(
     const penalty = unrelatedTextPenalty(sourceText.unrelated, req.texts ?? []);
     score = Math.max(0, score - penalty);
     match.sourceText = Number((1 - penalty / 0.08).toFixed(2));
+  }
+  // Your own take choices for this reel: a moment you chose for this shot before leads, and one
+  // you replaced falls back (corrections.ts).
+  const taken = takeChoiceShift(source.takes, req.shot.startMs, req.shot.endMs, inMs, outMs);
+  if (taken) {
+    score = Math.max(0, score + taken);
+    match.yourChoice = taken > 0 ? 1 : 0;
   }
   for (const k of Object.keys(match)) match[k] = Number(match[k].toFixed(2));
   // Display-only detail (no weight): the parts of the movement match and the duration fit.

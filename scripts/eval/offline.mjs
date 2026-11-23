@@ -1,7 +1,7 @@
 // Footage selection offline over the captured evaluation set (capture.mjs), graded like the app's
 // score card. For developing: seconds per pair instead of minutes in the app. Confirm any change
 // with an app run (run.mjs), which stays the measure that counts.
-// Usage: node scripts/eval/offline.mjs [--only=id,id] [--peaks=RUN_DIR] [--mode="Close Match"] [--out=DIR] [--quiet]
+// Usage: node scripts/eval/offline.mjs [--only=id,id] [--peaks=RUN_DIR] [--mode="Close Match"] [--out=DIR] [--quiet] [--weights=JSON]
 // --peaks takes each pair's action peaks from an app run's log (as the app placed them on audio
 // events), so offline and app runs compare like with like.
 import fs from "node:fs";
@@ -25,7 +25,8 @@ for (const item of listPairs().filter((p) => p.prepared && p.split !== "blind" &
   const labels = labelsSchema.parse(readJson(path.join(dir, "labels.json")));
   const peaks = peaksDir && fs.existsSync(path.join(peaksDir, `${item.id}.log`)) ? [`--peaks=${path.join(peaksDir, `${item.id}.log`)}`] : [];
   const json = path.join(out, `${item.id}.json`);
-  const run = spawnSync(process.execPath, ["scripts/check-footage-selection.mjs", inv, "", mode, "--identity", ...peaks, `--json=${json}`], { encoding: "utf8", maxBuffer: 64 << 20 });
+  const weights = option("weights") ? [`--weights=${option("weights")}`] : [];
+  const run = spawnSync(process.execPath, ["scripts/check-footage-selection.mjs", inv, "", mode, "--identity", ...peaks, ...weights, `--json=${json}`], { encoding: "utf8", maxBuffer: 64 << 20 });
   if (run.status !== 0 || !fs.existsSync(json)) {
     console.log(`${item.id}: failed ${(run.stderr || "").slice(-300)}`);
     continue;

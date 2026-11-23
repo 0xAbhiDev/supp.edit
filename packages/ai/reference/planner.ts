@@ -44,6 +44,8 @@ export interface SourceEvidence {
   text?: SourceTextWindow[];
   /** Where the reference's probe frames were found in this clip (same-footage identity). */
   identity?: import("./identity").SourceIdentity;
+  /** The person's earlier take choices in this clip for this reel (corrections.ts). */
+  takes?: import("./corrections").SourceTakes;
 }
 export interface Controls {
   mode: RecreationMode;

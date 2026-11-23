@@ -169,6 +169,8 @@ export interface InkTitles {
    * decoder and OCR saw there, for a reviewer. */
   unread: { startMs: number; endMs: number; hints: string[] }[];
 }
+/** Shorter than this, a single decoded letter is not taken for a title. */
+export const STRAY_GLYPH_MS = 300;
 export async function inkTitles(input: InkTitleInput): Promise<InkTitles> {
   const { samples, band, frame, endMs, centerY, reach, seeds, reviews = [] } = input;
   const minimumInk = Math.max(30, band.width * band.height * 0.002);
@@ -422,6 +424,13 @@ export async function inkTitles(input: InkTitleInput): Promise<InkTitles> {
     run.startMs = prior.startMs;
     prior.absorbed = true;
   });
+  // A lone letter on screen for a few frames, that no review, OCR or speech offered, is a bright
+  // edge read as a glyph (a "J" from an arm and a jeans hem over 4 frames of a flex shot), not a title.
+  for (const r of measured)
+    if (r.reading && r.reading.content.replace(/\s/g, "").length === 1 && r.endMs - r.startMs < STRAY_GLYPH_MS && (r.reading.origin === "glyphs" || r.reading.origin === "combined")) {
+      r.reading = undefined;
+      r.absorbed = true;
+    }
   const accepted = measured.filter((r) => r.reading);
   const treatments = new Map(accepted.map((run) => [run, inkTreatment(run, measured, samples, band)]));
   // Capitals of one size and one compositing are one lettering style; set them in a single face.

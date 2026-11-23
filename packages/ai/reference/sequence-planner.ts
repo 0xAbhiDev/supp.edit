@@ -305,6 +305,9 @@ export function transitionFit(prevReq: ShotRequirement, req: ShotRequirement, pr
 }
 
 // ---- 4. Future-aware sequence search --------------------------------------------------------
+/** When every window is taken, how much each earlier use of a moment counts against reusing it
+ * again (per whole window's length), against the window's own score. */
+export const REUSE_SPREAD = 0.5;
 export interface Plan {
   picks: Option[];
   reuse: ({ permitted: true; reason: string; confidence: number; ofShot: number } | null)[];
@@ -395,12 +398,27 @@ export function planSequence(
         next.push({ total, priority: total + future(i + 1, picks), picks, reuse });
       }
     if (!next.length) {
-      // Nothing admissible (everything consumed): fall back to the shot's best, flagged as reuse.
+      // Nothing admissible among the shot's best windows. First its best window in footage no shot
+      // has used yet, wherever that is; only when every window is taken, reuse the footage used
+      // least. A reel longer than its footage (94 s from 64 s) used to replay the shot's top window:
+      // one 7 s stretch played nine times while 19 s of the footage went unused.
       for (const beam of beams) {
-        const o = lists[i][0];
+        const fresh = options[i].find((o) => admissible(i, o, beam.picks) !== null);
+        if (fresh) {
+          const cost = admissible(i, fresh, beam.picks)!;
+          const total = beam.total + lengthWeight[i] * (fresh.score - cost - mismatch(i, fresh)) + neighbour(i, beam.picks.at(-1), fresh, beam.picks);
+          next.push({ total, priority: total, picks: [...beam.picks, fresh], reuse: [...beam.reuse, null] });
+          continue;
+        }
+        const used = (o: Option) => beam.picks.reduce((t, p) => t + (overlapping(p, o) ? Math.min(p.outMs, o.outMs) - Math.max(p.inMs, o.inMs) : 0), 0) / Math.max(1, o.outMs - o.inMs);
+        let o: Option | undefined, best = -Infinity;
+        for (const x of options[i]) {
+          const v = x.score - REUSE_SPREAD * used(x);
+          if (v > best) [o, best] = [x, v];
+        }
         if (!o) continue;
-        const reusedOf = beam.picks.findIndex((p) => overlapping(p, o));
-        next.push({ total: beam.total + lengthWeight[i] * (o.score - 0.2), priority: beam.total + lengthWeight[i] * (o.score - 0.2), picks: [...beam.picks, o], reuse: [...beam.reuse, reusedOf >= 0 ? { permitted: true, reason: `no other usable footage for this shot; reuses shot ${reusedOf + 1}'s interval`, confidence: 0.2, ofShot: reusedOf } : null] });
+        const reusedOf = beam.picks.findIndex((p) => overlapping(p, o!));
+        next.push({ total: beam.total + lengthWeight[i] * (o.score - 0.2), priority: beam.total + lengthWeight[i] * (o.score - 0.2), picks: [...beam.picks, o], reuse: [...beam.reuse, reusedOf >= 0 ? { permitted: true, reason: `no other usable footage for this shot; reuses shot ${reusedOf + 1}'s interval, the footage used least`, confidence: 0.2, ofShot: reusedOf } : null] });
       }
     }
     // Diversity in how scarce footage is spent: beams that use a scarce stretch differently are

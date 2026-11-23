@@ -13,8 +13,9 @@ import type { StyleDNA } from "./dna";
  * 3–4: partial OCR readings of one word may correct each other (fragmentMerges), and agreeing
  * uncertain pieces no longer veto the traced word on ink. 5: titles re-traced once so the person
  * check is verified on first-run (freshly traced) references. 6: a reading only vetoes a trace on
- * size when it overlaps the trace's columns. */
-export const TITLE_CACHE_VERSION = "6";
+ * size when it overlaps the trace's columns. 7: a lone decoded letter held under 300 ms is not a
+ * title, and spoken words are shortlisted by proportion before every face is tried. */
+export const TITLE_CACHE_VERSION = "7";
 
 /** Short stable digest of a string, for cache keys. */
 export const digest = (s: string) => {

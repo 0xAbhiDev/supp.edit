@@ -1,3 +1,4 @@
+import { readTakeChoices, takesFor } from "./corrections";
 import { referenceVisual } from "./visual-source";
 import { personMasks } from "./subject-mask";
 import { traceTitles } from "./focus";
@@ -509,6 +510,8 @@ export function recreate(
         return evidence;
       };
       const footageStarted = performance.now();
+      // Your earlier take choices for this reel, so a re-run keeps what you chose.
+      const takeChoices = await readTakeChoices();
       const sources: SourceEvidence[] = new Array(raw.length);
       let nextClip = 0;
       await Promise.all(
@@ -516,6 +519,8 @@ export function recreate(
           while (nextClip < raw.length) {
             const k = nextClip++;
             sources[k] = await understand(raw[k]);
+            const takes = takesFor(takeChoices, reference.fingerprint, raw[k].fingerprint);
+            if (takes) sources[k].takes = takes;
           }
         }),
       );
